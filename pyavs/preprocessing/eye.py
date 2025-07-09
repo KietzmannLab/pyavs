@@ -8,18 +8,16 @@ event detection, artifact removal, and quality assessment.
 import numpy as np
 import pandas as pd
 from typing import List, Optional, Tuple, Dict, Any, Union
-import matplotlib.pyplot as plt
-from scipy import signal
-from scipy.spatial.distance import euclidean
+from tqdm import tqdm
 
 from ..utils.validation import validate_eye_events_dataframe
 
 
 def preprocess_eye_events(events_df: pd.DataFrame,
                          remove_blinks: bool = True,
-                         remove_short_fixations: bool = True,
+                         remove_short_fixations: bool = False,
                          min_fixation_duration: float = 0.1,
-                         remove_long_saccades: bool = True,
+                         remove_long_saccades: bool = False,
                          max_saccade_duration: float = 0.1,
                          remove_outlier_positions: bool = True,
                          screen_resolution: Tuple[int, int] = (1024, 768),
@@ -34,11 +32,11 @@ def preprocess_eye_events(events_df: pd.DataFrame,
     remove_blinks : bool, optional
         Whether to remove blink events (default: True)
     remove_short_fixations : bool, optional
-        Whether to remove short fixations (default: True)
+        Whether to remove short fixations (default: False)
     min_fixation_duration : float, optional
         Minimum fixation duration in seconds (default: 0.1)
     remove_long_saccades : bool, optional
-        Whether to remove long saccades (default: True)
+        Whether to remove long saccades (default: False)
     max_saccade_duration : float, optional
         Maximum saccade duration in seconds (default: 0.1)
     remove_outlier_positions : bool, optional
@@ -146,208 +144,8 @@ def _remove_position_outliers(events_df: pd.DataFrame,
     return events_df[valid_mask]
 
 
-def detect_fixations(gaze_x: np.ndarray, gaze_y: np.ndarray, 
-                    timestamps: np.ndarray,
-                    velocity_threshold: float = 30.0,
-                    min_duration: float = 0.1,
-                    sampling_rate: float = 1000.0) -> pd.DataFrame:
-    """
-    Detect fixations from raw gaze data using velocity-based algorithm.
-    
-    Parameters
-    ----------
-    gaze_x : np.ndarray
-        X gaze coordinates
-    gaze_y : np.ndarray
-        Y gaze coordinates
-    timestamps : np.ndarray
-        Timestamps for each sample
-    velocity_threshold : float, optional
-        Velocity threshold in pixels/second (default: 30.0)
-    min_duration : float, optional
-        Minimum fixation duration in seconds (default: 0.1)
-    sampling_rate : float, optional
-        Sampling rate in Hz (default: 1000.0)
-        
-    Returns
-    -------
-    pd.DataFrame
-        Detected fixations with start_time, end_time, mean_gx, mean_gy, duration
-    """
-    # Calculate velocities
-    dt = np.diff(timestamps)
-    dx = np.diff(gaze_x)
-    dy = np.diff(gaze_y)
-    
-    # Handle zero time differences
-    dt[dt == 0] = 1.0 / sampling_rate
-    
-    velocity = np.sqrt((dx / dt) ** 2 + (dy / dt) ** 2)
-    
-    # Identify potential fixation points (low velocity)
-    is_fixation = np.concatenate(([False], velocity < velocity_threshold))
-    
-    # Find fixation periods
-    fixation_starts = []
-    fixation_ends = []
-    
-    in_fixation = False
-    start_idx = 0
-    
-    for i, fix_point in enumerate(is_fixation):
-        if fix_point and not in_fixation:
-            # Start of fixation
-            in_fixation = True
-            start_idx = i
-        elif not fix_point and in_fixation:
-            # End of fixation
-            in_fixation = False
-            duration = timestamps[i-1] - timestamps[start_idx]
-            
-            if duration >= min_duration:
-                fixation_starts.append(start_idx)
-                fixation_ends.append(i-1)
-    
-    # Handle case where recording ends during fixation
-    if in_fixation:
-        duration = timestamps[-1] - timestamps[start_idx]
-        if duration >= min_duration:
-            fixation_starts.append(start_idx)
-            fixation_ends.append(len(timestamps) - 1)
-    
-    # Create fixations dataframe
-    fixations = []
-    
-    for start_idx, end_idx in zip(fixation_starts, fixation_ends):
-        fixation = {
-            'start_time': timestamps[start_idx],
-            'end_time': timestamps[end_idx],
-            'duration': timestamps[end_idx] - timestamps[start_idx],
-            'mean_gx': np.mean(gaze_x[start_idx:end_idx+1]),
-            'mean_gy': np.mean(gaze_y[start_idx:end_idx+1]),
-            'start_gx': gaze_x[start_idx],
-            'start_gy': gaze_y[start_idx],
-            'end_gx': gaze_x[end_idx],
-            'end_gy': gaze_y[end_idx],
-            'type': 'fixation'
-        }
-        fixations.append(fixation)
-    
-    return pd.DataFrame(fixations)
 
 
-def detect_saccades(gaze_x: np.ndarray, gaze_y: np.ndarray,
-                   timestamps: np.ndarray,
-                   velocity_threshold: float = 30.0,
-                   acceleration_threshold: float = 8000.0,
-                   min_duration: float = 0.01,
-                   max_duration: float = 0.1,
-                   sampling_rate: float = 1000.0) -> pd.DataFrame:
-    """
-    Detect saccades from raw gaze data using velocity and acceleration thresholds.
-    
-    Parameters
-    ----------
-    gaze_x : np.ndarray
-        X gaze coordinates
-    gaze_y : np.ndarray
-        Y gaze coordinates
-    timestamps : np.ndarray
-        Timestamps for each sample
-    velocity_threshold : float, optional
-        Velocity threshold in pixels/second (default: 30.0)
-    acceleration_threshold : float, optional
-        Acceleration threshold in pixels/second² (default: 8000.0)
-    min_duration : float, optional
-        Minimum saccade duration in seconds (default: 0.01)
-    max_duration : float, optional
-        Maximum saccade duration in seconds (default: 0.1)
-    sampling_rate : float, optional
-        Sampling rate in Hz (default: 1000.0)
-        
-    Returns
-    -------
-    pd.DataFrame
-        Detected saccades with start_time, end_time, amplitude, peak_velocity, duration
-    """
-    # Calculate velocities
-    dt = np.diff(timestamps)
-    dx = np.diff(gaze_x)
-    dy = np.diff(gaze_y)
-    
-    # Handle zero time differences
-    dt[dt == 0] = 1.0 / sampling_rate
-    
-    velocity = np.sqrt((dx / dt) ** 2 + (dy / dt) ** 2)
-    
-    # Calculate accelerations
-    dt2 = np.diff(timestamps[1:])
-    dt2[dt2 == 0] = 1.0 / sampling_rate
-    acceleration = np.abs(np.diff(velocity) / dt2)
-    
-    # Identify potential saccade points
-    is_saccade_vel = np.concatenate(([False], velocity > velocity_threshold, [False]))
-    is_saccade_acc = np.concatenate(([False, False], acceleration > acceleration_threshold, [False]))
-    
-    is_saccade = is_saccade_vel | is_saccade_acc
-    
-    # Find saccade periods
-    saccade_starts = []
-    saccade_ends = []
-    
-    in_saccade = False
-    start_idx = 0
-    
-    for i, sac_point in enumerate(is_saccade):
-        if sac_point and not in_saccade:
-            # Start of saccade
-            in_saccade = True
-            start_idx = i
-        elif not sac_point and in_saccade:
-            # End of saccade
-            in_saccade = False
-            duration = timestamps[i-1] - timestamps[start_idx]
-            
-            if min_duration <= duration <= max_duration:
-                saccade_starts.append(start_idx)
-                saccade_ends.append(i-1)
-    
-    # Handle case where recording ends during saccade
-    if in_saccade:
-        duration = timestamps[-1] - timestamps[start_idx]
-        if min_duration <= duration <= max_duration:
-            saccade_starts.append(start_idx)
-            saccade_ends.append(len(timestamps) - 1)
-    
-    # Create saccades dataframe
-    saccades = []
-    
-    for start_idx, end_idx in zip(saccade_starts, saccade_ends):
-        # Calculate saccade metrics
-        start_x, start_y = gaze_x[start_idx], gaze_y[start_idx]
-        end_x, end_y = gaze_x[end_idx], gaze_y[end_idx]
-        
-        amplitude = euclidean([start_x, start_y], [end_x, end_y])
-        
-        # Find peak velocity during saccade
-        sac_velocities = velocity[start_idx:end_idx]
-        peak_velocity = np.max(sac_velocities) if len(sac_velocities) > 0 else 0
-        
-        saccade = {
-            'start_time': timestamps[start_idx],
-            'end_time': timestamps[end_idx],
-            'duration': timestamps[end_idx] - timestamps[start_idx],
-            'start_gx': start_x,
-            'start_gy': start_y,
-            'end_gx': end_x,
-            'end_gy': end_y,
-            'amplitude': amplitude,
-            'peak_velocity': peak_velocity,
-            'type': 'saccade'
-        }
-        saccades.append(saccade)
-    
-    return pd.DataFrame(saccades)
 
 
 def remove_artifacts(events_df: pd.DataFrame,
@@ -525,79 +323,3 @@ def compute_eye_tracking_quality_metrics(events_df: pd.DataFrame,
     return metrics
 
 
-def plot_eye_tracking_quality(events_df: pd.DataFrame,
-                             figsize: Tuple[int, int] = (15, 10)) -> plt.Figure:
-    """
-    Create quality assessment plots for eye tracking data.
-    
-    Parameters
-    ----------
-    events_df : pd.DataFrame
-        Eye tracking events dataframe
-    figsize : tuple of int, optional
-        Figure size (width, height) (default: (15, 10))
-        
-    Returns
-    -------
-    plt.Figure
-        Matplotlib figure with quality plots
-    """
-    fig, axes = plt.subplots(2, 3, figsize=figsize)
-    
-    # Event type distribution
-    event_counts = events_df['type'].value_counts()
-    axes[0, 0].pie(event_counts.values, labels=event_counts.index, autopct='%1.1f%%')
-    axes[0, 0].set_title('Event Type Distribution')
-    
-    # Fixation duration distribution
-    fixations = events_df[events_df['type'] == 'fixation']
-    if len(fixations) > 0:
-        axes[0, 1].hist(fixations['duration'], bins=50, alpha=0.7, edgecolor='black')
-        axes[0, 1].set_xlabel('Duration (s)')
-        axes[0, 1].set_ylabel('Count')
-        axes[0, 1].set_title('Fixation Duration Distribution')
-    
-    # Saccade amplitude distribution (if available)
-    saccades = events_df[events_df['type'] == 'saccade']
-    if len(saccades) > 0 and 'amplitude' in events_df.columns:
-        axes[0, 2].hist(saccades['amplitude'], bins=50, alpha=0.7, edgecolor='black')
-        axes[0, 2].set_xlabel('Amplitude (pixels)')
-        axes[0, 2].set_ylabel('Count')
-        axes[0, 2].set_title('Saccade Amplitude Distribution')
-    
-    # Timeline of events
-    if len(events_df) > 0:
-        for event_type in events_df['type'].unique():
-            type_events = events_df[events_df['type'] == event_type]
-            axes[1, 0].scatter(type_events['start_time'], 
-                             [event_type] * len(type_events), 
-                             alpha=0.6, s=2, label=event_type)
-        
-        axes[1, 0].set_xlabel('Time (s)')
-        axes[1, 0].set_ylabel('Event Type')
-        axes[1, 0].set_title('Event Timeline')
-        axes[1, 0].legend()
-    
-    # Gaze position scatter plot
-    position_cols = ['mean_gx', 'mean_gy']
-    if all(col in events_df.columns for col in position_cols):
-        for event_type in events_df['type'].unique():
-            type_events = events_df[events_df['type'] == event_type]
-            axes[1, 1].scatter(type_events['mean_gx'], type_events['mean_gy'], 
-                             alpha=0.6, s=10, label=event_type)
-        
-        axes[1, 1].set_xlabel('X Position (pixels)')
-        axes[1, 1].set_ylabel('Y Position (pixels)')
-        axes[1, 1].set_title('Gaze Position Distribution')
-        axes[1, 1].legend()
-        axes[1, 1].invert_yaxis()  # Invert Y axis to match screen coordinates
-    
-    # Duration vs amplitude scatter (for saccades)
-    if len(saccades) > 0 and 'amplitude' in events_df.columns:
-        axes[1, 2].scatter(saccades['duration'], saccades['amplitude'], alpha=0.6)
-        axes[1, 2].set_xlabel('Duration (s)')
-        axes[1, 2].set_ylabel('Amplitude (pixels)')
-        axes[1, 2].set_title('Saccade Duration vs Amplitude')
-    
-    plt.tight_layout()
-    return fig

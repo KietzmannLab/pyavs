@@ -11,6 +11,7 @@ import numpy as np
 from typing import List, Optional, Tuple, Dict, Any, Union
 from pandas.api.types import is_list_like
 from ast import literal_eval
+from tqdm import tqdm
 
 from .loaders import load_eye_events, load_experiment_log
 from ..utils.validation import validate_subject_id, validate_session, validate_eye_events_dataframe
@@ -63,8 +64,8 @@ def load_and_enrich_eye_events(subjects: List[int], sessions: List[int],
     events_all = None
     explog_all = None
     
-    for sub_counter, subject in enumerate(subjects):
-        for sess_counter, session in enumerate(sessions):
+    for sub_counter, subject in enumerate(tqdm(subjects, desc="Processing subjects", disable=not verbose)):
+        for sess_counter, session in enumerate(tqdm(sessions, desc=f"Subject {subject} sessions", leave=False, disable=not verbose)):
             
             # Load data for this subject/session
             try:
@@ -318,7 +319,7 @@ def add_fixation_sequence_position(events: pd.DataFrame,
     saccade_mask = events['type'] == 'saccade'
     
     # Process each subject
-    for subject in events.subject.unique():
+    for subject in tqdm(events.subject.unique(), desc="Processing subjects", disable=not verbose):
         subject_mask = events.subject == subject
         
         if verbose:
@@ -326,7 +327,8 @@ def add_fixation_sequence_position(events: pd.DataFrame,
             print(f'Subject {subject}: {unique_scenes} unique scenes')
         
         # Process each trial
-        for trial in events.loc[subject_mask, 'trial'].dropna().unique():
+        for trial in tqdm(events.loc[subject_mask, 'trial'].dropna().unique(), 
+                         desc=f"Subject {subject} trials", leave=False, disable=not verbose):
             trial_mask = events.trial == trial
             
             # Process both scene and caption recordings
@@ -454,23 +456,3 @@ def add_cross_event_information(events_df: pd.DataFrame, verbose: bool = False) 
     return events_df
 
 
-def align_eye_events_with_meg(eye_events_df: pd.DataFrame, meg_raw) -> pd.DataFrame:
-    """
-    Align eye tracking events with MEG data timing.
-    
-    Parameters
-    ----------
-    eye_events_df : pd.DataFrame
-        Eye tracking events dataframe
-    meg_raw : mne.io.Raw
-        MEG raw data object
-        
-    Returns
-    -------
-    pd.DataFrame
-        Eye tracking events with MEG-aligned timing
-    """
-    # This function would implement MEG-ET alignment
-    # For now, return the original dataframe
-    # TODO: Implement MEG-ET temporal alignment
-    return eye_events_df.copy()
