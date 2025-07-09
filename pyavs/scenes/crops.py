@@ -1,0 +1,386 @@
+"""
+Scene cropping utilities for pyAVS package.
+
+This module provides functions for creating fixation-based crops from scene images
+and extracting regions of interest based on eye tracking data.
+"""
+
+import os
+import numpy as np
+import pandas as pd
+from typing import List, Optional, Tuple, Dict, Any, Union
+from PIL import Image
+import matplotlib.pyplot as plt
+
+from ..utils.config import get_input_paths
+from .objects import load_object_masks
+
+
+def create_fixation_crops(eye_events_df: pd.DataFrame, 
+                         scene_images: Dict[int, str],
+                         crop_size: Tuple[int, int] = (100, 100),
+                         output_dir: Optional[str] = None,
+                         save_crops: bool = False,
+                         center_on: str = 'mean') -> Dict[str, np.ndarray]:
+    """
+    Create fixation-based crops from scene images.
+    
+    Parameters
+    ----------
+    eye_events_df : pd.DataFrame
+        Eye tracking events dataframe with fixation locations
+    scene_images : dict
+        Dictionary mapping scene IDs to image file paths
+    crop_size : tuple of int, optional
+        Size of crops in pixels (width, height) (default: (100, 100))
+    output_dir : str, optional
+        Directory to save crops. If None, crops are not saved
+    save_crops : bool, optional
+        Whether to save crops to disk (default: False)
+    center_on : str, optional
+        Coordinate type to center on ('mean', 'start', 'end') (default: 'mean')
+        
+    Returns
+    -------
+    dict
+        Dictionary mapping crop IDs to crop arrays
+    """
+    crops = {}
+    crop_width, crop_height = crop_size
+    
+    # Filter for fixation events only
+    fixations = eye_events_df[eye_events_df['type'] == 'fixation'].copy()
+    
+    if len(fixations) == 0:
+        return crops
+    
+    # Prepare output directory if saving
+    if save_crops and output_dir is not None:
+        os.makedirs(output_dir, exist_ok=True)
+    
+    # Process each fixation
+    for idx, fixation in fixations.iterrows():
+        scene_id = int(fixation['sceneID'])
+        
+        if scene_id not in scene_images:
+            continue
+        
+        # Load scene image
+        try:
+            scene_image = Image.open(scene_images[scene_id])
+        except Exception as e:
+            print(f"Error loading scene {scene_id}: {e}")
+            continue
+        
+        # Get fixation coordinates
+        if center_on == 'mean':
+            fix_x = fixation.get('mean_gx', fixation.get('gx', 0))
+            fix_y = fixation.get('mean_gy', fixation.get('gy', 0))
+        elif center_on == 'start':
+            fix_x = fixation.get('start_gx', fixation.get('gx', 0))
+            fix_y = fixation.get('start_gy', fixation.get('gy', 0))
+        elif center_on == 'end':
+            fix_x = fixation.get('end_gx', fixation.get('gx', 0))
+            fix_y = fixation.get('end_gy', fixation.get('gy', 0))
+        else:
+            raise ValueError(f"Invalid center_on value: {center_on}")
+        
+        # Calculate crop boundaries
+        left = int(fix_x - crop_width // 2)
+        top = int(fix_y - crop_height // 2)
+        right = left + crop_width
+        bottom = top + crop_height
+        
+        # Adjust boundaries to stay within image
+        img_width, img_height = scene_image.size
+        left = max(0, left)
+        top = max(0, top)
+        right = min(img_width, right)
+        bottom = min(img_height, bottom)
+        
+        # Extract crop
+        crop = scene_image.crop((left, top, right, bottom))
+        
+        # Convert to array
+        crop_array = np.array(crop)
+        
+        # Create unique crop ID
+        subject = fixation.get('subject', 0)
+        trial = fixation.get('trial', 0)
+        fix_sequence = fixation.get('fix_sequence', idx)
+        
+        crop_id = f"sub{subject:02d}_trial{trial:03d}_fix{fix_sequence:03d}_scene{scene_id}"
+        
+        crops[crop_id] = crop_array
+        
+        # Save crop if requested
+        if save_crops and output_dir is not None:
+            crop_filename = f"{crop_id}.png"
+            crop_filepath = os.path.join(output_dir, crop_filename)
+            crop.save(crop_filepath)
+    
+    return crops
+
+
+def extract_scene_regions(scene_id: int,
+                         regions: List[Tuple[int, int, int, int]],
+                         scene_images: Optional[Dict[int, str]] = None,
+                         input_dir: Optional[str] = None) -> List[np.ndarray]:
+    """
+    Extract rectangular regions from a scene image.
+    
+    Parameters
+    ----------
+    scene_id : int
+        COCO scene ID
+    regions : list of tuple
+        List of regions as (left, top, width, height) tuples
+    scene_images : dict, optional
+        Dictionary mapping scene IDs to image paths
+    input_dir : str, optional
+        Path to input directory containing scenes
+        
+    Returns
+    -------
+    list of np.ndarray
+        List of extracted region arrays
+    """
+    # Get scene image path
+    if scene_images is not None and scene_id in scene_images:
+        image_path = scene_images[scene_id]
+    else:
+        if input_dir is None:
+            input_dir = get_input_paths()
+        
+        scenes_dir = os.path.join(input_dir, 'mscoco_scenes')
+        image_filename = f"{scene_id:012d}.jpg"
+        image_path = os.path.join(scenes_dir, image_filename)
+        
+        # Try alternative locations
+        if not os.path.exists(image_path):
+            for subdir in ['train2017', 'val2017']:
+                alt_path = os.path.join(scenes_dir, subdir, image_filename)
+                if os.path.exists(alt_path):
+                    image_path = alt_path
+                    break
+    
+    if not os.path.exists(image_path):
+        raise FileNotFoundError(f"Scene image not found: {image_path}")
+    
+    # Load image
+    scene_image = Image.open(image_path)
+    img_width, img_height = scene_image.size
+    
+    extracted_regions = []
+    
+    for left, top, width, height in regions:
+        # Ensure region is within image bounds
+        left = max(0, min(left, img_width - 1))
+        top = max(0, min(top, img_height - 1))
+        right = min(img_width, left + width)
+        bottom = min(img_height, top + height)
+        
+        # Extract region
+        region = scene_image.crop((left, top, right, bottom))
+        region_array = np.array(region)
+        
+        extracted_regions.append(region_array)
+    
+    return extracted_regions
+
+
+def create_object_based_crops(scene_id: int,
+                             object_ids: List[int],
+                             crop_size: Tuple[int, int] = (100, 100),
+                             scene_images: Optional[Dict[int, str]] = None,
+                             input_dir: Optional[str] = None) -> Dict[int, np.ndarray]:
+    """
+    Create crops centered on object centers of mass.
+    
+    Parameters
+    ----------
+    scene_id : int
+        COCO scene ID
+    object_ids : list of int
+        List of object category IDs to crop
+    crop_size : tuple of int, optional
+        Size of crops in pixels (width, height) (default: (100, 100))
+    scene_images : dict, optional
+        Dictionary mapping scene IDs to image paths
+    input_dir : str, optional
+        Path to input directory
+        
+    Returns
+    -------
+    dict
+        Dictionary mapping object IDs to crop arrays
+    """
+    # Load object masks
+    masks = load_object_masks([scene_id], input_dir)
+    
+    if scene_id not in masks:
+        raise ValueError(f"No masks found for scene {scene_id}")
+    
+    scene_masks = masks[scene_id]
+    
+    # Get scene image path
+    if scene_images is not None and scene_id in scene_images:
+        image_path = scene_images[scene_id]
+    else:
+        if input_dir is None:
+            input_dir = get_input_paths()
+        
+        scenes_dir = os.path.join(input_dir, 'mscoco_scenes')
+        image_filename = f"{scene_id:012d}.jpg"
+        image_path = os.path.join(scenes_dir, image_filename)
+        
+        # Try alternative locations
+        if not os.path.exists(image_path):
+            for subdir in ['train2017', 'val2017']:
+                alt_path = os.path.join(scenes_dir, subdir, image_filename)
+                if os.path.exists(alt_path):
+                    image_path = alt_path
+                    break
+    
+    if not os.path.exists(image_path):
+        raise FileNotFoundError(f"Scene image not found: {image_path}")
+    
+    # Load scene image
+    scene_image = Image.open(image_path)
+    img_width, img_height = scene_image.size
+    
+    crops = {}
+    crop_width, crop_height = crop_size
+    
+    for object_id in object_ids:
+        object_id_str = str(object_id)
+        
+        if object_id_str not in scene_masks:
+            continue
+        
+        # Get object mask
+        object_mask = scene_masks[object_id_str]
+        
+        if not object_mask.any():
+            continue
+        
+        # Calculate center of mass
+        y_coords, x_coords = np.where(object_mask)
+        center_x = int(np.mean(x_coords))
+        center_y = int(np.mean(y_coords))
+        
+        # Calculate crop boundaries
+        left = center_x - crop_width // 2
+        top = center_y - crop_height // 2
+        right = left + crop_width
+        bottom = top + crop_height
+        
+        # Adjust boundaries to stay within image
+        left = max(0, left)
+        top = max(0, top)
+        right = min(img_width, right)
+        bottom = min(img_height, bottom)
+        
+        # Extract crop
+        crop = scene_image.crop((left, top, right, bottom))
+        crop_array = np.array(crop)
+        
+        crops[object_id] = crop_array
+    
+    return crops
+
+
+def visualize_fixations_on_scene(scene_id: int,
+                                fixations_df: pd.DataFrame,
+                                scene_images: Optional[Dict[int, str]] = None,
+                                input_dir: Optional[str] = None,
+                                figsize: Tuple[int, int] = (12, 8),
+                                save_path: Optional[str] = None) -> plt.Figure:
+    """
+    Visualize fixations overlaid on scene image.
+    
+    Parameters
+    ----------
+    scene_id : int
+        COCO scene ID
+    fixations_df : pd.DataFrame
+        Dataframe containing fixation data for this scene
+    scene_images : dict, optional
+        Dictionary mapping scene IDs to image paths
+    input_dir : str, optional
+        Path to input directory
+    figsize : tuple of int, optional
+        Figure size (width, height) (default: (12, 8))
+    save_path : str, optional
+        Path to save the visualization
+        
+    Returns
+    -------
+    plt.Figure
+        Matplotlib figure object
+    """
+    # Get scene image path
+    if scene_images is not None and scene_id in scene_images:
+        image_path = scene_images[scene_id]
+    else:
+        if input_dir is None:
+            input_dir = get_input_paths()
+        
+        scenes_dir = os.path.join(input_dir, 'mscoco_scenes')
+        image_filename = f"{scene_id:012d}.jpg"
+        image_path = os.path.join(scenes_dir, image_filename)
+        
+        # Try alternative locations
+        if not os.path.exists(image_path):
+            for subdir in ['train2017', 'val2017']:
+                alt_path = os.path.join(scenes_dir, subdir, image_filename)
+                if os.path.exists(alt_path):
+                    image_path = alt_path
+                    break
+    
+    if not os.path.exists(image_path):
+        raise FileNotFoundError(f"Scene image not found: {image_path}")
+    
+    # Load and display scene
+    scene_image = Image.open(image_path)
+    
+    fig, ax = plt.subplots(1, 1, figsize=figsize)
+    ax.imshow(scene_image)
+    
+    # Filter fixations for this scene
+    scene_fixations = fixations_df[fixations_df['sceneID'] == scene_id]
+    scene_fixations = scene_fixations[scene_fixations['type'] == 'fixation']
+    
+    if len(scene_fixations) > 0:
+        # Plot fixations
+        x_coords = scene_fixations.get('mean_gx', scene_fixations.get('gx', []))
+        y_coords = scene_fixations.get('mean_gy', scene_fixations.get('gy', []))
+        
+        # Color by fixation sequence if available
+        if 'fix_sequence' in scene_fixations.columns:
+            scatter = ax.scatter(x_coords, y_coords, 
+                               c=scene_fixations['fix_sequence'], 
+                               cmap='viridis', s=50, alpha=0.7)
+            plt.colorbar(scatter, ax=ax, label='Fixation Sequence')
+        else:
+            ax.scatter(x_coords, y_coords, c='red', s=50, alpha=0.7)
+        
+        # Add sequence numbers if available
+        if 'fix_sequence' in scene_fixations.columns:
+            for idx, row in scene_fixations.iterrows():
+                ax.annotate(str(int(row['fix_sequence'])), 
+                          (row.get('mean_gx', row.get('gx', 0)), 
+                           row.get('mean_gy', row.get('gy', 0))),
+                          xytext=(5, 5), textcoords='offset points',
+                          fontsize=8, color='white', weight='bold')
+    
+    ax.set_title(f'Fixations on Scene {scene_id}')
+    ax.set_xlabel('X Position (pixels)')
+    ax.set_ylabel('Y Position (pixels)')
+    
+    plt.tight_layout()
+    
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches='tight')
+    
+    return fig

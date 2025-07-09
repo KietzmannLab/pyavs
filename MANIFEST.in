@@ -1,0 +1,28 @@
+# Include important files in the package distribution
+include README.md
+include LICENSE
+include CHANGELOG.md
+include requirements.txt
+include .readthedocs.yaml
+
+# Include documentation
+recursive-include docs *.rst *.py *.txt *.yaml *.yml
+recursive-include docs/_static *
+recursive-include docs/_templates *
+
+# Include examples
+recursive-include examples *.py *.md *.ipynb
+
+# Include package data
+recursive-include pyavs *.py
+recursive-include pyavs/data *.csv *.json
+recursive-include pyavs/examples *.py
+
+# Exclude unwanted files
+exclude .gitignore
+recursive-exclude * __pycache__
+recursive-exclude * *.py[co]
+recursive-exclude * *.so
+recursive-exclude * .DS_Store
+recursive-exclude docs/_build *
+recursive-exclude * *~
