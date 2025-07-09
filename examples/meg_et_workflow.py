@@ -8,6 +8,8 @@ from the Active Visual Semantics dataset, including:
 3. Epoch creation based on eye tracking events
 4. Source reconstruction
 5. Population code analysis
+
+Author: Philip Sulewski
 """
 
 import numpy as np
@@ -95,43 +97,139 @@ def main():
     # Step 4: Source reconstruction
     print("\n4. Performing source reconstruction...")
     
-    # Create forward model (simplified - in practice would need proper coregistration)
+    # Load forward model
     try:
         forward_model = pyavs.load_forward_model(subject_id, session)
         print("   Loaded existing forward model")
-    except FileNotFoundError:
-        print("   Forward model not found - would need to create one")
-        print("   Skipping source reconstruction for this example")
-        forward_model = None
-    
-    if forward_model is not None:
-        # Apply beamformer source reconstruction
-        source_data = pyavs.apply_source_reconstruction(
+        
+        # Example 1: Beamformer source reconstruction
+        print("\n   4a. Beamformer (LCMV) source reconstruction...")
+        source_data_beamformer = pyavs.apply_source_reconstruction(
             fixation_epochs, 
             forward_model, 
             method='beamformer'
         )
-        print(f"   Source data shape: {source_data.shape}")
+        print(f"      Beamformer source data shape: {source_data_beamformer.shape}")
         
-        # Extract ROI data
-        roi_labels = pyavs.get_glasser_roi_labels('high_visual')
-        roi_data = pyavs.extract_roi_data(
-            source_data,
-            forward_model['src'],
-            roi_labels,
-            subjects_dir="/path/to/freesurfer/subjects"
+        # Example 2: Minimum norm estimate with dSPM (default)
+        print("\n   4b. Minimum norm estimate (dSPM) source reconstruction...")
+        source_data_dspm = pyavs.apply_source_reconstruction(
+            fixation_epochs, 
+            forward_model, 
+            method='mne'  # Uses dSPM as default
         )
-        print(f"   Extracted data from {len(roi_data)} ROIs")
+        print(f"      dSPM source data shape: {source_data_dspm.shape}")
         
-        # Compute population codes
-        population_codes = pyavs.compute_population_codes(
-            source_data,
-            fixation_events,
-            conditions=['object_category', 'scene_category'],
-            time_window=(0.1, 0.3),
+        # Example 3: Extract ROI data from both methods
+        print("\n   4c. Extracting ROI data...")
+        roi_labels = pyavs.get_glasser_roi_labels('high_visual')
+        print(f"      Using {len(roi_labels)} high-level visual ROIs: {roi_labels[:3]}...")
+        
+        # ROI extraction from beamformer results
+        roi_data_beamformer = pyavs.extract_roi_data(
+            source_data_beamformer,
+            forward_model['src'],
+            roi_labels
+        )
+        print(f"      Beamformer ROI data: {len(roi_data_beamformer)} ROIs")
+        
+        # ROI extraction from dSPM results
+        roi_data_dspm = pyavs.extract_roi_data(
+            source_data_dspm,
+            forward_model['src'],
+            roi_labels
+        )
+        print(f"      dSPM ROI data: {len(roi_data_dspm)} ROIs")
+        
+        # Example 4: Compute source power for different time windows
+        print("\n   4d. Computing source power...")
+        
+        # Early visual response (100-200ms)
+        early_power = pyavs.compute_source_power(
+            source_data_beamformer,
+            method='mean',
+            time_window=(0.1, 0.2),
             times=fixation_epochs.times
         )
-        print(f"   Computed population codes for {len(population_codes)} conditions")
+        print(f"      Early visual power shape: {early_power.shape}")
+        
+        # Late visual response (200-400ms)
+        late_power = pyavs.compute_source_power(
+            source_data_beamformer,
+            method='mean',
+            time_window=(0.2, 0.4),
+            times=fixation_epochs.times
+        )
+        print(f"      Late visual power shape: {late_power.shape}")
+        
+        # Example 5: Population codes (if we have event metadata)
+        print("\n   4e. Computing population codes...")
+        if hasattr(fixation_epochs, 'metadata') and fixation_epochs.metadata is not None:
+            # Get available metadata columns
+            metadata_cols = [col for col in fixation_epochs.metadata.columns 
+                           if col in ['object_category', 'scene_category', 'semantic_category']]
+            
+            if metadata_cols:
+                population_codes = pyavs.compute_population_codes(
+                    source_data_beamformer,
+                    fixation_epochs.metadata,
+                    conditions=metadata_cols,
+                    time_window=(0.1, 0.3),
+                    times=fixation_epochs.times
+                )
+                print(f"      Population codes computed for {len(population_codes)} conditions")
+            else:
+                print("      No suitable metadata columns found for population codes")
+        else:
+            print("      No metadata available for population codes")
+            
+        # Example 6: Save source data for further analysis
+        print("\n   4f. Saving source reconstruction results...")
+        if len(fixation_epochs) > 0:
+            # Create dummy metadata if none exists
+            if not hasattr(fixation_epochs, 'metadata') or fixation_epochs.metadata is None:
+                import pandas as pd
+                metadata = pd.DataFrame({
+                    'epoch_id': range(len(fixation_epochs)),
+                    'event_type': ['fixation'] * len(fixation_epochs)
+                })
+            else:
+                metadata = fixation_epochs.metadata
+            
+            # Save beamformer results
+            beamformer_path = pyavs.save_source_data(
+                source_data_beamformer,
+                metadata,
+                subject_id,
+                session,
+                data_type='beamformer_source_estimates'
+            )
+            print(f"      Beamformer data saved to: {beamformer_path}")
+            
+            # Save dSPM results
+            dspm_path = pyavs.save_source_data(
+                source_data_dspm,
+                metadata,
+                subject_id,
+                session,
+                data_type='dspm_source_estimates'
+            )
+            print(f"      dSPM data saved to: {dspm_path}")
+        
+        print("   Source reconstruction examples completed successfully!")
+        
+    except FileNotFoundError:
+        print("   Forward model not found - creating a demonstration example...")
+        print("   In practice, you would need to:")
+        print("   1. Create or load a forward model using pyavs.load_forward_model()")
+        print("   2. Ensure proper coregistration between MEG and MRI")
+        print("   3. Use appropriate source space (cortical surface or volume)")
+        print("   4. Apply source reconstruction with chosen method")
+        print("   Skipping source reconstruction for this example")
+        
+    except Exception as e:
+        print(f"   Error during source reconstruction: {e}")
+        print("   This is likely due to missing forward model or coregistration issues")
     
     # Step 5: Advanced analysis using aligned data
     print("\n5. Advanced analysis...")
@@ -197,8 +295,10 @@ def main():
     print("- Data loading and preprocessing")
     print("- MEG-ET temporal alignment")
     print("- Epoch creation based on eye tracking")
-    print("- Source reconstruction (if forward model available)")
+    print("- Comprehensive source reconstruction (beamformer and dSPM)")
+    print("- ROI data extraction and source power computation")
     print("- Population code analysis")
+    print("- Data saving for further analysis")
     print("- Visualization of results")
 
 
@@ -248,7 +348,7 @@ def preprocessing_example():
 
 
 def source_reconstruction_example():
-    """Example focused on source reconstruction."""
+    """Example focused on source reconstruction methods and analysis."""
     
     print("\n=== Source Reconstruction Example ===")
     
@@ -264,29 +364,141 @@ def source_reconstruction_example():
     )
     
     if len(epochs) > 0:
-        # Different source reconstruction methods
-        print("\n1. Beamformer reconstruction...")
+        print(f"Created {len(epochs)} epochs for source reconstruction")
+        
         try:
             forward_model = pyavs.load_forward_model(subject_id, session)
+            print("Forward model loaded successfully")
             
-            # Beamformer
+            # Method 1: Beamformer (LCMV) reconstruction
+            print("\n1. Beamformer (LCMV) reconstruction...")
             source_data_lcmv = pyavs.apply_source_reconstruction(
                 epochs, forward_model, method='beamformer'
             )
+            print(f"   LCMV source data shape: {source_data_lcmv.shape}")
             
-            # Minimum norm estimate
-            print("\n2. Minimum norm reconstruction...")
+            # Method 2: Minimum norm estimate with dSPM (default)
+            print("\n2. Minimum norm estimate (dSPM) reconstruction...")
+            source_data_dspm = pyavs.apply_source_reconstruction(
+                epochs, forward_model, method='mne'  # Uses dSPM as default
+            )
+            print(f"   dSPM source data shape: {source_data_dspm.shape}")
+            
+            # Method 3: Minimum norm estimate with MNE
+            print("\n3. Minimum norm estimate (MNE) reconstruction...")
             source_data_mne = pyavs.apply_source_reconstruction(
-                epochs, forward_model, method='mne'
+                epochs, forward_model, method='mne', method='MNE'
+            )
+            print(f"   MNE source data shape: {source_data_mne.shape}")
+            
+            # Method 4: Minimum norm estimate with sLORETA
+            print("\n4. Minimum norm estimate (sLORETA) reconstruction...")
+            source_data_sloreta = pyavs.apply_source_reconstruction(
+                epochs, forward_model, method='mne', method='sLORETA'
+            )
+            print(f"   sLORETA source data shape: {source_data_sloreta.shape}")
+            
+            # Compare methods by extracting ROI data
+            print("\n5. Comparing methods with ROI extraction...")
+            roi_labels = pyavs.get_glasser_roi_labels('early_visual')
+            print(f"   Using {len(roi_labels)} early visual ROIs")
+            
+            # Extract ROI data from each method
+            roi_lcmv = pyavs.extract_roi_data(
+                source_data_lcmv, forward_model['src'], roi_labels
+            )
+            roi_dspm = pyavs.extract_roi_data(
+                source_data_dspm, forward_model['src'], roi_labels
+            )
+            roi_mne = pyavs.extract_roi_data(
+                source_data_mne, forward_model['src'], roi_labels
+            )
+            roi_sloreta = pyavs.extract_roi_data(
+                source_data_sloreta, forward_model['src'], roi_labels
             )
             
-            print(f"LCMV source data shape: {source_data_lcmv.shape}")
-            print(f"MNE source data shape: {source_data_mne.shape}")
+            print(f"   LCMV ROI data: {len(roi_lcmv)} regions")
+            print(f"   dSPM ROI data: {len(roi_dspm)} regions")
+            print(f"   MNE ROI data: {len(roi_mne)} regions")
+            print(f"   sLORETA ROI data: {len(roi_sloreta)} regions")
+            
+            # Compute source power for different time windows
+            print("\n6. Computing source power across time windows...")
+            
+            # Early response (50-150ms)
+            early_power_lcmv = pyavs.compute_source_power(
+                source_data_lcmv, method='mean', 
+                time_window=(0.05, 0.15), times=epochs.times
+            )
+            
+            # Late response (200-400ms)
+            late_power_lcmv = pyavs.compute_source_power(
+                source_data_lcmv, method='mean',
+                time_window=(0.2, 0.4), times=epochs.times
+            )
+            
+            print(f"   Early power (50-150ms): {early_power_lcmv.shape}")
+            print(f"   Late power (200-400ms): {late_power_lcmv.shape}")
+            
+            # Save results for comparison
+            print("\n7. Saving source reconstruction results...")
+            import pandas as pd
+            
+            # Create metadata for saving
+            metadata = pd.DataFrame({
+                'epoch_id': range(len(epochs)),
+                'event_type': ['fixation'] * len(epochs),
+                'block': [1] * len(epochs)
+            })
+            
+            # Save each method's results
+            lcmv_path = pyavs.save_source_data(
+                source_data_lcmv, metadata, subject_id, session,
+                data_type='lcmv_source_estimates'
+            )
+            
+            dspm_path = pyavs.save_source_data(
+                source_data_dspm, metadata, subject_id, session,
+                data_type='dspm_source_estimates'
+            )
+            
+            mne_path = pyavs.save_source_data(
+                source_data_mne, metadata, subject_id, session,
+                data_type='mne_source_estimates'
+            )
+            
+            sloreta_path = pyavs.save_source_data(
+                source_data_sloreta, metadata, subject_id, session,
+                data_type='sloreta_source_estimates'
+            )
+            
+            print(f"   Saved LCMV results to: {lcmv_path}")
+            print(f"   Saved dSPM results to: {dspm_path}")
+            print(f"   Saved MNE results to: {mne_path}")
+            print(f"   Saved sLORETA results to: {sloreta_path}")
+            
+            print("\n8. Source reconstruction method comparison complete!")
+            print("   This example demonstrated:")
+            print("   - Multiple source reconstruction methods")
+            print("   - ROI-based analysis")
+            print("   - Time-window based power computation")
+            print("   - Data saving for further analysis")
             
         except FileNotFoundError:
-            print("Forward model not found - create one first")
+            print("Forward model not found - you would need to create one first")
+            print("Steps to create a forward model:")
+            print("1. Load anatomical data (MRI, surfaces)")
+            print("2. Set up source space (cortical surface)")
+            print("3. Create BEM model")
+            print("4. Compute forward solution")
+            
+        except Exception as e:
+            print(f"Error during source reconstruction: {e}")
     
-    print("Source reconstruction examples completed!")
+    else:
+        print("No epochs available for source reconstruction")
+    
+    print("\nSource reconstruction examples completed!")
 
 
 if __name__ == "__main__":

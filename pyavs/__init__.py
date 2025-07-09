@@ -11,7 +11,7 @@ try:
 except ImportError:
     __version__ = "0.1.0"
 
-__author__ = "P. Sulewski"
+__author__ = "Philip Sulewski"
 __email__ = "psulewski@uos.de"
 
 # Main API functions
@@ -28,6 +28,7 @@ from .source.forward import create_forward_model, create_bem_model, setup_coregi
 from .source.reconstruction import apply_source_reconstruction, compute_beamformer_filters, compute_population_codes, extract_roi_data
 from .source.spaces import create_source_space, get_roi_labels, get_glasser_roi_labels
 from .visualization.meg import plot_evoked_joint, plot_median_erf, plot_sensor_space_overview
+from .visualization.events_on_scene import EyeTrackingPlotter
 
 # Main workflow functions
 def load_and_preprocess_eye_tracking(subjects, sessions, data_path=None, **kwargs):

@@ -36,7 +36,7 @@ def read_requirements():
 setup(
     name='pyavs',
     version='0.1.0',
-    author='P. Sulewski, C. Meinert',
+    author='Philip Sulewski',
     author_email='psulewski@uos.de',
     description='Python package for Active Visual Semantics dataset processing',
     long_description=read_readme(),
