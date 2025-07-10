@@ -12,6 +12,7 @@ from the Active Visual Semantics dataset, including:
 Author: Philip Sulewski
 """
 
+import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -28,10 +29,44 @@ def main():
     # Configuration
     subject_id = 1
     session = 1
+    # NOTE: Update this path to match your local data directory
+    # Example paths:
+    # - "/share/klab/datasets/avs/" (klab server)
+    # - "/path/to/your/avs/data/" (local installation)
+    # - "~/data/avs/" (home directory)
     data_path = "/share/klab/datasets/avs/"
     
-    # Set up pyAVS
-    pyavs.set_data_path(data_path)
+    # Set up pyAVS data path
+    print(f"Setting data path to: {data_path}")
+    
+    # Check if data path exists and provide helpful error message
+    if not os.path.exists(data_path):
+        print(f"⚠ Warning: Data path does not exist: {data_path}")
+        print("  Please update the 'data_path' variable in this script to point to your AVS data directory.")
+        print("  Common locations:")
+        print("  - Klab server: /share/klab/datasets/avs/")
+        print("  - Local setup: /path/to/your/avs/data/")
+        print("  - Home directory: ~/data/avs/")
+        print("\n  Creating a mock data path for demonstration purposes...")
+        
+        # Create a temporary directory structure for demonstration
+        import tempfile
+        mock_data_path = tempfile.mkdtemp(prefix="pyavs_demo_")
+        print(f"  Using temporary path: {mock_data_path}")
+        print("  (This demo will show the workflow structure but won't process real data)")
+        
+        # Set the mock path without validation
+        import pyavs
+        pyavs.utils.config._config['data_path'] = mock_data_path
+        data_path = mock_data_path
+    else:
+        try:
+            pyavs.set_data_path(data_path)
+            print("✓ Data path configured successfully")
+        except Exception as e:
+            print(f"⚠ Error configuring data path: {e}")
+            print("  Please check that you have read access to the data directory")
+            return
     
     # Step 1: Check data availability
     print("1. Checking data availability...")
@@ -369,6 +404,17 @@ def preprocessing_example():
     
     subject_id = 1
     session = 1
+    data_path = "/share/klab/datasets/avs/"
+    
+    # Set up pyAVS data path
+    print(f"Setting data path to: {data_path}")
+    try:
+        pyavs.set_data_path(data_path)
+        print("✓ Data path configured successfully")
+    except Exception as e:
+        print(f"⚠ Warning: Could not verify data path: {e}")
+        # Still set the path for the example to proceed
+        pyavs.set_data_path(data_path)
     
     # Example 1: Basic preprocessing
     print("\n1. Basic preprocessing...")
@@ -414,6 +460,17 @@ def source_reconstruction_example():
     
     subject_id = 1
     session = 1
+    data_path = "/share/klab/datasets/avs/"
+    
+    # Set up pyAVS data path
+    print(f"Setting data path to: {data_path}")
+    try:
+        pyavs.set_data_path(data_path)
+        print("✓ Data path configured successfully")
+    except Exception as e:
+        print(f"⚠ Warning: Could not verify data path: {e}")
+        # Still set the path for the example to proceed
+        pyavs.set_data_path(data_path)
     
     # Load preprocessed data
     subject_data = pyavs.load_and_preprocess(subject_id, session)
