@@ -7,14 +7,10 @@ including filtering, artifact rejection, and temporal alignment.
 
 from .eye import (
     preprocess_eye_events,
-    detect_fixations,
-    detect_saccades,
     remove_artifacts
 )
 
 __all__ = [
     'preprocess_eye_events',
-    'detect_fixations', 
-    'detect_saccades',
     'remove_artifacts'
 ]

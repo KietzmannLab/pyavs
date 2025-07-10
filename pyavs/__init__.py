@@ -20,7 +20,7 @@ from .dataloader.loaders import load_eye_events, load_experiment_log, load_anato
 from .dataloader.eye import load_and_enrich_eye_events, add_fixation_sequence_position, add_cross_event_information
 from .dataloader.meg import load_meg_raw, load_meg_preprocessed, load_meg_session, load_and_preprocess_meg_run
 from .scenes.objects import get_fixated_objects
-from .preprocessing.eye import preprocess_eye_events, detect_fixations, detect_saccades
+from .preprocessing.eye import preprocess_eye_events
 from .preprocessing.meg import apply_maxwell_filter, filter_meg, resample_meg, preprocess_meg_block, apply_precomputed_ica
 from .preprocessing.ica import compute_ica, find_eye_components, apply_ica, preprocess_with_ica
 from .preprocessing.alignment import MEGETComposer, create_et_event_epochs, align_meg_et_timing

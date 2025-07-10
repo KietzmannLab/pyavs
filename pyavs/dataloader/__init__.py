@@ -7,6 +7,7 @@ from the Active Visual Semantics BIDS dataset.
 
 from .loaders import (
     load_eye_events,
+    load_experiment_log,
     load_anatomical, 
     load_scenes,
     load_calibration_files
@@ -20,6 +21,7 @@ from .eye import (
 
 __all__ = [
     'load_eye_events',
+    'load_experiment_log',
     'load_anatomical',
     'load_scenes', 
     'load_calibration_files',
