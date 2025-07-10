@@ -244,7 +244,7 @@ def main():
         else:
             print("      No metadata available for population codes")
             
-        # Example 6: Save source data for further analysis (NEW: MNE .fif format)
+        # Example 6: Save source data for further analysis (AVS-machine-room compatible HDF5 format)
         print("\n   4f. Saving source reconstruction results...")
         if len(saccade_epochs) > 0:
             # Create dummy metadata if none exists
@@ -257,27 +257,91 @@ def main():
             else:
                 metadata = saccade_epochs.metadata
             
-            # Save beamformer results in MNE .fif format (recommended)
+            # Example 6a: Save using AVS-machine-room compatible HDF5 format
+            print("      Saving in AVS-machine-room compatible HDF5 format...")
+            
+            # Define ROIs to extract (similar to original avs-machine-room)
+            rois_to_extract = ['stc', 'mag', 'grad']  # Start with basic ROIs
+            
+            # Try to add anatomical ROIs if labels are available
+            try:
+                # Get subjects directory (would need to be configured)
+                subjects_dir = os.path.join(data_path, 'subjects')  # Adjust path as needed
+                
+                # Add common visual ROIs
+                visual_rois = ['V1', 'V2', 'V3', 'V4', 'MT', 'LOC', 'FFA', 'PPA']
+                rois_to_extract.extend(visual_rois)
+                
+                print(f"      Extracting population codes for ROIs: {rois_to_extract}")
+                
+                # Extract and save population codes using AVS format
+                h5_path = pyavs.extract_and_save_population_codes(
+                    epochs=saccade_epochs,
+                    source_estimates=source_data_beamformer,  # Using beamformer results
+                    rois=rois_to_extract,
+                    subjects_dir=subjects_dir,
+                    subject_id=subject_id,
+                    session=session,
+                    event_type='saccade',
+                    sampling_rate=500,
+                    save_format='h5',  # Use original AVS HDF5 format
+                    blocks=[1, 2, 3],
+                    filter_params={'l_freq': 1.0, 'h_freq': 40.0}
+                )
+                print(f"      Population codes saved to: {h5_path}")
+                
+            except Exception as e:
+                print(f"      Could not save in HDF5 format: {e}")
+                print("      This is expected if anatomical data/labels are not available")
+                
+                # Fallback: Save using simplified HDF5 format with only source space data
+                try:
+                    # Convert source estimates to numpy array for basic saving
+                    if isinstance(source_data_beamformer, list) and len(source_data_beamformer) > 0:
+                        # Convert list of SourceEstimate to numpy array
+                        stc_data = np.array([stc.data.T for stc in source_data_beamformer])  # (n_epochs, n_times, n_sources)
+                        stc_data = stc_data.transpose(0, 2, 1)  # (n_epochs, n_sources, n_times)
+                        
+                        population_codes = {'stc': stc_data}
+                        
+                        h5_path = pyavs.save_population_codes_h5(
+                            population_codes=population_codes,
+                            metadata=metadata,
+                            subject_id=subject_id,
+                            session=session,
+                            event_type='saccade',
+                            times=saccade_epochs.times,
+                            sampling_rate=500,
+                            filter_params={'l_freq': 1.0, 'h_freq': 40.0}
+                        )
+                        print(f"      Basic population codes saved to: {h5_path}")
+                except Exception as e2:
+                    print(f"      Fallback HDF5 saving also failed: {e2}")
+            
+            # Example 6b: Also save using MNE .fif format for comparison
+            print("      Also saving in MNE .fif format for comparison...")
+            
+            # Save beamformer results in MNE .fif format 
             beamformer_path = pyavs.save_source_data(
                 source_data_beamformer,
                 metadata,
                 subject_id,
                 session,
                 data_type='beamformer_source_estimates',
-                file_format='fif'  # NEW: Using MNE .fif format
+                file_format='fif'
             )
-            print(f"      Beamformer data saved to: {beamformer_path}")
+            print(f"      Beamformer .fif data saved to: {beamformer_path}")
             
-            # Save dSPM results in MNE .fif format (recommended)
+            # Save dSPM results in MNE .fif format
             dspm_path = pyavs.save_source_data(
                 source_data_dspm,
                 metadata,
                 subject_id,
                 session,
                 data_type='dspm_source_estimates',
-                file_format='fif'  # NEW: Using MNE .fif format
+                file_format='fif'
             )
-            print(f"      dSPM data saved to: {dspm_path}")
+            print(f"      dSPM .fif data saved to: {dspm_path}")
             
             # Also save the epochs themselves in .fif format
             saccade_epochs_path = pyavs.save_source_data(
@@ -287,7 +351,7 @@ def main():
             print(f"      Saccade epochs saved to: {saccade_epochs_path}")
         
         print("   Source reconstruction examples completed successfully!")
-        print("   Data saved in MNE .fif format for better compatibility and performance!")
+        print("   Data saved in both AVS-machine-room compatible HDF5 format and MNE .fif format!")
         
         # Example 7: Load saved data (NEW: Demonstrate .fif loading)
         print("\n   4g. Loading saved source data...")

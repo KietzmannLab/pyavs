@@ -10,6 +10,8 @@ import numpy as np
 import pandas as pd
 import mne
 import h5py
+import json
+import hashlib
 from typing import List, Optional, Tuple, Dict, Any, Union
 from sklearn.preprocessing import StandardScaler
 
@@ -759,6 +761,397 @@ def save_numpy_source_data_h5(source_data: np.ndarray,
     return h5_path
 
 
+def save_population_codes_h5(population_codes: Dict[str, np.ndarray],
+                            metadata: pd.DataFrame,
+                            subject_id: int,
+                            session: int,
+                            event_type: str = 'saccade',
+                            blocks: Optional[List[int]] = None,
+                            times: Optional[np.ndarray] = None,
+                            rois: Optional[List[str]] = None,
+                            random_epochs: Optional[np.ndarray] = None,
+                            sampling_rate: int = 500,
+                            filter_params: Optional[Dict[str, float]] = None,
+                            apply_fixation_mask: bool = False,
+                            fixation_masks: Optional[np.ndarray] = None,
+                            offset_data: Optional[Dict[str, np.ndarray]] = None,
+                            data_path: Optional[str] = None,
+                            hemi: str = 'both',
+                            compression: str = 'gzip') -> str:
+    """
+    Save population codes to HDF5 file following the original avs-machine-room format.
+    
+    This function replicates the exact saving strategy used in the original
+    avs_compute_population_codes.py script, maintaining compatibility with
+    existing analysis pipelines.
+    
+    Parameters
+    ----------
+    population_codes : dict
+        Dictionary where keys are ROI names and values are population code arrays
+        with shape (n_epochs, n_sources, n_timepoints)
+    metadata : pd.DataFrame
+        Metadata for each epoch
+    subject_id : int
+        Subject ID
+    session : int
+        Session number
+    event_type : str, optional
+        Event type ('saccade', 'fixation', etc.) (default: 'saccade')
+    blocks : list of int, optional
+        List of blocks processed (default: None)
+    times : np.ndarray, optional
+        Time points array in seconds (default: None)
+    rois : list of str, optional
+        List of ROI names (default: None, will use population_codes.keys())
+    random_epochs : np.ndarray, optional
+        Indices of randomly selected epochs (default: None)
+    sampling_rate : int, optional
+        Sampling rate in Hz (default: 500)
+    filter_params : dict, optional
+        Filter parameters with 'l_freq' and 'h_freq' keys (default: None)
+    apply_fixation_mask : bool, optional
+        Whether fixation masking was applied (default: False)
+    fixation_masks : np.ndarray, optional
+        Boolean masks for fixation periods (default: None)
+    offset_data : dict, optional
+        Offset-locked data for fixation events (default: None)
+    data_path : str, optional
+        Path to data directory (default: None, uses configured path)
+    hemi : str, optional
+        Hemisphere processed ('lh', 'rh', 'both') (default: 'both')
+    compression : str, optional
+        HDF5 compression method (default: 'gzip')
+        
+    Returns
+    -------
+    str
+        Path to saved HDF5 file
+        
+    Notes
+    -----
+    This function creates an HDF5 file with the exact structure used in the
+    original avs-machine-room scripts:
+    
+    File structure:
+    - Attributes: subject, session, blocks, times, random_epochs, event_type,
+                 rois, hemi, hz, filter, etc.
+    - Groups: One group per ROI (e.g., 'stc', 'mag', 'grad', 'V1', 'V2', etc.)
+    - Datasets: 'onset' dataset in each ROI group, 'offset' for fixation events,
+               'fixation_masks' at root level
+    
+    Example filename: as01a_population_codes_saccade_500hz_masked_False.h5
+    """
+    validate_subject_id(subject_id)
+    validate_session(session)
+    
+    if data_path is None:
+        data_path = get_data_path()
+        if data_path is None:
+            raise ValueError("No data path configured")
+    
+    # Create intelligent directory structure for population codes
+    # Structure: derivatives/pyavs/population_codes/{parameters_hash}/{subject_group}/
+    
+    # Generate parameter signature for intelligent storage
+    param_signature = _generate_parameter_signature(
+        event_type=event_type,
+        sampling_rate=sampling_rate,
+        filter_params=filter_params,
+        apply_fixation_mask=apply_fixation_mask,
+        hemi=hemi,
+        rois=rois,
+        blocks=blocks
+    )
+    
+    # Create parameter-based directory structure
+    param_dir = os.path.join(data_path, 'derivatives', 'pyavs', 'population_codes', param_signature)
+    
+    # Group subjects by sets (e.g., sub01-05, sub06-10, etc.)
+    subject_group = f"sub{((subject_id - 1) // 5) * 5 + 1:02d}-{min(((subject_id - 1) // 5 + 1) * 5, 99):02d}"
+    subject_group_dir = os.path.join(param_dir, subject_group)
+    
+    os.makedirs(subject_group_dir, exist_ok=True)
+    
+    # Create metadata file for this parameter set
+    metadata_file = os.path.join(param_dir, 'parameters.json')
+    _save_parameter_metadata(metadata_file, {
+        'event_type': event_type,
+        'sampling_rate': sampling_rate,
+        'filter_params': filter_params,
+        'apply_fixation_mask': apply_fixation_mask,
+        'hemi': hemi,
+        'rois': rois,
+        'blocks': blocks,
+        'parameter_signature': param_signature,
+        'created': pd.Timestamp.now().isoformat(),
+        'description': f"Population codes for {event_type} events at {sampling_rate}Hz"
+    })
+    
+    # Create subject-session identifier (following original naming)
+    sub_sess_id = f"as{subject_id:02d}{'abcde'[session-1] if session <= 5 else session}"
+    
+    # Create filename with parameter hash for uniqueness
+    h5_filename = f"{sub_sess_id}_population_codes_{event_type}_{sampling_rate}hz_masked_{apply_fixation_mask}_{param_signature[:8]}.h5"
+    h5_path = os.path.join(subject_group_dir, h5_filename)
+    
+    # Prepare ROI list
+    if rois is None:
+        rois = list(population_codes.keys())
+    
+    # Prepare times array
+    if times is None and len(population_codes) > 0:
+        # Try to infer times from data shape
+        first_roi_data = next(iter(population_codes.values()))
+        n_timepoints = first_roi_data.shape[-1]
+        times = np.linspace(-0.2, 0.5, n_timepoints)  # Default time window
+    
+    # Prepare blocks list
+    if blocks is None:
+        blocks = [1, 2, 3]  # Default blocks
+    
+    # Prepare random epochs
+    if random_epochs is None and len(population_codes) > 0:
+        first_roi_data = next(iter(population_codes.values()))
+        n_epochs = first_roi_data.shape[0]
+        random_epochs = np.arange(n_epochs)
+    
+    # Prepare filter parameters
+    if filter_params is None:
+        filter_params = {'l_freq': 1.0, 'h_freq': 40.0}
+    
+    print(f"Saving population codes to: {h5_path}")
+    print(f"Event type: {event_type}, ROIs: {len(rois)}, Epochs: {len(random_epochs) if random_epochs is not None else 'unknown'}")
+    
+    # Save to HDF5 file following original format
+    with h5py.File(h5_path, 'w') as storage:
+        # Save attributes (exactly as in original script)
+        storage.attrs["subject"] = subject_id
+        storage.attrs["session"] = session
+        storage.attrs["blocks"] = blocks
+        if times is not None:
+            storage.attrs["times"] = times
+        if random_epochs is not None:
+            storage.attrs["random_epochs"] = random_epochs
+        storage.attrs["event_type"] = event_type
+        storage.attrs["rois"] = rois
+        storage.attrs["hemi"] = hemi
+        storage.attrs["hz"] = sampling_rate
+        storage.attrs["filter"] = [filter_params.get("l_freq", 1.0), filter_params.get("h_freq", 40.0)]
+        
+        # Additional attributes for fixation events
+        if event_type == "fixation":
+            storage.attrs["offset_lock_steps"] = True  # Placeholder for offset locking
+        
+        # Store fixation masks (if not applying them)
+        if not apply_fixation_mask and fixation_masks is not None:
+            if "fixation_masks" in storage.keys():
+                del storage["fixation_masks"]
+            storage.create_dataset("fixation_masks", data=fixation_masks, dtype=bool, compression=compression)
+        
+        # Store population codes for each ROI
+        for roi_name in rois:
+            if roi_name not in population_codes:
+                print(f"Warning: ROI {roi_name} not found in population_codes")
+                continue
+                
+            roi_data = population_codes[roi_name]
+            print(f"Saving ROI: {roi_name}, shape: {roi_data.shape}")
+            
+            # Create ROI group if it doesn't exist
+            if roi_name not in storage.keys():
+                storage.create_group(roi_name)
+            
+            # Save onset data
+            if "onset" not in storage[roi_name].keys():
+                storage[roi_name].create_dataset("onset", data=roi_data, dtype=np.float32, compression=compression)
+            else:
+                # Replace existing data
+                del storage[roi_name]["onset"]
+                storage[roi_name].create_dataset("onset", data=roi_data, dtype=np.float32, compression=compression)
+            
+            # Save offset data for fixation events
+            if event_type == "fixation" and offset_data is not None and roi_name in offset_data:
+                if "offset" not in storage[roi_name].keys():
+                    storage[roi_name].create_dataset("offset", data=offset_data[roi_name], dtype=np.float32, compression=compression)
+                else:
+                    del storage[roi_name]["offset"]
+                    storage[roi_name].create_dataset("offset", data=offset_data[roi_name], dtype=np.float32, compression=compression)
+        
+        # Flush to ensure data is written
+        storage.flush()
+    
+    print(f"Successfully saved population codes to: {h5_path}")
+    return h5_path
+
+
+def extract_and_save_population_codes(epochs: mne.Epochs,
+                                     source_estimates: List[mne.SourceEstimate],
+                                     rois: List[str],
+                                     subjects_dir: str,
+                                     subject_id: int,
+                                     session: int,
+                                     event_type: str = 'saccade',
+                                     apply_fixation_mask: bool = False,
+                                     sampling_rate: int = 500,
+                                     save_format: str = 'h5',
+                                     **kwargs) -> str:
+    """
+    Extract population codes from source estimates for specified ROIs and save in AVS format.
+    
+    This function replicates the population code extraction workflow from the original
+    avs-machine-room scripts, converting source estimates to ROI-specific population codes
+    and saving them in the original HDF5 format.
+    
+    Parameters
+    ----------
+    epochs : mne.Epochs
+        Epoched MEG data with metadata
+    source_estimates : list of mne.SourceEstimate
+        Source estimates for each epoch
+    rois : list of str
+        List of ROI names to extract (e.g., ['V1', 'V2', 'MT', 'stc'])
+    subjects_dir : str
+        Path to subjects directory containing label files
+    subject_id : int
+        Subject ID
+    session : int
+        Session number
+    event_type : str, optional
+        Event type ('saccade', 'fixation', etc.) (default: 'saccade')
+    apply_fixation_mask : bool, optional
+        Whether to apply fixation masking (default: False)
+    sampling_rate : int, optional
+        Sampling rate in Hz (default: 500)
+    save_format : str, optional
+        Save format ('h5' for original format, 'fif' for MNE format) (default: 'h5')
+    **kwargs
+        Additional parameters passed to save_population_codes_h5
+        
+    Returns
+    -------
+    str
+        Path to saved file
+        
+    Notes
+    -----
+    This function:
+    1. Extracts data for each ROI from source estimates
+    2. Handles special ROIs like 'stc' (full source space), 'mag', 'grad' (sensor space)
+    3. Converts data to the format expected by the original analysis pipeline
+    4. Saves data using the original HDF5 structure
+    
+    ROI extraction:
+    - For anatomical ROIs (e.g., 'V1', 'V2'): Extracts vertices within the label
+    - For 'stc': Uses the full source space data
+    - For 'mag', 'grad': Uses sensor space data from epochs
+    """
+    print(f"Extracting population codes for {len(rois)} ROIs")
+    print(f"Source estimates: {len(source_estimates)} epochs")
+    
+    # Prepare population codes dictionary
+    population_codes = {}
+    
+    # Get subject name for label loading
+    subject_name = f"sub-{subject_id:02d}"
+    
+    # Process each ROI
+    for roi_name in rois:
+        print(f"Processing ROI: {roi_name}")
+        
+        if roi_name == 'stc':
+            # Full source space data
+            roi_data = []
+            for stc in source_estimates:
+                roi_data.append(stc.data.T)  # Shape: (n_times, n_sources)
+            roi_data = np.array(roi_data)  # Shape: (n_epochs, n_times, n_sources)
+            roi_data = roi_data.transpose(0, 2, 1)  # Shape: (n_epochs, n_sources, n_times)
+            
+        elif roi_name in ['mag', 'grad']:
+            # Sensor space data
+            if roi_name == 'mag':
+                picks = mne.pick_types(epochs.info, meg='mag')
+            else:
+                picks = mne.pick_types(epochs.info, meg='grad')
+            
+            roi_data = epochs.get_data(picks=picks)  # Shape: (n_epochs, n_channels, n_times)
+            
+        else:
+            # Anatomical ROI - need to load label
+            try:
+                # Try to load the label file
+                label_file = os.path.join(subjects_dir, subject_name, 'label', f"{roi_name}.label")
+                if not os.path.exists(label_file):
+                    # Try alternative naming conventions
+                    label_file = os.path.join(subjects_dir, subject_name, 'label', f"lh.{roi_name}.label")
+                    if not os.path.exists(label_file):
+                        label_file = os.path.join(subjects_dir, subject_name, 'label', f"rh.{roi_name}.label")
+                
+                if os.path.exists(label_file):
+                    label = mne.read_label(label_file, subject=subject_name)
+                    
+                    # Extract data for this ROI
+                    roi_data = []
+                    for stc in source_estimates:
+                        stc_in_label = stc.in_label(label)
+                        roi_data.append(stc_in_label.data.T)  # Shape: (n_times, n_sources_in_roi)
+                    roi_data = np.array(roi_data)  # Shape: (n_epochs, n_times, n_sources_in_roi)
+                    roi_data = roi_data.transpose(0, 2, 1)  # Shape: (n_epochs, n_sources_in_roi, n_times)
+                else:
+                    print(f"Warning: Label file not found for ROI {roi_name}, skipping")
+                    continue
+                    
+            except Exception as e:
+                print(f"Error processing ROI {roi_name}: {e}")
+                continue
+        
+        population_codes[roi_name] = roi_data
+        print(f"  Extracted {roi_name}: shape {roi_data.shape}")
+    
+    # Prepare metadata
+    if hasattr(epochs, 'metadata') and epochs.metadata is not None:
+        metadata = epochs.metadata.copy()
+    else:
+        metadata = pd.DataFrame({
+            'epoch_id': range(len(epochs)),
+            'event_type': [event_type] * len(epochs)
+        })
+    
+    # Prepare additional parameters
+    times = epochs.times
+    blocks = kwargs.get('blocks', [1, 2, 3])
+    random_epochs = kwargs.get('random_epochs', np.arange(len(epochs)))
+    filter_params = kwargs.get('filter_params', {'l_freq': 1.0, 'h_freq': 40.0})
+    
+    # Save the population codes
+    if save_format == 'h5':
+        return save_population_codes_h5(
+            population_codes=population_codes,
+            metadata=metadata,
+            subject_id=subject_id,
+            session=session,
+            event_type=event_type,
+            blocks=blocks,
+            times=times,
+            rois=list(population_codes.keys()),
+            random_epochs=random_epochs,
+            sampling_rate=sampling_rate,
+            filter_params=filter_params,
+            apply_fixation_mask=apply_fixation_mask,
+            **kwargs
+        )
+    else:
+        # Use the standard save_source_data with .fif format
+        return save_source_data(
+            data=epochs,
+            metadata=metadata,
+            subject_id=subject_id,
+            session=session,
+            data_type=f'population_codes_{event_type}',
+            file_format='fif'
+        )
+
+
 def load_source_data(subject_id: int,
                     session: int,
                     data_type: str = 'source_estimates',
@@ -890,3 +1283,256 @@ def apply_source_reconstruction(epochs: mne.Epochs,
         raise ValueError(f"Unknown source reconstruction method: {method}")
     
     return source_data
+
+
+def _generate_parameter_signature(**params) -> str:
+    """
+    Generate a unique signature string based on processing parameters.
+    
+    This creates a hash-based identifier that uniquely identifies a set of
+    processing parameters, allowing for intelligent organization of results.
+    
+    Parameters
+    ----------
+    **params
+        Processing parameters
+        
+    Returns
+    -------
+    str
+        Unique parameter signature string
+    """
+    # Clean and standardize parameters
+    clean_params = {}
+    
+    for key, value in params.items():
+        if value is None:
+            continue
+        elif isinstance(value, (list, tuple, np.ndarray)):
+            # Convert sequences to sorted tuples for consistent hashing
+            if isinstance(value, np.ndarray):
+                value = value.tolist()
+            if isinstance(value, list) and len(value) > 0 and isinstance(value[0], str):
+                value = sorted(value)  # Sort string lists
+            clean_params[key] = tuple(value)
+        elif isinstance(value, dict):
+            # Convert dicts to sorted tuple of items
+            clean_params[key] = tuple(sorted(value.items()))
+        else:
+            clean_params[key] = value
+    
+    # Create deterministic string representation
+    param_string = json.dumps(clean_params, sort_keys=True, separators=(',', ':'))
+    
+    # Generate hash
+    param_hash = hashlib.sha256(param_string.encode()).hexdigest()
+    
+    # Create readable signature: event_type_sampling_rate_hash
+    event_type = clean_params.get('event_type', 'unknown')
+    sampling_rate = clean_params.get('sampling_rate', 'unknown')
+    
+    signature = f"{event_type}_{sampling_rate}hz_{param_hash[:16]}"
+    
+    return signature
+
+
+def _save_parameter_metadata(metadata_file: str, metadata: Dict[str, Any]) -> None:
+    """
+    Save parameter metadata to JSON file.
+    
+    Parameters
+    ----------
+    metadata_file : str
+        Path to metadata file
+    metadata : dict
+        Metadata dictionary to save
+    """
+    # Load existing metadata if file exists
+    if os.path.exists(metadata_file):
+        try:
+            with open(metadata_file, 'r') as f:
+                existing_metadata = json.load(f)
+        except (json.JSONDecodeError, FileNotFoundError):
+            existing_metadata = {}
+    else:
+        existing_metadata = {}
+    
+    # Update with new metadata
+    existing_metadata.update(metadata)
+    existing_metadata['last_updated'] = pd.Timestamp.now().isoformat()
+    
+    # Save updated metadata
+    with open(metadata_file, 'w') as f:
+        json.dump(existing_metadata, f, indent=2, default=str)
+
+
+def find_population_codes_files(subject_id: int,
+                               session: int,
+                               data_path: Optional[str] = None,
+                               event_type: Optional[str] = None,
+                               sampling_rate: Optional[int] = None,
+                               **param_filters) -> List[Dict[str, Any]]:
+    """
+    Find population codes files for a subject with optional parameter filtering.
+    
+    This function searches the intelligent storage structure to find all
+    population codes files for a given subject, optionally filtered by
+    processing parameters.
+    
+    Parameters
+    ----------
+    subject_id : int
+        Subject ID to search for
+    session : int
+        Session number to search for
+    data_path : str, optional
+        Path to data directory. If None, uses configured data path
+    event_type : str, optional
+        Filter by event type (e.g., 'saccade', 'fixation')
+    sampling_rate : int, optional
+        Filter by sampling rate
+    **param_filters
+        Additional parameter filters
+        
+    Returns
+    -------
+    list of dict
+        List of dictionaries containing file paths and metadata for matching files
+        
+    Examples
+    --------
+    # Find all saccade population codes for subject 1, session 1
+    files = find_population_codes_files(1, 1, event_type='saccade')
+    
+    # Find 500Hz population codes with specific filter parameters
+    files = find_population_codes_files(1, 1, sampling_rate=500, 
+                                      filter_params={'l_freq': 1.0, 'h_freq': 40.0})
+    """
+    if data_path is None:
+        data_path = get_data_path()
+        if data_path is None:
+            raise ValueError("No data path configured")
+    
+    validate_subject_id(subject_id)
+    validate_session(session)
+    
+    # Search pattern
+    pop_codes_dir = os.path.join(data_path, 'derivatives', 'pyavs', 'population_codes')
+    
+    if not os.path.exists(pop_codes_dir):
+        return []
+    
+    # Subject identifier for filename matching
+    sub_sess_id = f"as{subject_id:02d}{'abcde'[session-1] if session <= 5 else session}"
+    
+    matching_files = []
+    
+    # Search through parameter directories
+    for param_dir in os.listdir(pop_codes_dir):
+        param_path = os.path.join(pop_codes_dir, param_dir)
+        if not os.path.isdir(param_path):
+            continue
+        
+        # Load parameter metadata
+        metadata_file = os.path.join(param_path, 'parameters.json')
+        if not os.path.exists(metadata_file):
+            continue
+        
+        try:
+            with open(metadata_file, 'r') as f:
+                param_metadata = json.load(f)
+        except json.JSONDecodeError:
+            continue
+        
+        # Apply parameter filters
+        if event_type is not None and param_metadata.get('event_type') != event_type:
+            continue
+        if sampling_rate is not None and param_metadata.get('sampling_rate') != sampling_rate:
+            continue
+        
+        # Apply additional parameter filters
+        skip_this_dir = False
+        for filter_key, filter_value in param_filters.items():
+            if filter_key in param_metadata:
+                if param_metadata[filter_key] != filter_value:
+                    skip_this_dir = True
+                    break
+        if skip_this_dir:
+            continue
+        
+        # Search for subject files in this parameter directory
+        for subject_group_dir in os.listdir(param_path):
+            if subject_group_dir == 'parameters.json':
+                continue
+            
+            subject_group_path = os.path.join(param_path, subject_group_dir)
+            if not os.path.isdir(subject_group_path):
+                continue
+            
+            # Look for files matching our subject
+            for filename in os.listdir(subject_group_path):
+                if filename.startswith(sub_sess_id) and filename.endswith('.h5'):
+                    file_path = os.path.join(subject_group_path, filename)
+                    
+                    matching_files.append({
+                        'file_path': file_path,
+                        'filename': filename,
+                        'parameter_signature': param_dir,
+                        'parameter_metadata': param_metadata,
+                        'subject_group': subject_group_dir
+                    })
+    
+    # Sort by creation time (most recent first)
+    matching_files.sort(key=lambda x: x['parameter_metadata'].get('created', ''), reverse=True)
+    
+    return matching_files
+
+
+def list_available_parameter_sets(data_path: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    List all available parameter sets in the population codes storage.
+    
+    Parameters
+    ----------
+    data_path : str, optional
+        Path to data directory. If None, uses configured data path
+        
+    Returns
+    -------
+    list of dict
+        List of parameter sets with their metadata
+    """
+    if data_path is None:
+        data_path = get_data_path()
+        if data_path is None:
+            raise ValueError("No data path configured")
+    
+    pop_codes_dir = os.path.join(data_path, 'derivatives', 'pyavs', 'population_codes')
+    
+    if not os.path.exists(pop_codes_dir):
+        return []
+    
+    parameter_sets = []
+    
+    for param_dir in os.listdir(pop_codes_dir):
+        param_path = os.path.join(pop_codes_dir, param_dir)
+        if not os.path.isdir(param_path):
+            continue
+        
+        metadata_file = os.path.join(param_path, 'parameters.json')
+        if not os.path.exists(metadata_file):
+            continue
+        
+        try:
+            with open(metadata_file, 'r') as f:
+                metadata = json.load(f)
+            
+            metadata['parameter_directory'] = param_dir
+            parameter_sets.append(metadata)
+        except json.JSONDecodeError:
+            continue
+    
+    # Sort by creation time
+    parameter_sets.sort(key=lambda x: x.get('created', ''), reverse=True)
+    
+    return parameter_sets

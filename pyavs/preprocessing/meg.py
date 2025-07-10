@@ -226,6 +226,7 @@ def filter_meg(raw: mne.io.Raw,
               fir_design: str = 'firwin',
               skip_by_annotation: Union[str, list] = 'edge',
               pad: str = 'reflect_limited',
+              causal: bool = False,
               verbose: bool = True) -> mne.io.Raw:
     """
     Apply bandpass filtering to MEG data.
@@ -253,7 +254,8 @@ def filter_meg(raw: mne.io.Raw,
     iir_params : dict, optional
         IIR filter parameters (default: None)
     phase : str, optional
-        Phase of the filter (default: 'zero')
+        Phase of the filter (default: 'zero', 'zero-double', 'minimum')
+        For causal filtering, use 'minimum' 
     fir_window : str, optional
         FIR window function (default: 'hamming')
     fir_design : str, optional
@@ -262,6 +264,9 @@ def filter_meg(raw: mne.io.Raw,
         Annotations to skip (default: 'edge')
     pad : str, optional
         Padding method (default: 'reflect_limited')
+    causal : bool, optional
+        Whether to apply causal filtering (default: False)
+        If True, sets phase='minimum' for causal response
     verbose : bool, optional
         Whether to print progress information (default: True)
         
@@ -269,9 +274,23 @@ def filter_meg(raw: mne.io.Raw,
     -------
     mne.io.Raw
         Filtered raw data
+        
+    Notes
+    -----
+    Causal filtering introduces a phase delay but preserves temporal order,
+    which can be important for real-time applications or when temporal
+    relationships with other signals are critical. Non-causal (zero-phase)
+    filtering provides better frequency response but is not suitable for
+    real-time processing.
     """
-    if verbose:
-        print(f"Applying bandpass filter: {l_freq}-{h_freq} Hz")
+    # Handle causal filtering
+    if causal:
+        phase = 'minimum'
+        if verbose:
+            print(f"Applying causal bandpass filter: {l_freq}-{h_freq} Hz (phase=minimum)")
+    else:
+        if verbose:
+            print(f"Applying bandpass filter: {l_freq}-{h_freq} Hz (phase={phase})")
     
     raw_filtered = raw.copy()
     
@@ -292,6 +311,9 @@ def filter_meg(raw: mne.io.Raw,
         pad=pad,
         verbose=verbose
     )
+    
+    if verbose and causal:
+        print("Note: Causal filtering introduces phase delay but preserves temporal order")
     
     return raw_filtered
 
@@ -506,6 +528,7 @@ def preprocess_meg_block(raw: mne.io.Raw,
                         l_freq: float = 0.2,
                         h_freq: float = 100.0,
                         resample_freq: float = 500.0,
+                        causal_filter: bool = False,
                         bad_channels_file: Optional[str] = None,
                         crosstalk_file: Optional[str] = None,
                         fine_cal_file: Optional[str] = None,
@@ -545,6 +568,9 @@ def preprocess_meg_block(raw: mne.io.Raw,
         High-pass frequency in Hz (default: 100.0)
     resample_freq : float, optional
         Resampling frequency in Hz (default: 500.0)
+    causal_filter : bool, optional
+        Whether to apply causal filtering (default: False)
+        If True, uses minimum-phase filtering which preserves temporal order
     bad_channels_file : str, optional
         Path to bad channels file
     crosstalk_file : str, optional
@@ -601,6 +627,7 @@ def preprocess_meg_block(raw: mne.io.Raw,
             raw_processed,
             l_freq=l_freq,
             h_freq=h_freq,
+            causal=causal_filter,
             verbose=verbose
         )
     

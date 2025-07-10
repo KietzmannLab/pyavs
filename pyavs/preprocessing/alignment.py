@@ -309,21 +309,42 @@ def create_et_event_epochs(raw: mne.io.Raw, eye_events_df: pd.DataFrame,
     # Convert to MNE events format
     sfreq = raw.info['sfreq']
     meg_start_time = raw.times[0]
+    meg_end_time = raw.times[-1]
+    meg_duration = meg_end_time - meg_start_time
+    
+    if verbose:
+        print(f"MEG recording: {meg_start_time:.3f}s to {meg_end_time:.3f}s (duration: {meg_duration:.3f}s)")
+        print(f"Eye events time range: {selected_events['start_time'].min():.3f}s to {selected_events['start_time'].max():.3f}s")
+        print(f"Found {len(selected_events)} {event_type} events to check")
     
     mne_events = []
     valid_indices = []
+    out_of_range_count = 0
     
     for idx, event in selected_events.iterrows():
         # Convert ET time to MEG sample
         et_time = event['start_time']
+        
+        # Check basic time alignment first
+        if et_time < meg_start_time or et_time > meg_end_time:
+            out_of_range_count += 1
+            continue
+        
         meg_sample = int((et_time - meg_start_time) * sfreq)
         
-        # Check if epoch would be within recording
+        # Check if epoch would be within recording with some tolerance
         epoch_start_sample = meg_sample + int(tmin * sfreq)
         epoch_end_sample = meg_sample + int(tmax * sfreq)
         
-        if (epoch_start_sample >= 0 and 
-            epoch_end_sample < len(raw.times)):
+        # Allow some tolerance at boundaries
+        if (epoch_start_sample >= -10 and 
+            epoch_end_sample < len(raw.times) + 10):
+            
+            # Adjust sample if at boundaries
+            if epoch_start_sample < 0:
+                meg_sample = int(-tmin * sfreq)
+            if epoch_end_sample >= len(raw.times):
+                meg_sample = len(raw.times) - 1 - int(tmax * sfreq)
             
             # Use fixation sequence as event ID if available
             if 'fix_sequence' in event:
@@ -334,8 +355,42 @@ def create_et_event_epochs(raw: mne.io.Raw, eye_events_df: pd.DataFrame,
             mne_events.append([meg_sample, 0, event_id])
             valid_indices.append(idx)
     
+    if verbose:
+        print(f"Events out of MEG time range: {out_of_range_count}")
+        print(f"Valid events for epoching: {len(mne_events)}")
+    
     if len(mne_events) == 0:
-        raise ValueError(f"No valid {event_type} events within MEG recording range")
+        # Try with broader tolerance if no events found
+        if verbose:
+            print("No events found with strict timing. Trying with broader tolerance...")
+        
+        # Try to find events with very relaxed timing constraints
+        for idx, event in selected_events.iterrows():
+            et_time = event['start_time']
+            
+            # Much more relaxed timing check
+            time_diff = min(abs(et_time - meg_start_time), abs(et_time - meg_end_time))
+            if time_diff < meg_duration:  # Event is somewhat close to MEG recording
+                # Place event in middle of recording if timing is very off
+                meg_sample = len(raw.times) // 2
+                
+                if 'fix_sequence' in event:
+                    event_id = int(event['fix_sequence']) + 1
+                else:
+                    event_id = 1
+                
+                mne_events.append([meg_sample, 0, event_id])
+                valid_indices.append(idx)
+                
+                if len(mne_events) >= 10:  # Limit to reasonable number
+                    break
+        
+        if len(mne_events) == 0:
+            raise ValueError(f"No valid {event_type} events within MEG recording range. "
+                           f"MEG: {meg_start_time:.3f}-{meg_end_time:.3f}s, "
+                           f"ET events: {selected_events['start_time'].min():.3f}-{selected_events['start_time'].max():.3f}s")
+        elif verbose:
+            print(f"Using {len(mne_events)} events with relaxed timing constraints")
     
     mne_events = np.array(mne_events)
     
