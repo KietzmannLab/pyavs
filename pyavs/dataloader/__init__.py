@@ -14,7 +14,6 @@ from .loaders import (
 
 from .eye import (
     load_and_enrich_eye_events,
-    align_eye_events_with_meg,
     add_fixation_sequence_position,
     add_cross_event_information
 )
@@ -25,7 +24,6 @@ __all__ = [
     'load_scenes', 
     'load_calibration_files',
     'load_and_enrich_eye_events',
-    'align_eye_events_with_meg',
     'add_fixation_sequence_position',
     'add_cross_event_information'
 ]

@@ -69,6 +69,17 @@ def main():
     )
     
     # Now create epochs based on ALIGNED data
+    print("   Creating saccade epochs from aligned data (default)...")
+    saccade_epochs = composer.create_epochs(
+        event_type='saccade',
+        tmin=-0.1,
+        tmax=0.3,
+        baseline=None
+    )
+    
+    print(f"   Created {len(saccade_epochs)} saccade epochs")
+    
+    # Create fixation epochs
     print("   Creating fixation epochs from aligned data...")
     fixation_epochs = composer.create_epochs(
         event_type='fixation',
@@ -79,16 +90,31 @@ def main():
     
     print(f"   Created {len(fixation_epochs)} fixation epochs")
     
-    # Create saccade epochs
-    print("   Creating saccade epochs from aligned data...")
-    saccade_epochs = composer.create_epochs(
-        event_type='saccade',
-        tmin=-0.1,
-        tmax=0.3,
-        baseline=None
-    )
+    # Create scene epochs (scene onset events)
+    print("   Creating scene epochs from aligned data...")
+    try:
+        scene_epochs = composer.create_epochs(
+            event_type='scene',
+            tmin=-0.5,
+            tmax=2.0,
+            baseline=None
+        )
+        print(f"   Created {len(scene_epochs)} scene epochs")
+    except Exception as e:
+        print(f"   Could not create scene epochs: {e}")
     
-    print(f"   Created {len(saccade_epochs)} saccade epochs")
+    # Create blink epochs (if available)
+    print("   Creating blink epochs from aligned data...")
+    try:
+        blink_epochs = composer.create_epochs(
+            event_type='blink',
+            tmin=-0.1,
+            tmax=0.1,
+            baseline=None
+        )
+        print(f"   Created {len(blink_epochs)} blink epochs")
+    except Exception as e:
+        print(f"   Could not create blink epochs: {e}")
     
     # Get alignment summary
     summary = composer.get_data_summary()
@@ -105,7 +131,7 @@ def main():
         # Example 1: Beamformer source reconstruction
         print("\n   4a. Beamformer (LCMV) source reconstruction...")
         source_data_beamformer = pyavs.apply_source_reconstruction(
-            fixation_epochs, 
+            saccade_epochs, 
             forward_model, 
             method='beamformer'
         )
@@ -114,7 +140,7 @@ def main():
         # Example 2: Minimum norm estimate with dSPM (default)
         print("\n   4b. Minimum norm estimate (dSPM) source reconstruction...")
         source_data_dspm = pyavs.apply_source_reconstruction(
-            fixation_epochs, 
+            saccade_epochs, 
             forward_model, 
             method='mne'  # Uses dSPM as default
         )
@@ -183,40 +209,74 @@ def main():
         else:
             print("      No metadata available for population codes")
             
-        # Example 6: Save source data for further analysis
+        # Example 6: Save source data for further analysis (NEW: MNE .fif format)
         print("\n   4f. Saving source reconstruction results...")
-        if len(fixation_epochs) > 0:
+        if len(saccade_epochs) > 0:
             # Create dummy metadata if none exists
-            if not hasattr(fixation_epochs, 'metadata') or fixation_epochs.metadata is None:
+            if not hasattr(saccade_epochs, 'metadata') or saccade_epochs.metadata is None:
                 import pandas as pd
                 metadata = pd.DataFrame({
-                    'epoch_id': range(len(fixation_epochs)),
-                    'event_type': ['fixation'] * len(fixation_epochs)
+                    'epoch_id': range(len(saccade_epochs)),
+                    'event_type': ['saccade'] * len(saccade_epochs)
                 })
             else:
-                metadata = fixation_epochs.metadata
+                metadata = saccade_epochs.metadata
             
-            # Save beamformer results
+            # Save beamformer results in MNE .fif format (recommended)
             beamformer_path = pyavs.save_source_data(
                 source_data_beamformer,
                 metadata,
                 subject_id,
                 session,
-                data_type='beamformer_source_estimates'
+                data_type='beamformer_source_estimates',
+                file_format='fif'  # NEW: Using MNE .fif format
             )
             print(f"      Beamformer data saved to: {beamformer_path}")
             
-            # Save dSPM results
+            # Save dSPM results in MNE .fif format (recommended)
             dspm_path = pyavs.save_source_data(
                 source_data_dspm,
                 metadata,
                 subject_id,
                 session,
-                data_type='dspm_source_estimates'
+                data_type='dspm_source_estimates',
+                file_format='fif'  # NEW: Using MNE .fif format
             )
             print(f"      dSPM data saved to: {dspm_path}")
+            
+            # Also save the epochs themselves in .fif format
+            saccade_epochs_path = pyavs.save_source_data(
+                saccade_epochs,
+                data_type='saccade_epochs'
+            )
+            print(f"      Saccade epochs saved to: {saccade_epochs_path}")
         
         print("   Source reconstruction examples completed successfully!")
+        print("   Data saved in MNE .fif format for better compatibility and performance!")
+        
+        # Example 7: Load saved data (NEW: Demonstrate .fif loading)
+        print("\n   4g. Loading saved source data...")
+        try:
+            # Load beamformer data
+            loaded_beamformer = pyavs.load_source_data(
+                subject_id, session, 
+                data_type='beamformer_source_estimates',
+                file_format='fif'
+            )
+            print(f"      Loaded beamformer data: {type(loaded_beamformer)}")
+            
+            # Load saccade epochs
+            loaded_epochs = pyavs.load_source_data(
+                subject_id, session,
+                data_type='saccade_epochs',
+                file_format='fif'
+            )
+            print(f"      Loaded saccade epochs: {type(loaded_epochs)}")
+            print(f"      Epochs shape: {loaded_epochs.get_data().shape}")
+            
+        except Exception as e:
+            print(f"      Could not load saved data: {e}")
+            print("      This is expected if data saving failed earlier")
         
     except FileNotFoundError:
         print("   Forward model not found - creating a demonstration example...")
@@ -387,14 +447,14 @@ def source_reconstruction_example():
             # Method 3: Minimum norm estimate with MNE
             print("\n3. Minimum norm estimate (MNE) reconstruction...")
             source_data_mne = pyavs.apply_source_reconstruction(
-                epochs, forward_model, method='mne', method='MNE'
+                epochs, forward_model, method='MNE'
             )
             print(f"   MNE source data shape: {source_data_mne.shape}")
             
             # Method 4: Minimum norm estimate with sLORETA
             print("\n4. Minimum norm estimate (sLORETA) reconstruction...")
             source_data_sloreta = pyavs.apply_source_reconstruction(
-                epochs, forward_model, method='mne', method='sLORETA'
+                epochs, forward_model, method='sLORETA'
             )
             print(f"   sLORETA source data shape: {source_data_sloreta.shape}")
             

@@ -233,7 +233,7 @@ def add_fixation_event_triggers(raw: mne.io.Raw, eye_events_df: pd.DataFrame,
 
 
 def create_et_event_epochs(raw: mne.io.Raw, eye_events_df: pd.DataFrame,
-                          event_type: str = 'fixation',
+                          event_type: str = 'saccade',
                           tmin: float = -0.2, tmax: float = 0.8,
                           baseline: Optional[Tuple[float, float]] = None,
                           picks: Optional[Union[str, list]] = 'meg',
@@ -251,7 +251,7 @@ def create_et_event_epochs(raw: mne.io.Raw, eye_events_df: pd.DataFrame,
     eye_events_df : pd.DataFrame
         Eye tracking events dataframe
     event_type : str, optional
-        Type of eye tracking event to use ('fixation', 'saccade') (default: 'fixation')
+        Type of eye tracking event to use ('scene', 'fixation', 'saccade', 'blink') (default: 'saccade')
     tmin : float, optional
         Start time before event in seconds (default: -0.2)
     tmax : float, optional
@@ -274,13 +274,34 @@ def create_et_event_epochs(raw: mne.io.Raw, eye_events_df: pd.DataFrame,
     tuple
         (epochs, events_metadata) - MEG epochs and corresponding event metadata
     """
-    # Filter events by type
-    event_mask = eye_events_df['type'] == event_type
-    if 'recording' in eye_events_df.columns:
-        # Focus on scene viewing events
-        event_mask &= eye_events_df['recording'] == 'scene'
+    # Define valid event types
+    valid_event_types = ['scene', 'fixation', 'saccade', 'blink']
+    if event_type not in valid_event_types:
+        raise ValueError(f"event_type must be one of {valid_event_types}, got '{event_type}'")
     
-    selected_events = eye_events_df[event_mask].copy()
+    # Filter events by type
+    if event_type == 'scene':
+        # For scene events, use trial onset times or scene-related events
+        if 'recording' in eye_events_df.columns:
+            # Use any events during scene viewing as scene events
+            event_mask = eye_events_df['recording'] == 'scene'
+            # Take the first event per trial as scene onset
+            if 'trial' in eye_events_df.columns:
+                selected_events = eye_events_df[event_mask].groupby('trial').first().reset_index()
+            else:
+                event_mask = eye_events_df['recording'] == 'scene'
+                selected_events = eye_events_df[event_mask].copy()
+        else:
+            # Fallback: use first fixation as scene onset
+            event_mask = eye_events_df['type'] == 'fixation'
+            selected_events = eye_events_df[event_mask].copy()
+    else:
+        # For specific event types (fixation, saccade, blink)
+        event_mask = eye_events_df['type'] == event_type
+        if 'recording' in eye_events_df.columns:
+            # Focus on scene viewing events
+            event_mask &= eye_events_df['recording'] == 'scene'
+        selected_events = eye_events_df[event_mask].copy()
     
     if len(selected_events) == 0:
         raise ValueError(f"No {event_type} events found")
@@ -423,7 +444,7 @@ def align_meg_et_timing(raw_meg: mne.io.Raw, eye_events_df: pd.DataFrame,
 
 
 def create_meg_et_annotations(raw: mne.io.Raw, eye_events_df: pd.DataFrame,
-                             event_types: List[str] = ['fixation', 'saccade'],
+                             event_types: List[str] = ['scene', 'fixation', 'saccade', 'blink'],
                              verbose: bool = True) -> mne.Annotations:
     """
     Create MNE annotations from eye tracking events.
@@ -435,7 +456,7 @@ def create_meg_et_annotations(raw: mne.io.Raw, eye_events_df: pd.DataFrame,
     eye_events_df : pd.DataFrame
         Eye tracking events dataframe
     event_types : list of str, optional
-        Types of eye tracking events to include (default: ['fixation', 'saccade'])
+        Types of eye tracking events to include (default: ['scene', 'fixation', 'saccade', 'blink'])
     verbose : bool, optional
         Whether to print annotation information (default: True)
         
@@ -956,7 +977,7 @@ class MEGETComposer:
         
         return raw_annotated
     
-    def create_epochs(self, event_type: str = 'fixation',
+    def create_epochs(self, event_type: str = 'saccade',
                      tmin: float = -0.2, tmax: float = 0.5,
                      baseline: Optional[Tuple[float, float]] = None) -> mne.Epochs:
         """
@@ -966,7 +987,7 @@ class MEGETComposer:
         Parameters
         ----------
         event_type : str, optional
-            Type of events to epoch ('fixation', 'saccade', or 'all')
+            Type of events to epoch ('scene', 'fixation', 'saccade', 'blink', or 'all') (default: 'saccade')
         tmin : float, optional
             Start time before event onset in seconds (default: -0.2)
         tmax : float, optional
