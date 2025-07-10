@@ -472,13 +472,44 @@ def source_reconstruction_example():
         # Still set the path for the example to proceed
         pyavs.set_data_path(data_path)
     
-    # Load preprocessed data
-    subject_data = pyavs.load_and_preprocess(subject_id, session)
-    
-    # Create epochs
-    epochs, events = pyavs.get_epochs(
-        subject_data, 'fixation', 'meg', block=1
+    # Load preprocessed data with specific blocks
+    subject_data = pyavs.load_and_preprocess(
+        subject_id, session, 
+        blocks=[1, 2, 3]  # Load specific blocks to ensure proper structure
     )
+    
+    # Check available MEG data structure and create epochs accordingly
+    print(f"MEG data structure: {type(subject_data.get('meg_data', 'None'))}")
+    
+    if isinstance(subject_data.get('meg_data'), dict):
+        available_blocks = list(subject_data['meg_data'].keys())
+        print(f"Available MEG blocks: {available_blocks}")
+        
+        if available_blocks:
+            # Use the first available block
+            first_block_key = available_blocks[0]
+            if 'block_' in first_block_key:
+                block_num = int(first_block_key.split('_')[1])
+                print(f"Using block {block_num} for epoch creation")
+                epochs, events = pyavs.get_epochs(
+                    subject_data, 'fixation', 'meg', block=block_num
+                )
+            else:
+                print("Using non-block-specific MEG data")
+                # For non-block data, don't specify block parameter
+                epochs, events = pyavs.get_epochs(
+                    subject_data, 'fixation', 'meg'
+                )
+        else:
+            raise Exception("No MEG data blocks available")
+    elif hasattr(subject_data.get('meg_data'), 'info'):
+        # Single raw object, not block-based
+        print("Using single MEG raw object for epoch creation")
+        epochs, events = pyavs.get_epochs(
+            subject_data, 'fixation', 'meg'
+        )
+    else:
+        raise Exception("MEG data format not recognized")
     
     if len(epochs) > 0:
         print(f"Created {len(epochs)} epochs for source reconstruction")

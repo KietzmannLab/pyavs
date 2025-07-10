@@ -19,7 +19,8 @@ from .reconstruction import (
 from .forward import (
     create_forward_model,
     create_bem_model,
-    setup_coregistration
+    setup_coregistration,
+    load_forward_model
 )
 
 from .spaces import (
@@ -41,6 +42,7 @@ __all__ = [
     'create_forward_model',
     'create_bem_model',
     'setup_coregistration',
+    'load_forward_model',
     'create_source_space',
     'setup_volume_source_space',
     'get_roi_labels',

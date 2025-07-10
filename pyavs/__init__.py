@@ -185,12 +185,22 @@ def get_epochs(subject_data, event_type, sensor_type, tmin=-0.2, tmax=0.5,
         
         # Get MEG data
         meg_data = subject_data['meg_data']
-        if isinstance(meg_data, dict) and block is not None:
-            # Use specific block
-            block_key = f'block_{block}'
-            if block_key not in meg_data:
-                raise ValueError(f"Block {block} not found in MEG data")
-            raw_meg = meg_data[block_key]
+        if isinstance(meg_data, dict):
+            if block is not None:
+                # Use specific block
+                block_key = f'block_{block}'
+                if block_key not in meg_data:
+                    available_blocks = list(meg_data.keys())
+                    raise ValueError(f"Block {block} not found in MEG data. Available blocks: {available_blocks}")
+                raw_meg = meg_data[block_key]
+            else:
+                # No block specified - use the first available block
+                available_blocks = list(meg_data.keys())
+                if not available_blocks:
+                    raise ValueError("No MEG data blocks available")
+                first_block = available_blocks[0]
+                print(f"No block specified, using first available block: {first_block}")
+                raw_meg = meg_data[first_block]
         elif hasattr(meg_data, 'info'):
             # Single raw object
             raw_meg = meg_data
