@@ -122,9 +122,9 @@ class AVSComposer:
         self.stim_channel = stim_channel
         self.verbose = verbose
         self.sub_sess_id = 'as' + str(self.subject).zfill(2) + self.session
-        self.session_dir = os.path.join(self.data_dir, self.sub_sess_id)
-        self.prepro_dir = os.path.join(self.data_dir, self.sub_sess_id, 'prepro')
-        self.subject_dir = os.path.join(self.data_dir, 'as' + str(self.subject).zfill(2))
+        self.session_dir = os.path.join(self.data_dir, 'rawdir', self.sub_sess_id)
+        self.prepro_dir = os.path.join(self.data_dir, 'rawdir', self.sub_sess_id, 'prepro')
+        self.subject_dir = os.path.join(self.data_dir, 'rawdir', 'as' + str(self.subject).zfill(2))
         self.write_output = write_output
         self.preprocessed = preprocessed
         self.recompute_prepro = recompute_prepro
@@ -396,7 +396,7 @@ class AVSComposer:
         h_freq: float,
         picks=None,
         causal: bool = True,
-        concatenated: Optional[bool] = None
+        concatenated: Optional[bool] = False
     ):
         """
         Applies lowpass and/or highpass filters to the MEG data.
@@ -426,6 +426,7 @@ class AVSComposer:
         
         if not concatenated:
             # Filter the data per block
+            print("Filtering data per block")
             for block in self.raws_dict.keys():
                 self.raws_dict[block].filter(
                     l_freq=l_freq,
@@ -439,6 +440,7 @@ class AVSComposer:
                 # We add an attribute that tells us that the data has been filtered
                 self.raws_dict[block].filtered = True
         else:
+            print("Filtering concatenated data")
             # Filter the concatenated data
             self.raws_concatenated.filter(
                 l_freq=l_freq,
@@ -557,7 +559,7 @@ class AVSComposer:
     def get_et_annotations(
         self,
         et_event_types: List[str] = ["fixation", "saccade"],
-        recording: str = "scene",
+        recordings = ["scene"],
         exclude_last_fixation: bool = True,
         get_object_labels: bool = False,
         add_cross_event_info: bool = True,
@@ -775,6 +777,7 @@ class AVSComposer:
         for et_event_type in self.et_event_types:
             # Preload the epochs object so that we can compute its length
             events_df_for_metadata = self.et_events[self.et_events["type"] == et_event_type]
+            events_df_for_metadata = events_df_for_metadata[events_df_for_metadata["recording"] == self.recording]
             events_df_for_metadata = events_df_for_metadata[events_df_for_metadata["block"].isin(self.blocks_this_session)]
             
             if metadata_colnames is None:
@@ -785,6 +788,10 @@ class AVSComposer:
                 print("len events_df_for_metadata: " + str(len(events_df_for_metadata)))
                 print("len epochs: " + str(len(self.et_epochs[et_event_type])))
                 print(np.unique(events_df_for_metadata.block))
+                print(np.unique(events_df_for_metadata.type))
+                print(np.unique(events_df_for_metadata.recording))
+                # add some diagnostic prints
+            
                 raise ValueError("The amount of events in the events dataframe and the epochs object are not the same. This should not happen. Please check your data.")
             else:
                 # Check 2) now we will check whether the event durations are identical

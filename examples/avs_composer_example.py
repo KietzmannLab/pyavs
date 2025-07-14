@@ -32,25 +32,23 @@ def main():
     
     # Initialize AVS Composer
     print("\n1. Initializing AVS Composer...")
-    try:
-        composer = pyavs.AVSComposer(
-            subject=subject_id,
-            session_num=session,
-            data_dir=data_path,
-            output_dir=data_path,
-            et_dir=data_path,
-            preprocessed=True,
-            recompute_prepro=False,
-            max_block=3,  # Process only first 3 blocks for demonstration
-            min_block=1,
-            verbose=True,
-            interpolate_bad_channels=True
-        )
-        print(f"   ✓ AVS Composer initialized for subject {subject_id}, session {session}")
-        print(f"   ✓ Selected blocks: {composer.blocks_this_session}")
-    except Exception as e:
-        print(f"   Error initializing AVS Composer: {e}")
-        return
+
+    composer = pyavs.AVSComposer(
+        subject=subject_id,
+        session_num=session,
+        data_dir=data_path,
+        output_dir=data_path,
+        et_dir=data_path,
+        preprocessed=True,
+        recompute_prepro=False,
+        max_block=3,  # Process only first 3 blocks for demonstration
+        min_block=1,
+        verbose=True,
+        interpolate_bad_channels=True
+    )
+    print(f"   ✓ AVS Composer initialized for subject {subject_id}, session {session}")
+    print(f"   ✓ Selected blocks: {composer.blocks_this_session}")
+
     
     # Load MEG data
     print("\n2. Loading MEG data...")
@@ -65,7 +63,7 @@ def main():
     # Filter MEG data
     print("\n3. Filtering MEG data...")
     try:
-        composer.filter_meg_data(l_freq=0.1, h_freq=40.0, causal=False)
+        composer.filter_meg_data(l_freq=0.2, h_freq=40.0, causal=True)
         print("   ✓ Applied 0.1-40 Hz band-pass filter")
     except Exception as e:
         print(f"   Error filtering MEG data: {e}")
@@ -182,4 +180,4 @@ if __name__ == "__main__":
     main()
     
     # Run minimal example
-    minimal_composer_example()
+    #minimal_composer_example()

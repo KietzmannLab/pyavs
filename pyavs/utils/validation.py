@@ -9,7 +9,7 @@ import pandas as pd
 from typing import List, Union, Optional, Dict, Any
 
 
-def validate_subject_id(subject_id: int) -> None:
+def validate_subject_id(subject_id: int) -> int:
     """
     Validate subject ID.
     
@@ -28,9 +28,11 @@ def validate_subject_id(subject_id: int) -> None:
     
     if subject_id < 1:
         raise ValueError(f"Subject ID must be positive, got {subject_id}")
+    
+    return subject_id
 
 
-def validate_session(session: int) -> None:
+def validate_session(session: int) -> int:
     """
     Validate session number.
     
@@ -50,6 +52,7 @@ def validate_session(session: int) -> None:
     if session < 1:
         raise ValueError(f"Session must be positive, got {session}")
 
+    return session
 
 def validate_blocks(blocks: Optional[Union[int, List[int]]], session: int) -> List[int]:
     """

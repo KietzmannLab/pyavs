@@ -57,6 +57,7 @@ def get_avs_blocks(session_num: int, lower_bound: Optional[int] = None,
         Array of all avs blocks in the requested session
     """
     # Based on the session number we can compute the block numbers for this session
+    print("Computing blocks for session", session_num)
     if session_num == 1:
         min_block_this_session = 1
         max_block_this_session = 10
@@ -78,6 +79,7 @@ def get_avs_blocks(session_num: int, lower_bound: Optional[int] = None,
         (blocks_this_session >= lower_bound_this_session) & 
         (blocks_this_session <= upper_bound_this_session)
     ]
+    print("Blocks in session", session_num, ":", blocks_this_session_sel) if verbose else None
     return blocks_this_session_sel
 
 
