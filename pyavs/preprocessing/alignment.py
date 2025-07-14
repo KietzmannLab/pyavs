@@ -16,6 +16,7 @@ from ..dataloader.meg import load_meg_session
 from ..dataloader.eye import load_and_enrich_eye_events
 from ..utils.validation import validate_subject_id, validate_session
 from ..utils.paths import get_max_blocks
+from .trigger_tools import get_meg_trigger_dict, get_avs_blocks, repair_meg_trigger_events as repair_meg_trigger_events_legacy
 
 
 def get_meg_trigger_mapping() -> Dict[str, int]:
@@ -27,20 +28,7 @@ def get_meg_trigger_mapping() -> Dict[str, int]:
     dict
         Dictionary mapping trigger names to codes
     """
-    return {
-        'scene_on': 100,
-        'scene_off': 101,
-        'fixcross_on': 90,
-        'fixcross_off': 91,
-        'mic_on': 110,
-        'mic_off': 111,
-        'caption_on': 112,
-        'caption_off': 113,
-        'calibration_start': 120,
-        'calibration_end': 121,
-        'start_exp': 98,
-        'end_exp': 99
-    }
+    return get_meg_trigger_dict()
 
 
 def repair_meg_trigger_events(events: np.ndarray, session: int,
@@ -71,93 +59,13 @@ def repair_meg_trigger_events(events: np.ndarray, session: int,
     np.ndarray
         Repaired events array
     """
-    from ..utils.paths import get_max_blocks
-    
-    events_repaired = events.copy()
-    meg_trigger_dict = get_meg_trigger_mapping()
-    
-    # Get blocks for this session
-    if session == 1:
-        min_block = 1
-        max_block = 10
-    else:
-        min_block = 11 + (session - 2) * 14
-        max_block = min_block + 13
-    
-    blocks_this_session = np.arange(min_block, max_block + 1)
-    
-    if verbose:
-        print(f"Repairing triggers for session {session}, blocks: {blocks_this_session}")
-    
-    # Calculate affected block triggers
-    block_triggers_this_session = blocks_this_session + initial_block_trigger_offset
-    
-    # Handle trigger values > 127 (reset to 1)
-    blocks_mask = block_triggers_this_session > 127
-    block_triggers_this_session[blocks_mask] = block_triggers_this_session[blocks_mask] - 128
-    
-    # Store timestamps of corrupted triggers
-    corrupt_timestamps = []
-    for block_trigger in block_triggers_this_session:
-        if verbose:
-            print(f"Processing block trigger {block_trigger}")
-        
-        # Get all events with that trigger
-        events_with_block_trigger = events[events[:, 2] == block_trigger]
-        
-        if block_trigger <= 30:
-            # Handle overlap between corrupted block trigger and trial trigger
-            scene_onset_indices = np.where(events_with_block_trigger[:, 1] == meg_trigger_dict['scene_on'])[0]
-            
-            if verbose:
-                print(f"Scene onset indices: {len(scene_onset_indices)}")
-            
-            corrupt_timestamps_this_block = list(events_with_block_trigger[scene_onset_indices, 0])
-            if len(corrupt_timestamps_this_block) > 1:
-                corrupt_timestamps_this_block.pop(block_trigger - 1)
-            
-            corrupt_timestamps.append(corrupt_timestamps_this_block)
-            continue
-        
-        if block_trigger in meg_trigger_dict.values():
-            # Handle overlap between corrupted block trigger and MEG trigger
-            if block_trigger == meg_trigger_dict['mic_on']:
-                corrupt_timestamp_indices = np.where(events_with_block_trigger[:, 1] == 100)[0]
-                corrupt_timestamps.append(list(events_with_block_trigger[corrupt_timestamp_indices, 0]))
-            else:
-                corrupt_timestamp_indices = np.where(events_with_block_trigger[:, 1] != 0)[0]
-                corrupt_timestamps.append(list(events_with_block_trigger[corrupt_timestamp_indices, 0]))
-        else:
-            # No overlap with other triggers
-            corrupt_timestamps.append(list(events_with_block_trigger[:, 0]))
-    
-    # Flatten timestamps list
-    corrupt_timestamps_flat = [item for sublist in corrupt_timestamps for item in sublist]
-    
-    # Get indices of events to modify
-    corrupt_timestamps_indices = np.where(np.isin(events[:, 0], corrupt_timestamps_flat))[0]
-    
-    # Apply corrections based on session
-    if session == 6:
-        too_low_ids = events[corrupt_timestamps_indices, 2] < blocks_this_session[0]
-        if verbose:
-            print(f"Events with trigger values too low: {np.sum(too_low_ids)}")
-        additional_offset = too_low_ids * 128
-        events_repaired[corrupt_timestamps_indices, 2] = events[corrupt_timestamps_indices, 2] + new_block_trigger_offset + additional_offset
-    elif session > 6:
-        events_repaired[corrupt_timestamps_indices, 2] = events[corrupt_timestamps_indices, 2] + new_block_trigger_offset + 128
-    else:
-        events_repaired[corrupt_timestamps_indices, 2] = events[corrupt_timestamps_indices, 2] + new_block_trigger_offset
-    
-    # Remove initial block trigger offset
-    events_repaired[corrupt_timestamps_indices, 2] = events_repaired[corrupt_timestamps_indices, 2] - initial_block_trigger_offset
-    
-    # Update subsequent event trigger references
-    subsequent_indices = corrupt_timestamps_indices + 1
-    trigger_values = events_repaired[corrupt_timestamps_indices, 2]
-    events_repaired[subsequent_indices, 1] = trigger_values
-    
-    return events_repaired
+    return repair_meg_trigger_events_legacy(
+        events=events,
+        session=session,
+        new_block_trigger_offset=new_block_trigger_offset,
+        initial_block_trigger_offset=initial_block_trigger_offset,
+        verbose=verbose
+    )
 
 
 def create_et_event_epochs(raw: mne.io.Raw, eye_events_df: pd.DataFrame,
