@@ -53,6 +53,14 @@ class AVSComposer:
         verbose: bool = True,
         write_output: bool = True,
         interpolate_bad_channels: bool = True,
+        apply_ica: bool = False,
+        use_precomputed_ica: bool = False,
+        ica_solutions_dir: Optional[str] = None,
+        ica_exclusions_file: Optional[str] = None,
+        l_freq: float = 0.2,
+        h_freq: float = 100.0,
+        resample_freq: float = 500.0,
+        causal_filter: bool = False,
         n_jobs: int = 1,
         random_state: int = 42
     ):
@@ -91,6 +99,22 @@ class AVSComposer:
             Whether to write output to file. Defaults to True.
         interpolate_bad_channels : bool, optional
             Whether to interpolate bad channels. Defaults to True.
+        apply_ica : bool, optional
+            Whether to apply ICA for artifact removal during preprocessing. Defaults to False.
+        use_precomputed_ica : bool, optional
+            Whether to use precomputed ICA solution instead of computing new one. Defaults to False.
+        ica_solutions_dir : str, optional
+            Path to directory containing precomputed ICA solutions. Defaults to None.
+        ica_exclusions_file : str, optional
+            Path to JSON file containing ICA component exclusions. Defaults to None.
+        l_freq : float, optional
+            Low-pass frequency in Hz for filtering. Defaults to 0.2.
+        h_freq : float, optional
+            High-pass frequency in Hz for filtering. Defaults to 100.0.
+        resample_freq : float, optional
+            Target sampling frequency in Hz for resampling. Defaults to 500.0.
+        causal_filter : bool, optional
+            Whether to apply causal filtering (preserves temporal order). Defaults to False.
         n_jobs : int, optional
             The number of parallel jobs to run. Defaults to 1.
         random_state : int, optional
@@ -129,6 +153,14 @@ class AVSComposer:
         self.preprocessed = preprocessed
         self.recompute_prepro = recompute_prepro
         self.interpolate_bad_channels = interpolate_bad_channels
+        self.apply_ica = apply_ica
+        self.use_precomputed_ica = use_precomputed_ica
+        self.ica_solutions_dir = ica_solutions_dir
+        self.ica_exclusions_file = ica_exclusions_file
+        self.l_freq = l_freq
+        self.h_freq = h_freq
+        self.resample_freq = resample_freq
+        self.causal_filter = causal_filter
         self.n_jobs = n_jobs
         self.random_state = random_state
         
@@ -268,6 +300,14 @@ class AVSComposer:
                             subject_id=self.subject,
                             session=self.session_num,
                             block=block,
+                            apply_ica=self.apply_ica,
+                            use_precomputed_ica=self.use_precomputed_ica,
+                            ica_solutions_dir=self.ica_solutions_dir,
+                            ica_exclusions_file=self.ica_exclusions_file,
+                            l_freq=self.l_freq,
+                            h_freq=self.h_freq,
+                            resample_freq=self.resample_freq,
+                            causal_filter=self.causal_filter,
                             verbose=self.verbose
                         )
                     except Exception as e:
@@ -391,10 +431,10 @@ class AVSComposer:
 
     def filter_meg_data(
         self,
-        l_freq: float,
-        h_freq: float,
+        l_freq: Optional[float] = None,
+        h_freq: Optional[float] = None,
         picks=None,
-        causal: bool = True,
+        causal: Optional[bool] = None,
         concatenated: Optional[bool] = False
     ):
         """
@@ -402,21 +442,54 @@ class AVSComposer:
 
         Parameters
         ----------
-        l_freq : float
-            The lower frequency cutoff for the filter.
-        h_freq : float
-            The higher frequency cutoff for the filter.
+        l_freq : float, optional
+            The lower frequency cutoff for the filter. If None, uses instance variable.
+        h_freq : float, optional
+            The higher frequency cutoff for the filter. If None, uses instance variable.
         picks : list or None, optional
             The indices of the channels to filter. If None, all channels are filtered.
         causal : bool, optional
-            Whether to use a causal filter (True) or a non-causal filter (False). Default is True.
+            Whether to use a causal filter. If None, uses instance variable.
         concatenated : bool or None, optional
             Whether to use the concatenated data for filtering. If None, it uses the concatenated data if available, otherwise it uses the data per block.
+            
+        Notes
+        -----
+        WARNING: If recompute_prepro=True was used during initialization, the data may already be filtered 
+        by preprocess_meg_block. This method should only be used for additional filtering or when 
+        recompute_prepro=False.
         """
         from .meg import filter_meg
         
+        # Use instance variables as defaults
+        if l_freq is None:
+            l_freq = self.l_freq
+        if h_freq is None:
+            h_freq = self.h_freq
+        if causal is None:
+            causal = self.causal_filter
+        
         if self.verbose:
             print('Filtering data for subject', self.subject, 'session', self.session)
+            
+        # Check if data is already filtered by examining MNE info
+        if concatenated and hasattr(self, 'raws_concatenated'):
+            raw_to_check = self.raws_concatenated
+        elif self.raws_dict:
+            raw_to_check = list(self.raws_dict.values())[0]
+        else:
+            raw_to_check = None
+            
+        if raw_to_check and self.verbose:
+            # Check for existing filters in MNE info
+            if raw_to_check.info.get('lowpass') is not None:
+                print(f'   Data already has lowpass filter at {raw_to_check.info["lowpass"]} Hz')
+            if raw_to_check.info.get('highpass') is not None:
+                print(f'   Data already has highpass filter at {raw_to_check.info["highpass"]} Hz')
+            
+            # Additional warning if recompute_prepro was used
+            if self.recompute_prepro:
+                print('   WARNING: Data may already be filtered by preprocess_meg_block during initialization')
         
         # Check if raws have already been concatenated
         if concatenated is None:
@@ -452,16 +525,26 @@ class AVSComposer:
             # We add an attribute that tells us that the data has been filtered
             self.raws_concatenated.filtered = True
 
-    def resample_meg_data(self, target_sfreq: float):
+    def resample_meg_data(self, target_sfreq: Optional[float] = None):
         """
         Resamples the MEG data to the target sampling frequency using pyAVS resample_meg function.
 
         Parameters
         ----------
-        target_sfreq : float
-            The target sampling frequency in Hz.
+        target_sfreq : float, optional
+            The target sampling frequency in Hz. If None, uses instance variable.
+            
+        Notes
+        -----
+        WARNING: If recompute_prepro=True was used during initialization, the data may already be resampled 
+        by preprocess_meg_block. This method should only be used for additional resampling or when 
+        recompute_prepro=False.
         """
         from .meg import resample_meg
+        
+        # Use instance variable as default
+        if target_sfreq is None:
+            target_sfreq = self.resample_freq
         
         # Check if current sampling frequency is equal to target sampling frequency
         if self.raws_dict[list(self.raws_dict.keys())[0]].info['sfreq'] == target_sfreq:
@@ -477,6 +560,15 @@ class AVSComposer:
 
         if self.verbose:
             print('Resampling data for subject', self.subject, 'session', self.session)
+            
+            # Check current sampling frequency from MNE info
+            current_sfreq = self.raws_dict[list(self.raws_dict.keys())[0]].info['sfreq']
+            print(f'   Current sampling frequency: {current_sfreq} Hz')
+            print(f'   Target sampling frequency: {target_sfreq} Hz')
+            
+            # Additional warning if recompute_prepro was used
+            if self.recompute_prepro:
+                print('   WARNING: Data may already be resampled by preprocess_meg_block during initialization')
         
         # Check if raws have already been concatenated
         concatenated = hasattr(self, 'raws_concatenated')

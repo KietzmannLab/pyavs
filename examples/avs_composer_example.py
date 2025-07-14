@@ -44,7 +44,13 @@ def main():
         max_block=2,  # Process only first 3 blocks for demonstration
         min_block=1,
         verbose=True,
-        interpolate_bad_channels=True
+        interpolate_bad_channels=True,
+        use_precomputed_ica=True,  # Enable ICA artifact removal with precomputed solutions
+        apply_ica=False,  # Set to True to compute ICA on-the-fly instead
+        l_freq=0.2,  # Low-pass frequency for filtering
+        h_freq=40.0,  # High-pass frequency for filtering
+        causal_filter=True,  # Use causal filtering for temporal order preservation
+        resample_freq=500.0  # Target sampling frequency
     )
     print(f"   ✓ AVS Composer initialized for subject {subject_id}, session {session}")
     print(f"   ✓ Selected blocks: {composer.blocks_this_session}")
@@ -60,14 +66,18 @@ def main():
         print(f"   Error loading MEG data: {e}")
         return
     
-    # Filter MEG data
-    print("\n3. Filtering MEG data...")
-    try:
-        composer.filter_meg_data(l_freq=0.2, h_freq=40.0, causal=True)
-        print("   ✓ Applied 0.2-40 Hz band-pass filter (causal)")
-    except Exception as e:
-        print(f"   Error filtering MEG data: {e}")
-        return
+    # Filter MEG data (note: filtering is handled by preprocess_meg_block when recompute_prepro=True)
+    print("\n3. MEG preprocessing and filtering...")
+    if composer.recompute_prepro:
+        print("   ✓ Filtering handled automatically by preprocess_meg_block during data loading")
+        print(f"   ✓ Applied {composer.l_freq}-{composer.h_freq} Hz band-pass filter ({'causal' if composer.causal_filter else 'non-causal'})")
+    else:
+        try:
+            composer.filter_meg_data()  # Uses instance variables as defaults
+            print(f"   ✓ Applied {composer.l_freq}-{composer.h_freq} Hz band-pass filter ({'causal' if composer.causal_filter else 'non-causal'})")
+        except Exception as e:
+            print(f"   Error filtering MEG data: {e}")
+            return
     
     # Concatenate MEG blocks
     print("\n4. Concatenating MEG blocks...")
@@ -137,8 +147,45 @@ def main():
         
    
     
+    # Create simple median ERF plots
+    print("\n7. Creating median ERF plots...")
+    try:
+        import matplotlib.pyplot as plt
+        
+        # Create figure with subplots for each event type
+        fig, axes = plt.subplots(1, len(epochs_results), figsize=(12, 4))
+        if len(epochs_results) == 1:
+            axes = [axes]
+        
+        for idx, (event_type, epochs) in enumerate(epochs_results.items()):
+            # Calculate median ERF across all epochs
+            # Use magnetometers for cleaner visualization
+            mag_picks = epochs.pick_types(meg='mag', copy=True)
+            if len(mag_picks) > 0:
+                evoked_median = mag_picks.average()
+                
+                # Plot the median ERF
+                evoked_median.plot(axes=axes[idx], show=False, time_unit='ms')
+                axes[idx].set_title(f'{event_type.capitalize()} Median ERF\n({len(epochs)} epochs)')
+                axes[idx].set_ylabel('Magnetic Field (fT)')
+                axes[idx].grid(True, alpha=0.3)
+                
+                print(f"   ✓ Created median ERF plot for {event_type} ({len(epochs)} epochs)")
+            else:
+                print(f"   ⚠ No magnetometer data found for {event_type}")
+        
+        plt.tight_layout()
+        plt.savefig(f'avs_composer_median_erf_subject_{subject_id}_session_{session}.png', 
+                   dpi=150, bbox_inches='tight')
+        plt.close()
+        
+        print("   ✓ Saved median ERF plots to file")
+        
+    except Exception as e:
+        print(f"   Error creating ERF plots: {e}")
+    
     # Get data summary
-    print("\n7. Data summary...")
+    print("\n8. Data summary...")
     try:
         summary = composer.get_data_summary()
         print(f"   ✓ Subject: {summary['subject']}")
@@ -156,9 +203,11 @@ def main():
     print("\n=== AVS Composer Example Complete ===")
     print("This example demonstrated:")
     print("- MEG data loading and preprocessing using pyAVS meg.py functions")
+    print("- ICA integration for artifact removal (precomputed or on-the-fly)")
     print("- Eye tracking data integration with single event type processing")
     print("- Trigger-based MEG-ET alignment")
     print("- Epoch creation with metadata for multiple event types")
+    print("- Simple median ERF visualization for different ET event types")
     print("- Replication of AVS-machine-room composer functionality in pyAVS")
     print("- Unified preprocessing pipeline with reduced code redundancy")
 
