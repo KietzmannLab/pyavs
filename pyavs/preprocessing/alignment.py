@@ -12,7 +12,7 @@ import mne
 from typing import List, Optional, Tuple, Dict, Any, Union
 from datetime import timedelta
 
-from ..dataloader.meg import load_meg_session, load_meg_events
+from ..dataloader.meg import load_meg_events, load_meg_session
 from ..dataloader.eye import load_and_enrich_eye_events
 from ..utils.validation import validate_subject_id, validate_session
 from ..utils.paths import get_max_blocks
@@ -358,7 +358,7 @@ def create_et_event_epochs(raw: mne.io.Raw, eye_events_df: pd.DataFrame,
     if len(mne_events) == 0:
         raise ValueError("No valid fixation events within MEG recording range after applying AVS composer approach")
     
-    mne_events = np.array(mne_events)
+    mne_events = np.array(mne_events, dtype=np.int64)
     
     # Create event ID mapping
     unique_event_ids = np.unique(mne_events[:, 2])
@@ -508,20 +508,22 @@ class MEGETComposer:
             Dictionary mapping block numbers to Raw objects
         """
         if self.blocks is None:
-            max_blocks = get_max_blocks(self.subject_id, self.session)
+            max_blocks = get_max_blocks(self.session)
             self.blocks = list(range(1, max_blocks + 1))
         
         meg_data = {}
         for block in self.blocks:
             try:
-                raw = load_meg_session(
-                    self.subject_id, self.session, block,
-                    data_dir=self.data_dir,
+                raw_dict = load_meg_session(
+                    self.subject_id, self.session, 
+                    runs=[block],
+                    data_path=self.data_dir,
                     preload=preload
                 )
-                meg_data[block] = raw
-                if self.verbose:
-                    print(f"Loaded MEG block {block}: {raw.info['nchan']} channels, {len(raw.times)} samples")
+                if block in raw_dict:
+                    meg_data[block] = raw_dict[block]
+                    if self.verbose:
+                        print(f"Loaded MEG block {block}: {raw_dict[block].info['nchan']} channels, {len(raw_dict[block].times)} samples")
             except Exception as e:
                 if self.verbose:
                     print(f"Failed to load MEG block {block}: {e}")

@@ -181,7 +181,7 @@ def get_epochs(subject_data, event_type, sensor_type, tmin=-0.2, tmax=0.5,
         if data_path_val is None:
             raise ValueError("No data path configured. Use set_data_path() first")
             
-        composer = MEGETComposer(subject_id_val, session_val, data_path_val)
+        composer = MEGETComposer(subject_id_val, session_val, data_path_val, data_path_val)
         
         # Get MEG data
         meg_data = subject_data['meg_data']
