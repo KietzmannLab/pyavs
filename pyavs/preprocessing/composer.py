@@ -559,7 +559,7 @@ class AVSComposer:
     def get_et_annotations(
         self,
         et_event_types: List[str] = ["fixation", "saccade"],
-        recordings = ["scene"],
+        recording = "scene",
         exclude_last_fixation: bool = True,
         get_object_labels: bool = False,
         add_cross_event_info: bool = True,
@@ -600,7 +600,13 @@ class AVSComposer:
             preprocessed=preprocessed,
             fix_multi_saccades=True
         )
-        
+        # subselect the recording context 
+        if self.verbose:
+            print('Subselecting eye tracking events for recording context:', recording)
+        assert recording in ["scene", "caption", "microphone"], "Invalid recording context"
+        self.et_events = self.et_events[self.et_events["recording"] == recording]
+        if self.et_events.empty:
+            raise ValueError(f"No eye tracking events found for recording context '{recording}' in subject {self.subject}, session {self.session_num}")
         if add_cross_event_info:
             self.et_events = add_cross_event_information(self.et_events, verbose=self.verbose)
 
@@ -777,7 +783,7 @@ class AVSComposer:
         for et_event_type in self.et_event_types:
             # Preload the epochs object so that we can compute its length
             events_df_for_metadata = self.et_events[self.et_events["type"] == et_event_type]
-            events_df_for_metadata = events_df_for_metadata[events_df_for_metadata["recording"] == self.recording]
+          
             events_df_for_metadata = events_df_for_metadata[events_df_for_metadata["block"].isin(self.blocks_this_session)]
             
             if metadata_colnames is None:

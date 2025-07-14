@@ -41,7 +41,7 @@ def main():
         et_dir=data_path,
         preprocessed=True,
         recompute_prepro=False,
-        max_block=3,  # Process only first 3 blocks for demonstration
+        max_block=2,  # Process only first 3 blocks for demonstration
         min_block=1,
         verbose=True,
         interpolate_bad_channels=True
@@ -94,43 +94,38 @@ def main():
     
     # Get eye tracking annotations
     print("\n6. Processing eye tracking data...")
-    try:
-        composer.get_et_annotations(
-            et_event_types=["fixation", "saccade"],
-            exclude_last_fixation=True,
-            add_cross_event_info=True,
-            preprocessed=True
-        )
-        print(f"   ✓ Loaded {len(composer.et_events)} eye tracking events")
-        print(f"   ✓ Added eye tracking annotations to MEG data")
-        print(f"   ✓ Annotations: {len(composer.raws_annotated.annotations)}")
-    except Exception as e:
-        print(f"   Error processing eye tracking data: {e}")
-        return
-    
+
+    composer.get_et_annotations(
+        et_event_types=["fixation", "saccade"],
+        exclude_last_fixation=True,
+        add_cross_event_info=True,
+        preprocessed=True
+    )
+    print(f"   ✓ Loaded {len(composer.et_events)} eye tracking events")
+    print(f"   ✓ Added eye tracking annotations to MEG data")
+    print(f"   ✓ Annotations: {len(composer.raws_annotated.annotations)}")
+  
     # Create epochs
     print("\n7. Creating epochs...")
-    try:
-        composer.make_et_event_epochs(
-            tmin=-0.2,
-            tmax=0.8,
-            event_types=["fixation", "saccade"],
-            get_metadata=True,
-            baseline=None
-        )
+  
+    composer.make_et_event_epochs(
+        tmin=-0.2,
+        tmax=0.8,
+        event_types=["fixation", "saccade"],
+        get_metadata=True,
+        baseline=None
+    )
+    
+    for event_type in ["fixation", "saccade"]:
+        n_epochs = len(composer.et_epochs[event_type])
+        print(f"   ✓ Created {n_epochs} {event_type} epochs")
         
-        for event_type in ["fixation", "saccade"]:
-            n_epochs = len(composer.et_epochs[event_type])
-            print(f"   ✓ Created {n_epochs} {event_type} epochs")
-            
-            # Show some metadata columns
-            if hasattr(composer.et_epochs[event_type], 'metadata') and composer.et_epochs[event_type].metadata is not None:
-                metadata_cols = list(composer.et_epochs[event_type].metadata.columns)[:5]
-                print(f"   ✓ Metadata columns (first 5): {metadata_cols}")
+        # Show some metadata columns
+        if hasattr(composer.et_epochs[event_type], 'metadata') and composer.et_epochs[event_type].metadata is not None:
+            metadata_cols = list(composer.et_epochs[event_type].metadata.columns)[:5]
+            print(f"   ✓ Metadata columns (first 5): {metadata_cols}")
         
-    except Exception as e:
-        print(f"   Error creating epochs: {e}")
-        return
+   
     
     # Get data summary
     print("\n8. Data summary...")
