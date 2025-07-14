@@ -770,7 +770,7 @@ def apply_precomputed_ica(raw: mne.io.Raw,
     
     # Load ICA solution
     try:
-        ica = load_ica(ica_solution_path)
+        ica = mne.preprocessing.read_ica(ica_solution_path, verbose=verbose)
         if verbose:
             print(f"  Loaded ICA solution with {ica.n_components_} components")
     except Exception as e:

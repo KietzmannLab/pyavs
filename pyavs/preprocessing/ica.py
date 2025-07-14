@@ -750,7 +750,7 @@ def apply_ica_to_raws(raws_dict: Dict[Any, mne.io.Raw],
             if verbose:
                 print(f"Loading precomputed ICA from: {ica_solution_path}")
             
-            ica = load_ica(ica_solution_path)
+            ica = mne.preprocessing.read_ica(ica_solution_path, verbose=verbose)
             
             # Load exclusion components
             try:

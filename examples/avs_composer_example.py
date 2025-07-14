@@ -169,7 +169,7 @@ def main():
         for idx, (event_type, epochs) in enumerate(epochs_results.items()):
             # Calculate median ERF across all epochs
             # Use magnetometers for cleaner visualization
-            mag_picks = epochs.pick_types(meg='mag', copy=True)
+            mag_picks = epochs.copy().pick_types(meg='mag')
             if len(mag_picks) > 0:
                 evoked_median = mag_picks.average()
                 
