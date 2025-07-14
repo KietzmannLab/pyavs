@@ -9,15 +9,12 @@ Author: Philip Sulewski
 
 import os
 import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-import mne
 import pyavs
 
 def main():
-    """Run complete MEG+ET workflow example."""
+    """Run essential MEG+ET workflow example."""
     
-    print("=== pyAVS MEG + Eye Tracking Workflow Example ===\n")
+    print("=== pyAVS MEG + Eye Tracking Workflow (Streamlined) ===\n")
     
     # Configuration
     subject_id = 1
@@ -30,7 +27,7 @@ def main():
         print(f"✓ Data path configured: {data_path}")
     except FileNotFoundError:
         print(f"⚠ Data path not found: {data_path}")
-        print("Please update data_path variable or use pyavs.set_data_path()")
+        print("Please update data_path variable or set PYAVS_DATA_PATH environment variable")
         return
     
     # Step 1: Load and preprocess data
@@ -41,12 +38,12 @@ def main():
             include_meg=True,
             include_eye=True,
             blocks=[1, 2, 3],
-            causal_filter=False
+            causal_filter=False  # Use standard non-causal filtering
         )
-        print(f"   ✓ MEG blocks: {list(subject_data['meg_data'].keys())}")
-        print(f"   ✓ Eye events: {len(subject_data['eye_events'])} events")
+        print(f"   ✓ Loaded MEG blocks: {list(subject_data['meg_data'].keys())}")
+        print(f"   ✓ Loaded {len(subject_data['eye_events'])} eye tracking events")
     except Exception as e:
-        print(f"   Error: {e}")
+        print(f"   Error loading data: {e}")
         return
     
     # Step 2: Create epochs from eye tracking events
@@ -122,23 +119,23 @@ def main():
         print(f"   Error saving results: {e}")
     
     # Step 5: Demonstrate intelligent file discovery
-    print("\n5. File discovery and parameter management...")
+    print("\n5. Demonstrating file discovery...")
     try:
         # Find population codes files for this subject
         found_files = pyavs.find_population_codes_files(
             subject_id, session, event_type='saccade'
         )
-        print(f"   ✓ Found {len(found_files)} population codes files")
+        print(f"   ✓ Found {len(found_files)} population codes files for subject {subject_id}")
         
         # List available parameter sets
         param_sets = pyavs.list_available_parameter_sets()
-        print(f"   ✓ Found {len(param_sets)} unique parameter sets")
+        print(f"   ✓ Found {len(param_sets)} unique parameter sets in storage")
         
     except Exception as e:
         print(f"   Error in file discovery: {e}")
     
     print("\n=== Workflow Complete ===")
-    print("This example demonstrated:")
+    print("This streamlined example demonstrated:")
     print("- Data loading and preprocessing with causal filtering option")
     print("- MEG-ET epoch creation with robust alignment")
     print("- Source reconstruction with beamformer method")
@@ -146,100 +143,29 @@ def main():
     print("- File discovery and parameter set management")
 
 
-def simple_example():
+def minimal_example():
     """Minimal working example - just the essentials."""
     
-    print("\n=== Simple pyAVS Example ===")
+    print("\n=== Minimal pyAVS Example ===")
     
     # Essential workflow in just a few lines
-    try:
-        pyavs.set_data_path("/share/klab/datasets/avs/")
-        
-        # Load data
-        data = pyavs.load_and_preprocess(1, 1, blocks=[1])
-        
-        # Create epochs
-        epochs, events = pyavs.get_epochs(data, 'saccade', 'meg')
-        
-        # Save results
-        pyavs.save_source_data(epochs, data_type='saccade_epochs')
-        
-        print(f"✓ Processed {len(epochs)} saccade epochs")
-        
-    except Exception as e:
-        print(f"Error in simple example: {e}")
-
-
-def preprocessing_example():
-    """Example focused on preprocessing options."""
+    pyavs.set_data_path("/share/klab/datasets/avs/")
     
-    print("\n=== Preprocessing Options Example ===")
+    # Load data
+    data = pyavs.load_and_preprocess(1, 1, blocks=[1])
     
-    subject_id = 1
-    session = 1
-    data_path = "/share/klab/datasets/avs/"
+    # Create epochs
+    epochs, events = pyavs.get_epochs(data, 'saccade', 'meg')
     
-    try:
-        pyavs.set_data_path(data_path)
-        
-        # Example 1: Basic preprocessing
-        print("1. Basic preprocessing...")
-        data_basic = pyavs.load_and_preprocess(
-            subject_id, session,
-            blocks=[1],
-            causal_filter=False
-        )
-        print(f"   ✓ Loaded {len(data_basic['meg_data'])} MEG blocks")
-        
-        # Example 2: Causal filtering (preserves temporal order)
-        print("2. Preprocessing with causal filtering...")
-        data_causal = pyavs.load_and_preprocess(
-            subject_id, session,
-            blocks=[1],
-            causal_filter=True  # NEW: Causal filtering option
-        )
-        print(f"   ✓ Applied causal filtering to {len(data_causal['meg_data'])} MEG blocks")
-        
-    except Exception as e:
-        print(f"   Error in preprocessing example: {e}")
-
-
-def storage_example():
-    """Example demonstrating intelligent storage features."""
+    # Save results
+    pyavs.save_source_data(epochs, data_type='saccade_epochs')
     
-    print("\n=== Intelligent Storage Example ===")
-    
-    try:
-        pyavs.set_data_path("/share/klab/datasets/avs/")
-        
-        # Example: Find all saccade population codes
-        print("1. Finding population codes files...")
-        saccade_files = pyavs.find_population_codes_files(
-            subject_id=1, session=1, 
-            event_type='saccade',
-            sampling_rate=500
-        )
-        print(f"   ✓ Found {len(saccade_files)} saccade files")
-        
-        # Example: Browse all parameter sets
-        print("2. Listing available parameter sets...")
-        param_sets = pyavs.list_available_parameter_sets()
-        print(f"   ✓ Found {len(param_sets)} unique parameter configurations")
-        
-        if param_sets:
-            print("   Recent parameter sets:")
-            for i, params in enumerate(param_sets[:3]):
-                print(f"     {i+1}. {params.get('event_type', 'unknown')} @ {params.get('sampling_rate', 'unknown')}Hz")
-        
-    except Exception as e:
-        print(f"   Error in storage example: {e}")
+    print(f"✓ Processed {len(epochs)} saccade epochs")
 
 
 if __name__ == "__main__":
-    # Run main workflow
+    # Run streamlined workflow
     main()
     
-    # Run additional examples
-    simple_example()
-    preprocessing_example()
-    storage_example()
+    # Run minimal example
+    minimal_example()
