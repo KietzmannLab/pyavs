@@ -248,14 +248,14 @@ class AVSComposer:
                                 preload=preload,
                                 verbose=self.verbose
                             )
-                            raw_for_recompute = mne.preprocessing.maxwell_filter_prepare_emptyroom(
-                                raw_er=raw_for_recompute,
-                                raw=raw_reference,
+                            from .meg import prepare_empty_room_recording
+                            raw_for_recompute = prepare_empty_room_recording(
+                                raw_empty_room=raw_for_recompute,
+                                raw_reference=raw_reference,
                                 bads='from_raw',
                                 annotations='from_raw',
                                 meas_date='keep',
-                                emit_warning=False,
-                                verbose=None
+                                verbose=self.verbose
                             )
                         except Exception as e:
                             print(f"Error preparing empty room recording: {e}")
@@ -265,11 +265,10 @@ class AVSComposer:
                     try:
                         raw = preprocess_meg_block(
                             raw_for_recompute,
-                            self.subject,
-                            self.session_num,
-                            block,
-                            save_preprocessed=True,
-                            data_path=self.data_dir
+                            subject_id=self.subject,
+                            session=self.session_num,
+                            block=block,
+                            verbose=self.verbose
                         )
                     except Exception as e:
                         print(f"Error preprocessing block {block}: {e}")
@@ -399,7 +398,7 @@ class AVSComposer:
         concatenated: Optional[bool] = False
     ):
         """
-        Applies lowpass and/or highpass filters to the MEG data.
+        Applies lowpass and/or highpass filters to the MEG data using pyAVS filter_meg function.
 
         Parameters
         ----------
@@ -414,6 +413,7 @@ class AVSComposer:
         concatenated : bool or None, optional
             Whether to use the concatenated data for filtering. If None, it uses the concatenated data if available, otherwise it uses the data per block.
         """
+        from .meg import filter_meg
         
         if self.verbose:
             print('Filtering data for subject', self.subject, 'session', self.session)
@@ -422,47 +422,46 @@ class AVSComposer:
         if concatenated is None:
             concatenated = hasattr(self, 'raws_concatenated')
         
-        phase = 'minimum' if causal else 'zero'
-        
         if not concatenated:
-            # Filter the data per block
+            # Filter the data per block using meg.py function
             print("Filtering data per block")
             for block in self.raws_dict.keys():
-                self.raws_dict[block].filter(
+                self.raws_dict[block] = filter_meg(
+                    self.raws_dict[block],
                     l_freq=l_freq,
                     h_freq=h_freq,
                     picks=picks,
-                    phase=phase,
-                    fir_design='firwin',
-                    verbose=self.verbose,
-                    n_jobs=self.n_jobs
+                    causal=causal,
+                    n_jobs=self.n_jobs,
+                    verbose=self.verbose
                 )
                 # We add an attribute that tells us that the data has been filtered
                 self.raws_dict[block].filtered = True
         else:
             print("Filtering concatenated data")
-            # Filter the concatenated data
-            self.raws_concatenated.filter(
+            # Filter the concatenated data using meg.py function
+            self.raws_concatenated = filter_meg(
+                self.raws_concatenated,
                 l_freq=l_freq,
                 h_freq=h_freq,
                 picks=picks,
-                phase=phase,
-                fir_design='firwin',
-                verbose=self.verbose,
-                n_jobs=self.n_jobs
+                causal=causal,
+                n_jobs=self.n_jobs,
+                verbose=self.verbose
             )
             # We add an attribute that tells us that the data has been filtered
             self.raws_concatenated.filtered = True
 
     def resample_meg_data(self, target_sfreq: float):
         """
-        Resamples the MEG data to the target sampling frequency.
+        Resamples the MEG data to the target sampling frequency using pyAVS resample_meg function.
 
         Parameters
         ----------
         target_sfreq : float
             The target sampling frequency in Hz.
         """
+        from .meg import resample_meg
         
         # Check if current sampling frequency is equal to target sampling frequency
         if self.raws_dict[list(self.raws_dict.keys())[0]].info['sfreq'] == target_sfreq:
@@ -483,14 +482,24 @@ class AVSComposer:
         concatenated = hasattr(self, 'raws_concatenated')
         
         if not concatenated:
-            # Resample the data per block
+            # Resample the data per block using meg.py function
             for block in self.raws_dict.keys():
-                self.raws_dict[block].resample(target_sfreq, n_jobs=self.n_jobs)
+                self.raws_dict[block] = resample_meg(
+                    self.raws_dict[block],
+                    sfreq=target_sfreq,
+                    n_jobs=self.n_jobs,
+                    verbose=self.verbose
+                )
                 # We add an attribute that tells us that the data has been resampled
                 self.raws_dict[block].resampled = True
         else:
-            # Resample the concatenated data
-            self.raws_concatenated.resample(target_sfreq, n_jobs=self.n_jobs)
+            # Resample the concatenated data using meg.py function
+            self.raws_concatenated = resample_meg(
+                self.raws_concatenated,
+                sfreq=target_sfreq,
+                n_jobs=self.n_jobs,
+                verbose=self.verbose
+            )
             # We add an attribute that tells us that the data has been resampled
             self.raws_concatenated.resampled = True
 
@@ -510,10 +519,11 @@ class AVSComposer:
             
         if self.preprocessed:
             if self.interpolate_bad_channels:
+                from .meg import interpolate_bad_channels
                 if self.verbose:
                     print('Interpolating bad channels')
                 print("bads: ", [raw.info['bads'] for raw in raws_list])
-                raws_list = [raw.interpolate_bads() for raw in raws_list]
+                raws_list = [interpolate_bad_channels(raw, verbose=self.verbose) for raw in raws_list]
             else:
                 # We ignore the bad channels labels and hope that the MaxFilter did reasonably well in dealing with them
                 # We remove the bad channel info from the raw objects
@@ -526,12 +536,13 @@ class AVSComposer:
             raws_list_empty_room = list(self.raws_dict_empty_room.values())
             if self.preprocessed:
                 if self.interpolate_bad_channels:
+                    from .meg import interpolate_bad_channels
                     if self.verbose:
-                        print('Interpolating bad channels')
+                        print('Interpolating bad channels in empty room data')
                     # Remove duplicates from the bads list
                     for raw in raws_list_empty_room:
                         raw.info['bads'] = list(set(raw.info['bads']))
-                    raws_list_empty_room = [raw.interpolate_bads() for raw in raws_list_empty_room]
+                    raws_list_empty_room = [interpolate_bad_channels(raw, verbose=self.verbose) for raw in raws_list_empty_room]
                 else:
                     # We ignore the bad channels labels and hope that the MaxFilter did reasonably well in dealing with them
                     # We remove the bad channel info from the raw objects

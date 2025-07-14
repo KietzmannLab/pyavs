@@ -64,7 +64,7 @@ def main():
     print("\n3. Filtering MEG data...")
     try:
         composer.filter_meg_data(l_freq=0.2, h_freq=40.0, causal=True)
-        print("   ✓ Applied 0.1-40 Hz band-pass filter")
+        print("   ✓ Applied 0.2-40 Hz band-pass filter (causal)")
     except Exception as e:
         print(f"   Error filtering MEG data: {e}")
         return
@@ -155,11 +155,12 @@ def main():
     
     print("\n=== AVS Composer Example Complete ===")
     print("This example demonstrated:")
-    print("- MEG data loading and preprocessing")
+    print("- MEG data loading and preprocessing using pyAVS meg.py functions")
     print("- Eye tracking data integration with single event type processing")
     print("- Trigger-based MEG-ET alignment")
     print("- Epoch creation with metadata for multiple event types")
     print("- Replication of AVS-machine-room composer functionality in pyAVS")
+    print("- Unified preprocessing pipeline with reduced code redundancy")
 
 
 def minimal_composer_example():
