@@ -92,43 +92,53 @@ def main():
         print(f"   Error finding MEG events: {e}")
         return
     
-    # Get eye tracking annotations
+    # Get eye tracking annotations and create epochs
     print("\n6. Processing eye tracking data...")
-
-    composer.get_et_annotations(
-        et_event_types=["fixation", "saccade"],
-        exclude_last_fixation=True,
-        add_cross_event_info=True,
-        preprocessed=True
-    )
-    print(f"   ✓ Loaded {len(composer.et_events)} eye tracking events")
-    print(f"   ✓ Added eye tracking annotations to MEG data")
-    print(f"   ✓ Annotations: {len(composer.raws_annotated.annotations)}")
-  
-    # Create epochs
-    print("\n7. Creating epochs...")
-  
-    composer.make_et_event_epochs(
-        tmin=-0.2,
-        tmax=0.8,
-        event_types=["fixation", "saccade"],
-        get_metadata=True,
-        baseline=None
-    )
     
-    for event_type in ["fixation", "saccade"]:
-        n_epochs = len(composer.et_epochs[event_type])
+    # Process each event type separately (new pyAVS approach)
+    event_types = ["fixation", "saccade"]
+    epochs_results = {}
+    
+    for event_type in event_types:
+        print(f"\n   Processing {event_type} events...")
+        
+        # Get annotations for this event type
+        composer.get_et_annotations(
+            et_event_type=event_type,
+            recording="scene",
+            exclude_last_fixation=True,
+            add_cross_event_info=True,
+            preprocessed=True
+        )
+        print(f"   ✓ Loaded {len(composer.et_events)} {event_type} events")
+        print(f"   ✓ Added {event_type} annotations to MEG data")
+        print(f"   ✓ Annotations: {len(composer.raws_annotated.annotations)}")
+        
+        # Create epochs for this event type
+        print(f"      Creating {event_type} epochs...")
+        composer.make_et_event_epochs(
+            tmin=-0.2,
+            tmax=0.8,
+            event_type=event_type,
+            recording="scene",
+            get_metadata=True,
+            baseline=None
+        )
+        
+        # Store results
+        epochs_results[event_type] = composer.et_epochs
+        n_epochs = len(composer.et_epochs)
         print(f"   ✓ Created {n_epochs} {event_type} epochs")
         
         # Show some metadata columns
-        if hasattr(composer.et_epochs[event_type], 'metadata') and composer.et_epochs[event_type].metadata is not None:
-            metadata_cols = list(composer.et_epochs[event_type].metadata.columns)[:5]
+        if hasattr(composer.et_epochs, 'metadata') and composer.et_epochs.metadata is not None:
+            metadata_cols = list(composer.et_epochs.metadata.columns)[:5]
             print(f"   ✓ Metadata columns (first 5): {metadata_cols}")
         
    
     
     # Get data summary
-    print("\n8. Data summary...")
+    print("\n7. Data summary...")
     try:
         summary = composer.get_data_summary()
         print(f"   ✓ Subject: {summary['subject']}")
@@ -146,10 +156,10 @@ def main():
     print("\n=== AVS Composer Example Complete ===")
     print("This example demonstrated:")
     print("- MEG data loading and preprocessing")
-    print("- Eye tracking data integration")
+    print("- Eye tracking data integration with single event type processing")
     print("- Trigger-based MEG-ET alignment")
-    print("- Epoch creation with metadata")
-    print("- Replication of AVS-machine-room composer functionality")
+    print("- Epoch creation with metadata for multiple event types")
+    print("- Replication of AVS-machine-room composer functionality in pyAVS")
 
 
 def minimal_composer_example():
@@ -164,10 +174,10 @@ def minimal_composer_example():
     composer = pyavs.AVSComposer(subject=1, session_num=1, max_block=2)
     composer.load_meg_data()
     composer.concatenate_raws_per_session()
-    composer.get_et_annotations()
-    composer.make_et_event_epochs(tmin=-0.1, tmax=0.3, event_types=["saccade"])
+    composer.get_et_annotations(et_event_type="saccade")
+    composer.make_et_event_epochs(tmin=-0.1, tmax=0.3, event_type="saccade")
     
-    print(f"✓ Processed {len(composer.et_epochs['saccade'])} saccade epochs")
+    print(f"✓ Processed {len(composer.et_epochs)} saccade epochs")
 
 
 if __name__ == "__main__":
