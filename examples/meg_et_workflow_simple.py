@@ -49,14 +49,14 @@ def main():
     # Step 2: Create epochs from eye tracking events
     print("\n2. Creating epochs from eye tracking events...")
     try:
-        # Create saccade epochs
+        # Create saccade epochs (note: only one event type at a time)
         saccade_epochs, saccade_events = pyavs.get_epochs(
             subject_data, 'saccade', 'meg', 
             tmin=-0.1, tmax=0.3
         )
         print(f"   ✓ Created {len(saccade_epochs)} saccade epochs")
         
-        # Create fixation epochs  
+        # Create fixation epochs (separate call for each event type)
         fixation_epochs, fixation_events = pyavs.get_epochs(
             subject_data, 'fixation', 'meg',
             tmin=-0.2, tmax=0.5

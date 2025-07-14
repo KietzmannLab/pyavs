@@ -558,7 +558,7 @@ class AVSComposer:
 
     def get_et_annotations(
         self,
-        et_event_types: List[str] = ["fixation", "saccade"],
+        et_event_type: str = "fixation",
         recording = "scene",
         exclude_last_fixation: bool = True,
         get_object_labels: bool = False,
@@ -571,9 +571,9 @@ class AVSComposer:
 
         Parameters
         ----------
-        et_event_types : list, optional
-            List of event types to extract from the eye tracking data. Defaults to ["fixation", "saccade"].
-            Valid options: ["fixation", "saccade", "blink"].
+        et_event_type : str, optional
+            Event type to extract from the eye tracking data. Defaults to "fixation".
+            Valid options: "fixation", "saccade", "blink".
         recording : str, optional
             Recording context to filter events by. Defaults to "scene".
             Valid options: ["scene", "caption", "microphone"].
@@ -631,7 +631,7 @@ class AVSComposer:
             block_trigger_offset=1000,
             stim_channel='STI101',
             verbose=True,
-            event_types=et_event_types,
+            event_types=[et_event_type],
             recording=recording
         )
         
@@ -658,7 +658,7 @@ class AVSComposer:
         self,
         tmin: float,
         tmax: float, 
-        event_types: List[str],
+        event_type: str,
         recording: str = "scene",
         save_epochs: bool = True,
         get_metadata: bool = True,
@@ -674,9 +674,9 @@ class AVSComposer:
             The start of the epoch in seconds (around et event onset)
         tmax : float
             The end of the epoch in seconds (around et event onset)
-        event_types : list of str
-            The event types for which we want to make epochs. E.g. ["fixation", "saccade", "blink"]
-            Valid options: ["fixation", "saccade", "blink", "scene"]
+        event_type : str
+            The event type for which we want to make epochs. E.g. "fixation", "saccade", "blink"
+            Valid options: "fixation", "saccade", "blink", "scene"
         recording : str, optional
             Recording context to filter events by. Defaults to "scene".
             Valid options: ["scene", "caption", "microphone"].
@@ -690,11 +690,11 @@ class AVSComposer:
             The baseline period for the epochs (for AVS currently not recommended). Defaults to None.
         """
     
-        # Check whether event_types are valid
-        if not set(event_types).issubset(set(["fixation", "saccade", "blink", "scene"])):
-            raise ValueError("event_types must be a subset of ['fixation', 'saccade', 'blink', 'scene']")
+        # Check whether event_type is valid
+        if event_type not in ["fixation", "saccade", "blink", "scene"]:
+            raise ValueError("event_type must be one of ['fixation', 'saccade', 'blink', 'scene']")
         else:
-            self.et_event_types = event_types
+            self.et_event_type = event_type
 
         # Now we will make the event epochs
         if self.verbose:
@@ -703,7 +703,7 @@ class AVSComposer:
         # Add the et annotations to the raw data
         # Check if raws_annotated exists:
         if not hasattr(self, "raws_annotated"):
-            self.get_et_annotations(et_event_types=event_types, recording=recording, get_object_labels=get_object_labels)
+            self.get_et_annotations(et_event_type=event_type, recording=recording, get_object_labels=get_object_labels)
 
         events_annot = mne.events_from_annotations(
             self.raws_annotated,
@@ -714,52 +714,49 @@ class AVSComposer:
             verbose=self.verbose
         )
 
-        self.et_epochs = {}
+        # Now we will make the event epochs
+        if self.verbose:
+            print('Making event epochs for event type:', event_type)
+        
+        # We will make the epochs
+        if event_type == 'fixation':  # An epoch focussing on the fixation period
+            event_id = events_annot[1]['fixation']
+        elif event_type == 'saccade':  # An epoch focussing on the saccade period
+            event_id = events_annot[1]['saccade']
+        elif event_type == 'blink':  # An epoch focussing on the blink period
+            event_id = events_annot[1]['blink']
+        elif event_type == 'scene':  # An epoch focussing on the 4s scene period
+            event_id = events_annot[1]['scene']
 
-        for event_type in event_types:
-            # Now we will make the event epochs
-            if self.verbose:
-                print('Making event epochs for event type:', event_type)
-            
-            # We will make the epochs
-            if event_type == 'fixation':  # An epoch focussing on the fixation period
-                event_id = events_annot[1]['fixation']
-            elif event_type == 'saccade':  # An epoch focussing on the saccade period
-                event_id = events_annot[1]['saccade']
-            elif event_type == 'blink':  # An epoch focussing on the blink period
-                event_id = events_annot[1]['blink']
-            elif event_type == 'scene':  # An epoch focussing on the 4s scene period
-                event_id = events_annot[1]['scene']
+        events_to_use = events_annot[0][events_annot[0][:, 2] == event_id]
+        
+        preload = get_metadata  # For metadata the epochs have to be preloaded
+        
+        if get_metadata:
+            metadata = pd.DataFrame(index=np.arange(len(events_to_use)))  # We will prepare an empty dataframe
+            # that we will later fill with metadata from the events dataframe
+        else:
+            metadata = None
 
-            events_to_use = events_annot[0][events_annot[0][:, 2] == event_id]
-            
-            preload = get_metadata  # For metadata the epochs have to be preloaded
-            
-            if get_metadata:
-                metadata = pd.DataFrame(index=np.arange(len(events_to_use)))  # We will prepare an empty dataframe
-                # that we will later fill with metadata from the events dataframe
-            else:
-                metadata = None
-
-            self.et_epochs[event_type] = mne.Epochs(
-                self.raws_annotated,
-                events_to_use,
-                tmin=tmin,
-                tmax=tmax,
-                preload=preload,
-                proj=None,
-                event_id={event_type: event_id},
-                baseline=baseline,
-                metadata=metadata
-            )
-            
-            # Add metadata to the epochs object
-            if get_metadata:
-                # As metadata we will add all kinds of information about the eye tracking events
-                if event_type in ["fixation", "saccade", "blink"]:
-                    self.add_et_metadata_to_epochs(metadata_colnames=self.et_events.columns)
-                elif event_type == "scene":
-                    self.add_scene_metadata_to_epochs(metadata_colnames=self.et_events.columns)
+        self.et_epochs = mne.Epochs(
+            self.raws_annotated,
+            events_to_use,
+            tmin=tmin,
+            tmax=tmax,
+            preload=preload,
+            proj=None,
+            event_id={event_type: event_id},
+            baseline=baseline,
+            metadata=metadata
+        )
+        
+        # Add metadata to the epochs object
+        if get_metadata:
+            # As metadata we will add all kinds of information about the eye tracking events
+            if event_type in ["fixation", "saccade", "blink"]:
+                self.add_et_metadata_to_epochs(metadata_colnames=self.et_events.columns)
+            elif event_type == "scene":
+                self.add_scene_metadata_to_epochs(metadata_colnames=self.et_events.columns)
 
         if self.verbose:
             print("Event epochs created successfully")
@@ -780,47 +777,47 @@ class AVSComposer:
             raise ValueError("You need to run make_et_event_epochs first")
 
         # Check 1) now we will check whether the events dataframe and the epochs object have the same amount of events
-        for et_event_type in self.et_event_types:
-            # Preload the epochs object so that we can compute its length
-            events_df_for_metadata = self.et_events[self.et_events["type"] == et_event_type]
-          
-            events_df_for_metadata = events_df_for_metadata[events_df_for_metadata["block"].isin(self.blocks_this_session)]
+        et_event_type = self.et_event_type
+        # Preload the epochs object so that we can compute its length
+        events_df_for_metadata = self.et_events[self.et_events["type"] == et_event_type]
+      
+        events_df_for_metadata = events_df_for_metadata[events_df_for_metadata["block"].isin(self.blocks_this_session)]
+        
+        if metadata_colnames is None:
+            # Then we will use all columnnames available.
+            metadata_colnames = events_df_for_metadata.columns
+        
+        if len(events_df_for_metadata) != len(self.et_epochs):
+            print("len events_df_for_metadata: " + str(len(events_df_for_metadata)))
+            print("len epochs: " + str(len(self.et_epochs)))
+            print(np.unique(events_df_for_metadata.block))
+            print(np.unique(events_df_for_metadata.type))
+            print(np.unique(events_df_for_metadata.recording))
+            # add some diagnostic prints
+        
+            raise ValueError("The amount of events in the events dataframe and the epochs object are not the same. This should not happen. Please check your data.")
+        else:
+            # Check 2) now we will check whether the event durations are identical
+            durations_from_annot_df = self.et_epochs.annotations.to_data_frame()
+            durations_from_annot = durations_from_annot_df.loc[durations_from_annot_df.description == et_event_type, "duration"]
             
-            if metadata_colnames is None:
-                # Then we will use all columnnames available.
-                metadata_colnames = events_df_for_metadata.columns
-            
-            if len(events_df_for_metadata) != len(self.et_epochs[et_event_type]):
-                print("len events_df_for_metadata: " + str(len(events_df_for_metadata)))
-                print("len epochs: " + str(len(self.et_epochs[et_event_type])))
-                print(np.unique(events_df_for_metadata.block))
-                print(np.unique(events_df_for_metadata.type))
-                print(np.unique(events_df_for_metadata.recording))
-                # add some diagnostic prints
-            
-                raise ValueError("The amount of events in the events dataframe and the epochs object are not the same. This should not happen. Please check your data.")
+            if not np.array_equal(events_df_for_metadata["duration"].values, durations_from_annot.values):
+                print(events_df_for_metadata["duration"].values)
+                print(events_df_for_metadata["duration"])
+                print(self.et_epochs.annotations.duration)
+                raise ValueError("The event durations in the events dataframe and the epochs object are not the same. This should not happen. Please check your data.")
             else:
-                # Check 2) now we will check whether the event durations are identical
-                durations_from_annot_df = self.et_epochs[et_event_type].annotations.to_data_frame()
-                durations_from_annot = durations_from_annot_df.loc[durations_from_annot_df.description == et_event_type, "duration"]
+                if self.verbose:
+                    print("All checks passed. The amount of events and the event durations are identical. We will now add the metadata to the epochs object")
                 
-                if not np.array_equal(events_df_for_metadata["duration"].values, durations_from_annot.values):
-                    print(events_df_for_metadata["duration"].values)
-                    print(events_df_for_metadata["duration"])
-                    print(self.et_epochs[et_event_type].annotations.duration)
-                    raise ValueError("The event durations in the events dataframe and the epochs object are not the same. This should not happen. Please check your data.")
-                else:
-                    if self.verbose:
-                        print("All checks passed. The amount of events and the event durations are identical. We will now add the metadata to the epochs object")
-                    
-                    # Now we will add the metadata to the epochs object
-                    for colname in metadata_colnames:
-                        if colname not in self.et_events.columns:
-                            print(f"Warning: The column {colname} is not in the events dataframe. Please check your data")
-                        else:
-                            self.et_epochs[et_event_type].metadata[colname] = events_df_for_metadata[colname].values
-            
-            print("Metadata added to epochs object")
+                # Now we will add the metadata to the epochs object
+                for colname in metadata_colnames:
+                    if colname not in self.et_events.columns:
+                        print(f"Warning: The column {colname} is not in the events dataframe. Please check your data")
+                    else:
+                        self.et_epochs.metadata[colname] = events_df_for_metadata[colname].values
+        
+        print("Metadata added to epochs object")
     
     def add_scene_metadata_to_epochs(self, metadata_colnames: Optional[List[str]] = None):
         """
@@ -850,11 +847,11 @@ class AVSComposer:
         print(events_df_for_metadata_grouped)
         
         # Now we will add the metadata to the epochs object
-        self.et_epochs["scene"].metadata = events_df_for_metadata_grouped
+        self.et_epochs.metadata = events_df_for_metadata_grouped
         
         # Add column - time to first event
-        self.et_epochs["scene"].metadata["time_to_first_event"] = self.et_epochs["scene"].metadata["time_in_trial"].apply(lambda x: x[0])
-        self.et_epochs["scene"].metadata["type_of_first_event"] = self.et_epochs["scene"].metadata["type"].apply(lambda x: x[0])
+        self.et_epochs.metadata["time_to_first_event"] = self.et_epochs.metadata["time_in_trial"].apply(lambda x: x[0])
+        self.et_epochs.metadata["type_of_first_event"] = self.et_epochs.metadata["type"].apply(lambda x: x[0])
         
         print("Scene metadata added to epochs object")
 
@@ -875,7 +872,7 @@ class AVSComposer:
             'meg_samples': len(self.raws_concatenated.times) if hasattr(self, 'raws_concatenated') and self.raws_concatenated else 0,
             'meg_duration': self.raws_concatenated.times[-1] if hasattr(self, 'raws_concatenated') and self.raws_concatenated else 0,
             'eye_events': len(self.et_events) if self.et_events is not None else 0,
-            'epochs_created': len(self.et_epochs) if self.et_epochs else 0,
+            'epochs_created': len(self.et_epochs) if hasattr(self, 'et_epochs') and self.et_epochs else 0,
             'annotations': len(self.raws_annotated.annotations) if hasattr(self, 'raws_annotated') and self.raws_annotated else 0,
             'empty_room_available': self.empty_room_available
         }
