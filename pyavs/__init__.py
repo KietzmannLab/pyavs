@@ -23,7 +23,7 @@ from .scenes.objects import get_fixated_objects
 from .preprocessing.eye import preprocess_eye_events
 from .preprocessing.meg import apply_maxwell_filter, filter_meg, resample_meg, preprocess_meg_block, apply_precomputed_ica
 from .preprocessing.ica import compute_ica, find_eye_components, apply_ica, preprocess_with_ica
-from .preprocessing.alignment import MEGETComposer, create_et_event_epochs, align_meg_et_timing
+from .preprocessing.alignment import MEGETComposer, create_et_event_epochs, get_meg_trigger_mapping, repair_meg_trigger_events
 from .source.forward import create_forward_model, create_bem_model, setup_coregistration, load_forward_model
 from .source.reconstruction import apply_source_reconstruction, compute_beamformer_filters, compute_population_codes, extract_roi_data, save_source_data, save_population_codes_h5, extract_and_save_population_codes, find_population_codes_files, list_available_parameter_sets, load_source_data
 from .source.spaces import create_source_space, get_roi_labels, get_glasser_roi_labels
