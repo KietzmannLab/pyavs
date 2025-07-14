@@ -168,4 +168,4 @@ if __name__ == "__main__":
     main()
     
     # Run minimal example
-    minimal_example()
+    #minimal_example()

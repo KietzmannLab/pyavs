@@ -24,7 +24,9 @@ def load_and_enrich_eye_events(subjects: List[int], sessions: List[int],
                               fix_multi_saccades: bool = True,
                               verbose: bool = True,
                               include_fixation_zero: bool = False,
-                              offset_scene_triggers_ms: int = 20) -> Tuple[pd.DataFrame, pd.DataFrame]:
+                              offset_scene_triggers_ms: int = 20,
+                              **kwargs
+                              ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Load and enrich eye tracking events for multiple subjects/sessions.
     

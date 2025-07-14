@@ -162,6 +162,7 @@ def repair_meg_trigger_events(events: np.ndarray, session: int,
 
 def create_et_event_epochs(raw: mne.io.Raw, eye_events_df: pd.DataFrame,
                           event_type: str = 'saccade',
+                          recording: str = 'scene',
                           tmin: float = -0.2, tmax: float = 0.8,
                           baseline: Optional[Tuple[float, float]] = None,
                           picks: Optional[Union[str, list]] = 'meg',
@@ -169,7 +170,8 @@ def create_et_event_epochs(raw: mne.io.Raw, eye_events_df: pd.DataFrame,
                           reject_by_annotation: bool = True,
                           preload: bool = True,
                           offset_scene_triggers_ms: float = 20.0,
-                          verbose: bool = True) -> Tuple[mne.Epochs, pd.DataFrame]:
+                          verbose: bool = True,
+                          **kwargs) -> Tuple[mne.Epochs, pd.DataFrame]:
     """
     Create MEG epochs based on eye tracking events using the AVS composer approach.
     
@@ -185,6 +187,8 @@ def create_et_event_epochs(raw: mne.io.Raw, eye_events_df: pd.DataFrame,
         Eye tracking events dataframe with 'time_in_trial', 'block', 'trial_per_block' columns
     event_type : str, optional
         Type of eye tracking event to use ('scene', 'fixation', 'saccade', 'blink') (default: 'saccade')
+    recording : str, optional
+        Recording context ('scene', 'caption', "microphone".) (default: 'scene')
     tmin : float, optional
         Start time before event in seconds (default: -0.2)
     tmax : float, optional
@@ -245,23 +249,9 @@ def create_et_event_epochs(raw: mne.io.Raw, eye_events_df: pd.DataFrame,
         print(f"Found {len(meg_events)} MEG events")
         print(f"Looking for scene onset triggers with code {scene_onset_code}")
     
-    # Filter eye tracking events by type and scene viewing
-    if event_type == 'scene':
-        # For scene events, take first event per trial during scene viewing
-        if 'recording' in eye_events_df.columns:
-            event_mask = eye_events_df['recording'] == 'scene'
-            selected_events = eye_events_df[event_mask].groupby(['block', 'trial_per_block']).first().reset_index()
-        else:
-            # Fallback: use first fixation per trial
-            event_mask = eye_events_df['type'] == 'fixation'
-            selected_events = eye_events_df[event_mask].groupby(['block', 'trial_per_block']).first().reset_index()
-    else:
-        # For specific event types (fixation, saccade, blink)
-        event_mask = eye_events_df['type'] == event_type
-        if 'recording' in eye_events_df.columns:
-            # Focus on scene viewing events
-            event_mask &= eye_events_df['recording'] == 'scene'
-        selected_events = eye_events_df[event_mask].copy()
+    # Filter et_events_df for the specified event type and recording context
+    selected_events = eye_events_df[eye_events_df['type'] == event_type]
+    selected_events = selected_events[selected_events['recording'] == recording]
     
     if len(selected_events) == 0:
         raise ValueError(f"No {event_type} events found for scene viewing")
@@ -367,6 +357,9 @@ def create_et_event_epochs(raw: mne.io.Raw, eye_events_df: pd.DataFrame,
     if verbose:
         print(f"Creating {len(mne_events)} epochs from {event_type} events")
         print(f"Time window: {tmin} to {tmax} seconds")
+        print(f"Event ID mapping: {event_id}")
+        print(mne_events)
+
     
     # Create epochs
     epochs = mne.Epochs(
