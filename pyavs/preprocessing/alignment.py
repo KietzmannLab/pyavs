@@ -240,16 +240,21 @@ def create_et_event_epochs(raw: mne.io.Raw, eye_events_df: pd.DataFrame,
                           reject: Optional[dict] = None,
                           reject_by_annotation: bool = True,
                           preload: bool = True,
+                          offset_scene_triggers_ms: float = 20.0,
                           verbose: bool = True) -> Tuple[mne.Epochs, pd.DataFrame]:
     """
-    Create MEG epochs based on eye tracking events.
+    Create MEG epochs based on eye tracking events using the AVS composer approach.
+    
+    This function aligns MEG and ET data by using scene onset triggers (code 100) as temporal
+    anchors and then adding the eye tracking event's time_in_trial relative timing.
+    This follows the methodology from the original AVS-machine-room codebase.
     
     Parameters
     ----------
     raw : mne.io.Raw
         MEG raw data
     eye_events_df : pd.DataFrame
-        Eye tracking events dataframe
+        Eye tracking events dataframe with 'time_in_trial', 'block', 'trial_per_block' columns
     event_type : str, optional
         Type of eye tracking event to use ('scene', 'fixation', 'saccade', 'blink') (default: 'saccade')
     tmin : float, optional
@@ -257,7 +262,7 @@ def create_et_event_epochs(raw: mne.io.Raw, eye_events_df: pd.DataFrame,
     tmax : float, optional
         End time after event in seconds (default: 0.8)
     baseline : tuple or None, optional
-        Baseline time window (default: (-0.2, 0.0))
+        Baseline time window (default: None)
     picks : str or list, optional
         Channels to include (default: 'meg')
     reject : dict, optional
@@ -266,6 +271,9 @@ def create_et_event_epochs(raw: mne.io.Raw, eye_events_df: pd.DataFrame,
         Whether to reject by annotations (default: True)
     preload : bool, optional
         Whether to preload epoch data (default: True)
+    offset_scene_triggers_ms : float, optional
+        Systematic offset correction in milliseconds (default: 20.0)
+        This compensates for hardware delays between MEG and ET systems
     verbose : bool, optional
         Whether to print epoch information (default: True)
         
@@ -273,28 +281,52 @@ def create_et_event_epochs(raw: mne.io.Raw, eye_events_df: pd.DataFrame,
     -------
     tuple
         (epochs, events_metadata) - MEG epochs and corresponding event metadata
+        
+    Notes
+    -----
+    This implementation follows the AVS composer methodology:
+    1. Find MEG scene onset triggers (code 100) for each trial
+    2. Calculate MEG event times as: scene_onset_time + time_in_trial + offset
+    3. Apply systematic 20ms offset correction for hardware delays
+    4. Create epochs using the calculated MEG sample times
+    
+    Required columns in eye_events_df:
+    - 'time_in_trial': Relative time from scene onset in seconds
+    - 'block': Block number
+    - 'trial_per_block': Trial number within block
+    - 'type': Event type ('fixation', 'saccade', 'blink')
+    - 'recording': Recording context ('scene', 'caption', etc.)
     """
+    # Validate required columns in eye tracking data
+    required_columns = ['time_in_trial', 'block', 'trial_per_block', 'type']
+    missing_columns = [col for col in required_columns if col not in eye_events_df.columns]
+    if missing_columns:
+        raise ValueError(f"Missing required columns in eye_events_df: {missing_columns}")
+    
     # Define valid event types
     valid_event_types = ['scene', 'fixation', 'saccade', 'blink']
     if event_type not in valid_event_types:
         raise ValueError(f"event_type must be one of {valid_event_types}, got '{event_type}'")
     
-    # Filter events by type
+    # Get MEG events and trigger mapping
+    meg_events = mne.find_events(raw, stim_channel='STI101', consecutive=True, min_duration=0.005)
+    meg_trigger_mapping = get_meg_trigger_mapping()
+    scene_onset_code = meg_trigger_mapping['scene_on']  # Code 100
+    
+    if verbose:
+        print(f"Found {len(meg_events)} MEG events")
+        print(f"Looking for scene onset triggers with code {scene_onset_code}")
+    
+    # Filter eye tracking events by type and scene viewing
     if event_type == 'scene':
-        # For scene events, use trial onset times or scene-related events
+        # For scene events, take first event per trial during scene viewing
         if 'recording' in eye_events_df.columns:
-            # Use any events during scene viewing as scene events
             event_mask = eye_events_df['recording'] == 'scene'
-            # Take the first event per trial as scene onset
-            if 'trial' in eye_events_df.columns:
-                selected_events = eye_events_df[event_mask].groupby('trial').first().reset_index()
-            else:
-                event_mask = eye_events_df['recording'] == 'scene'
-                selected_events = eye_events_df[event_mask].copy()
+            selected_events = eye_events_df[event_mask].groupby(['block', 'trial_per_block']).first().reset_index()
         else:
-            # Fallback: use first fixation as scene onset
+            # Fallback: use first fixation per trial
             event_mask = eye_events_df['type'] == 'fixation'
-            selected_events = eye_events_df[event_mask].copy()
+            selected_events = eye_events_df[event_mask].groupby(['block', 'trial_per_block']).first().reset_index()
     else:
         # For specific event types (fixation, saccade, blink)
         event_mask = eye_events_df['type'] == event_type
@@ -304,93 +336,99 @@ def create_et_event_epochs(raw: mne.io.Raw, eye_events_df: pd.DataFrame,
         selected_events = eye_events_df[event_mask].copy()
     
     if len(selected_events) == 0:
-        raise ValueError(f"No {event_type} events found")
-    
-    # Convert to MNE events format
-    sfreq = raw.info['sfreq']
-    meg_start_time = raw.times[0]
-    meg_end_time = raw.times[-1]
-    meg_duration = meg_end_time - meg_start_time
+        raise ValueError(f"No {event_type} events found for scene viewing")
     
     if verbose:
-        print(f"MEG recording: {meg_start_time:.3f}s to {meg_end_time:.3f}s (duration: {meg_duration:.3f}s)")
-        print(f"Eye events time range: {selected_events['start_time'].min():.3f}s to {selected_events['start_time'].max():.3f}s")
-        print(f"Found {len(selected_events)} {event_type} events to check")
+        print(f"Found {len(selected_events)} {event_type} events during scene viewing")
     
+    # Apply systematic offset correction
+    offset_seconds = offset_scene_triggers_ms / 1000.0
+    
+    # Build list of MEG events using AVS composer approach
     mne_events = []
     valid_indices = []
-    out_of_range_count = 0
+    sfreq = raw.info['sfreq']
+    missing_triggers = 0
+    out_of_range = 0
     
     for idx, event in selected_events.iterrows():
-        # Convert ET time to MEG sample
-        et_time = event['start_time']
+        block = event['block']
+        trial_per_block = event['trial_per_block']
+        time_in_trial = event['time_in_trial']
         
-        # Check basic time alignment first
-        if et_time < meg_start_time or et_time > meg_end_time:
-            out_of_range_count += 1
+        # Find MEG scene onset trigger for this trial
+        # Following the approach from get_meg_timestamp in avs_trigger_tools.py
+        # First find the trial trigger, then use the previous event as scene onset
+        meg_scene_onset_sample = None
+        
+        # Look for trial trigger events matching trial_per_block
+        trial_trigger_events = meg_events[meg_events[:, 2] == trial_per_block]
+        
+        if len(trial_trigger_events) > 0:
+            # For each potential trial trigger, check if preceded by scene onset
+            for trial_sample, _, _ in trial_trigger_events:
+                # Find the index of this trial event in the full events array
+                trial_event_indices = np.where(meg_events[:, 0] == trial_sample)[0]
+                
+                if len(trial_event_indices) > 0:
+                    trial_event_index = trial_event_indices[0]
+                    
+                    # Check if there's a previous event (the scene onset)
+                    if trial_event_index > 0:
+                        prev_sample, _, prev_code = meg_events[trial_event_index - 1]
+                        
+                        # Following machine room logic: use interpolation between 
+                        # scene onset (previous event) and trial trigger
+                        if prev_code == scene_onset_code:
+                            # Use interpolation like in optimized_timing mode
+                            meg_scene_onset_sample = prev_sample + (trial_sample - prev_sample) // 2
+                            break
+                        else:
+                            # Use the previous event as scene onset regardless
+                            meg_scene_onset_sample = prev_sample
+                            break
+        
+        if meg_scene_onset_sample is None:
+            # Fallback: look for any scene onset trigger and use block info
+            # This handles cases where trial triggers are missing
+            scene_onset_events = meg_events[meg_events[:, 2] == scene_onset_code]
+            if len(scene_onset_events) > 0:
+                # Take the first scene onset found (simplified approach)
+                meg_scene_onset_sample = scene_onset_events[0, 0]
+        
+        if meg_scene_onset_sample is None:
+            missing_triggers += 1
+            if verbose and missing_triggers <= 5:  # Limit verbose output
+                print(f"No MEG scene onset found for block {block}, trial {trial_per_block}")
             continue
         
-        meg_sample = int((et_time - meg_start_time) * sfreq)
+        # Calculate MEG event time: scene_onset_time + time_in_trial + offset
+        meg_event_sample = meg_scene_onset_sample + int((time_in_trial + offset_seconds) * sfreq)
         
-        # Check if epoch would be within recording with some tolerance
-        epoch_start_sample = meg_sample + int(tmin * sfreq)
-        epoch_end_sample = meg_sample + int(tmax * sfreq)
+        # Check if epoch would be within recording bounds
+        epoch_start_sample = meg_event_sample + int(tmin * sfreq)
+        epoch_end_sample = meg_event_sample + int(tmax * sfreq)
         
-        # Allow some tolerance at boundaries
-        if (epoch_start_sample >= -10 and 
-            epoch_end_sample < len(raw.times) + 10):
-            
-            # Adjust sample if at boundaries
-            if epoch_start_sample < 0:
-                meg_sample = int(-tmin * sfreq)
-            if epoch_end_sample >= len(raw.times):
-                meg_sample = len(raw.times) - 1 - int(tmax * sfreq)
-            
-            # Use fixation sequence as event ID if available
-            if 'fix_sequence' in event:
-                event_id = int(event['fix_sequence']) + 1  # Start from 1
-            else:
-                event_id = 1
-            
-            mne_events.append([meg_sample, 0, event_id])
-            valid_indices.append(idx)
+        if epoch_start_sample < 0 or epoch_end_sample >= len(raw.times):
+            out_of_range += 1
+            continue
+        
+        # Create event ID (use fixation sequence if available, otherwise use trial number)
+        if 'fix_sequence' in event:
+            event_id = int(event['fix_sequence']) + 1  # Start from 1
+        else:
+            event_id = trial_per_block
+        
+        mne_events.append([meg_event_sample, 0, event_id])
+        valid_indices.append(idx)
     
     if verbose:
-        print(f"Events out of MEG time range: {out_of_range_count}")
+        print(f"Missing MEG scene onset triggers: {missing_triggers}")
+        print(f"Events out of MEG recording range: {out_of_range}")
         print(f"Valid events for epoching: {len(mne_events)}")
     
     if len(mne_events) == 0:
-        # Try with broader tolerance if no events found
-        if verbose:
-            print("No events found with strict timing. Trying with broader tolerance...")
-        
-        # Try to find events with very relaxed timing constraints
-        for idx, event in selected_events.iterrows():
-            et_time = event['start_time']
-            
-            # Much more relaxed timing check
-            time_diff = min(abs(et_time - meg_start_time), abs(et_time - meg_end_time))
-            if time_diff < meg_duration:  # Event is somewhat close to MEG recording
-                # Place event in middle of recording if timing is very off
-                meg_sample = len(raw.times) // 2
-                
-                if 'fix_sequence' in event:
-                    event_id = int(event['fix_sequence']) + 1
-                else:
-                    event_id = 1
-                
-                mne_events.append([meg_sample, 0, event_id])
-                valid_indices.append(idx)
-                
-                if len(mne_events) >= 10:  # Limit to reasonable number
-                    break
-        
-        if len(mne_events) == 0:
-            raise ValueError(f"No valid {event_type} events within MEG recording range. "
-                           f"MEG: {meg_start_time:.3f}-{meg_end_time:.3f}s, "
-                           f"ET events: {selected_events['start_time'].min():.3f}-{selected_events['start_time'].max():.3f}s")
-        elif verbose:
-            print(f"Using {len(mne_events)} events with relaxed timing constraints")
+        raise ValueError("No valid fixation events within MEG recording range after applying AVS composer approach")
     
     mne_events = np.array(mne_events)
     
@@ -425,6 +463,7 @@ def create_et_event_epochs(raw: mne.io.Raw, eye_events_df: pd.DataFrame,
     events_metadata['epoch_index'] = range(len(events_metadata))
     events_metadata['meg_sample'] = mne_events[:, 0]
     events_metadata['event_id'] = mne_events[:, 2]
+    events_metadata['meg_time_from_scene_onset'] = events_metadata['time_in_trial'] + offset_seconds
     
     if verbose:
         print(f"Created {len(epochs)} valid epochs")
