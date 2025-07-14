@@ -649,3 +649,192 @@ def preprocess_with_ica(raw: mne.io.Raw,
             print("Use apply_ica() to remove artifacts")
     
     return raw_clean, ica
+
+
+def apply_ica_to_raws(raws_dict: Dict[Any, mne.io.Raw],
+                     subject_id: int,
+                     session: int,
+                     use_precomputed: bool = True,
+                     ica_solutions_dir: Optional[str] = None,
+                     ica_exclusions_file: Optional[str] = None,
+                     compute_new_ica: bool = False,
+                     find_artifacts: bool = True,
+                     verbose: bool = True) -> Dict[Any, mne.io.Raw]:
+    """
+    Apply ICA artifact removal to a dictionary of raw MEG data.
+    
+    This function applies ICA (either precomputed or newly computed) to remove
+    artifacts from unconcatenated raw MEG data blocks.
+    
+    Parameters
+    ----------
+    raws_dict : dict
+        Dictionary mapping block IDs to raw MEG data
+    subject_id : int
+        Subject ID
+    session : int
+        Session number
+    use_precomputed : bool, optional
+        Whether to use precomputed ICA solutions (default: True)
+    ica_solutions_dir : str, optional
+        Path to directory containing precomputed ICA solutions (default: None)
+    ica_exclusions_file : str, optional
+        Path to JSON file containing ICA component exclusions (default: None)
+    compute_new_ica : bool, optional
+        Whether to compute new ICA if precomputed not available (default: False)
+    find_artifacts : bool, optional
+        Whether to automatically find artifact components when computing new ICA (default: True)
+    verbose : bool, optional
+        Whether to print progress information (default: True)
+        
+    Returns
+    -------
+    dict
+        Dictionary mapping block IDs to ICA-cleaned raw MEG data
+        
+    Notes
+    -----
+    This function operates on unconcatenated raw data blocks, applying ICA
+    to each block individually for optimal artifact removal.
+    """
+    import os
+    import json
+    from ..utils.paths import get_subject_session_id, convert_session_to_letter
+    
+    if verbose:
+        print(f"Applying ICA to {len(raws_dict)} blocks for subject {subject_id}, session {session}")
+    
+    cleaned_raws = {}
+    
+    if use_precomputed:
+        # Try to apply precomputed ICA
+        if verbose:
+            print("Attempting to use precomputed ICA solutions...")
+            
+        # Get default paths if not provided
+        if ica_solutions_dir is None or ica_exclusions_file is None:
+            # Try shared directory first
+            shared_ica_dir = '/share/klab/datasets/avs/AVS-UTILS/ica'
+            
+            if ica_solutions_dir is None:
+                if os.path.exists(shared_ica_dir):
+                    ica_solutions_dir = os.path.join(shared_ica_dir, 'ica_solutions')
+                else:
+                    # Fallback to package directory
+                    import pyavs
+                    package_dir = os.path.dirname(pyavs.__file__)
+                    ica_solutions_dir = os.path.join(package_dir, 'preprocessing', 'ica', 'ica_solutions')
+            
+            if ica_exclusions_file is None:
+                if os.path.exists(shared_ica_dir):
+                    ica_exclusions_file = os.path.join(shared_ica_dir, 'ica_exclusions', 'ex_components.json')
+                else:
+                    # Fallback to package directory
+                    import pyavs
+                    package_dir = os.path.dirname(pyavs.__file__)
+                    ica_exclusions_file = os.path.join(package_dir, 'preprocessing', 'ica', 'ica_exclusions', 'ex_components.json')
+        
+        # Create subject-session identifier
+        session_letter = convert_session_to_letter(session)
+        subject_session_id = get_subject_session_id(subject_id, session, prefix='as')
+        
+        # Construct ICA solution file path
+        ica_solution_path = os.path.join(
+            ica_solutions_dir, 
+            subject_session_id,
+            f"{subject_session_id}-ica.fif"
+        )
+        
+        # Try to load precomputed ICA
+        try:
+            if verbose:
+                print(f"Loading precomputed ICA from: {ica_solution_path}")
+            
+            ica = load_ica(ica_solution_path)
+            
+            # Load exclusion components
+            try:
+                with open(ica_exclusions_file, 'r') as f:
+                    exclusions_data = json.load(f)
+                
+                # Get exclusions for this subject
+                subject_key = f"as{subject_id:02d}"
+                if subject_key in exclusions_data:
+                    session_idx = session - 1  # Convert to 0-based index
+                    if session_idx < len(exclusions_data[subject_key]):
+                        exclude_components = exclusions_data[subject_key][session_idx]
+                        ica.exclude = exclude_components
+                        
+                        if verbose:
+                            print(f"Excluding {len(exclude_components)} ICA components: {exclude_components}")
+                    else:
+                        if verbose:
+                            print(f"Warning: No exclusions found for session {session}")
+                else:
+                    if verbose:
+                        print(f"Warning: No exclusions found for subject {subject_id}")
+            
+            except Exception as e:
+                if verbose:
+                    print(f"Warning: Could not load ICA exclusions: {e}")
+            
+            # Apply precomputed ICA to all blocks
+            for block_id, raw in raws_dict.items():
+                if verbose:
+                    print(f"Applying precomputed ICA to block {block_id}")
+                
+                cleaned_raw = apply_ica(raw, ica, copy=True, verbose=verbose)
+                cleaned_raws[block_id] = cleaned_raw
+                
+            if verbose:
+                print("Successfully applied precomputed ICA to all blocks")
+            
+            return cleaned_raws
+            
+        except (FileNotFoundError, ValueError) as e:
+            if verbose:
+                print(f"Error loading precomputed ICA: {e}")
+            
+            if not compute_new_ica:
+                if verbose:
+                    print("compute_new_ica=False, returning original data without ICA")
+                return raws_dict
+    
+    # Compute new ICA if precomputed failed or not requested
+    if compute_new_ica or not use_precomputed:
+        if verbose:
+            print("Computing new ICA for artifact removal...")
+        
+        # Use the first block for ICA computation (or concatenate if needed)
+        first_block = list(raws_dict.values())[0]
+        
+        # Compute ICA
+        ica = compute_ica(first_block, verbose=verbose)
+        
+        # Find artifact components if requested
+        exclude_components = []
+        if find_artifacts:
+            eye_components = find_eye_components(ica, first_block, verbose=verbose)
+            cardiac_components = find_cardiac_components(ica, first_block, verbose=verbose)
+            exclude_components = eye_components + cardiac_components
+            
+            if verbose and exclude_components:
+                print(f"Found {len(exclude_components)} artifact components: {exclude_components}")
+        
+        # Apply ICA to all blocks
+        for block_id, raw in raws_dict.items():
+            if verbose:
+                print(f"Applying computed ICA to block {block_id}")
+            
+            cleaned_raw = apply_ica(raw, ica, exclude=exclude_components, copy=True, verbose=verbose)
+            cleaned_raws[block_id] = cleaned_raw
+        
+        if verbose:
+            print("Successfully applied computed ICA to all blocks")
+        
+        return cleaned_raws
+    
+    # If we get here, return original data
+    if verbose:
+        print("No ICA processing applied, returning original data")
+    return raws_dict

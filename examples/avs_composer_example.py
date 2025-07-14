@@ -66,8 +66,17 @@ def main():
         print(f"   Error loading MEG data: {e}")
         return
     
+    # Apply ICA artifact removal to raw data blocks
+    print("\n3. Applying ICA artifact removal...")
+    try:
+        composer.apply_ica_to_blocks()
+        print("   ✓ ICA artifact removal completed for all blocks")
+    except Exception as e:
+        print(f"   Error applying ICA: {e}")
+        # Continue without ICA if it fails
+    
     # Filter MEG data (note: filtering is handled by preprocess_meg_block when recompute_prepro=True)
-    print("\n3. MEG preprocessing and filtering...")
+    print("\n4. MEG preprocessing and filtering...")
     if composer.recompute_prepro:
         print("   ✓ Filtering handled automatically by preprocess_meg_block during data loading")
         print(f"   ✓ Applied {composer.l_freq}-{composer.h_freq} Hz band-pass filter ({'causal' if composer.causal_filter else 'non-causal'})")
@@ -80,7 +89,7 @@ def main():
             return
     
     # Concatenate MEG blocks
-    print("\n4. Concatenating MEG blocks...")
+    print("\n5. Concatenating MEG blocks...")
     try:
         composer.concatenate_raws_per_session()
         print(f"   ✓ Concatenated {len(composer.raws_dict)} MEG blocks")
@@ -92,7 +101,7 @@ def main():
         return
     
     # Find MEG events
-    print("\n5. Finding MEG events...")
+    print("\n6. Finding MEG events...")
     try:
         composer.find_events_in_raw()
         print(f"   ✓ Found {len(composer.meg_trigger_events)} MEG events")
@@ -103,7 +112,7 @@ def main():
         return
     
     # Get eye tracking annotations and create epochs
-    print("\n6. Processing eye tracking data...")
+    print("\n7. Processing eye tracking data...")
     
     # Process each event type separately (new pyAVS approach)
     event_types = ["fixation", "saccade"]
@@ -148,7 +157,7 @@ def main():
    
     
     # Create simple median ERF plots
-    print("\n7. Creating median ERF plots...")
+    print("\n8. Creating median ERF plots...")
     try:
         import matplotlib.pyplot as plt
         
@@ -185,7 +194,7 @@ def main():
         print(f"   Error creating ERF plots: {e}")
     
     # Get data summary
-    print("\n8. Data summary...")
+    print("\n9. Data summary...")
     try:
         summary = composer.get_data_summary()
         print(f"   ✓ Subject: {summary['subject']}")
@@ -203,13 +212,13 @@ def main():
     print("\n=== AVS Composer Example Complete ===")
     print("This example demonstrated:")
     print("- MEG data loading and preprocessing using pyAVS meg.py functions")
-    print("- ICA integration for artifact removal (precomputed or on-the-fly)")
+    print("- Standalone ICA artifact removal applied to unconcatenated blocks")
     print("- Eye tracking data integration with single event type processing")
     print("- Trigger-based MEG-ET alignment")
     print("- Epoch creation with metadata for multiple event types")
     print("- Simple median ERF visualization for different ET event types")
     print("- Replication of AVS-machine-room composer functionality in pyAVS")
-    print("- Unified preprocessing pipeline with reduced code redundancy")
+    print("- Modular preprocessing pipeline with separated ICA processing")
 
 
 def minimal_composer_example():

@@ -300,10 +300,6 @@ class AVSComposer:
                             subject_id=self.subject,
                             session=self.session_num,
                             block=block,
-                            apply_ica=self.apply_ica,
-                            use_precomputed_ica=self.use_precomputed_ica,
-                            ica_solutions_dir=self.ica_solutions_dir,
-                            ica_exclusions_file=self.ica_exclusions_file,
                             l_freq=self.l_freq,
                             h_freq=self.h_freq,
                             resample_freq=self.resample_freq,
@@ -981,3 +977,58 @@ class AVSComposer:
         }
         
         return summary
+
+    def apply_ica_to_blocks(self,
+                           use_precomputed: Optional[bool] = None,
+                           compute_new_ica: bool = False,
+                           find_artifacts: bool = True) -> None:
+        """
+        Apply ICA artifact removal to loaded MEG blocks.
+        
+        This method applies ICA (either precomputed or newly computed) to remove
+        artifacts from the loaded raw MEG data blocks. It operates on unconcatenated
+        data for optimal artifact removal.
+        
+        Parameters
+        ----------
+        use_precomputed : bool, optional
+            Whether to use precomputed ICA solutions. If None, uses instance variable.
+        compute_new_ica : bool, optional
+            Whether to compute new ICA if precomputed not available (default: False)
+        find_artifacts : bool, optional
+            Whether to automatically find artifact components when computing new ICA (default: True)
+            
+        Notes
+        -----
+        This method modifies self.raws_dict in place with ICA-cleaned data.
+        ICA is applied before concatenation for optimal results.
+        """
+        from .ica import apply_ica_to_raws
+        
+        if not self.raws_dict:
+            if self.verbose:
+                print("No raw data loaded. Please run load_meg_data() first.")
+            return
+        
+        # Use instance variables as defaults
+        if use_precomputed is None:
+            use_precomputed = self.use_precomputed_ica
+        
+        if self.verbose:
+            print("Applying ICA artifact removal to MEG blocks...")
+        
+        # Apply ICA using the standalone function
+        self.raws_dict = apply_ica_to_raws(
+            raws_dict=self.raws_dict,
+            subject_id=self.subject,
+            session=self.session_num,
+            use_precomputed=use_precomputed,
+            ica_solutions_dir=self.ica_solutions_dir,
+            ica_exclusions_file=self.ica_exclusions_file,
+            compute_new_ica=compute_new_ica,
+            find_artifacts=find_artifacts,
+            verbose=self.verbose
+        )
+        
+        if self.verbose:
+            print("ICA artifact removal completed for all blocks")

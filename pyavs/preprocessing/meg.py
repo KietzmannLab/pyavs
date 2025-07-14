@@ -521,10 +521,6 @@ def preprocess_meg_block(raw: mne.io.Raw,
                         apply_filtering: bool = True,
                         apply_resampling: bool = True,
                         interpolate_bads: bool = True,
-                        apply_ica: bool = False,
-                        use_precomputed_ica: bool = False,
-                        ica_solutions_dir: Optional[str] = None,
-                        ica_exclusions_file: Optional[str] = None,
                         l_freq: float = 0.2,
                         h_freq: float = 100.0,
                         resample_freq: float = 500.0,
@@ -554,14 +550,6 @@ def preprocess_meg_block(raw: mne.io.Raw,
         Whether to resample data (default: True)
     interpolate_bads : bool, optional
         Whether to interpolate bad channels (default: True)
-    apply_ica : bool, optional
-        Whether to apply ICA for artifact removal (default: False)
-    use_precomputed_ica : bool, optional
-        Whether to use precomputed ICA solution (default: False)
-    ica_solutions_dir : str, optional
-        Path to ICA solutions directory (default: None, uses package default)
-    ica_exclusions_file : str, optional
-        Path to ICA exclusions JSON file (default: None, uses package default)
     l_freq : float, optional
         Low-pass frequency in Hz (default: 0.2)
     h_freq : float, optional
@@ -630,39 +618,6 @@ def preprocess_meg_block(raw: mne.io.Raw,
             causal=causal_filter,
             verbose=verbose
         )
-    
-    # Apply ICA for artifact removal
-    if use_precomputed_ica:
-        if verbose:
-            print("Applying precomputed ICA solution...")
-        
-        try:
-            raw_processed = apply_precomputed_ica(
-                raw_processed,
-                subject_id=subject_id,
-                session=session,
-                ica_solutions_dir=ica_solutions_dir,
-                ica_exclusions_file=ica_exclusions_file,
-                verbose=verbose
-            )
-        except (FileNotFoundError, ValueError) as e:
-            if verbose:
-                print(f"Error applying precomputed ICA: {e}")
-                print("Skipping ICA processing and continuing...")
-            # Continue without ICA
-            
-    elif apply_ica:
-        if verbose:
-            print("Computing ICA for artifact removal...")
-        
-        # Compute ICA
-        ica = compute_ica(raw_processed, verbose=verbose)
-        
-        # Find eye components automatically
-        eye_components = find_eye_components(ica, raw_processed, verbose=verbose)
-        
-        # Apply ICA to remove artifacts
-        raw_processed = apply_ica(raw_processed, ica, exclude=eye_components, verbose=verbose)
     
     # Apply resampling
     if apply_resampling and raw_processed.info['sfreq'] != resample_freq:
