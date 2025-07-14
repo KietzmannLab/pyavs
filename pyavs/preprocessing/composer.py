@@ -557,6 +557,7 @@ class AVSComposer:
     def get_et_annotations(
         self,
         et_event_types: List[str] = ["fixation", "saccade"],
+        recording: str = "scene",
         exclude_last_fixation: bool = True,
         get_object_labels: bool = False,
         add_cross_event_info: bool = True,
@@ -570,6 +571,10 @@ class AVSComposer:
         ----------
         et_event_types : list, optional
             List of event types to extract from the eye tracking data. Defaults to ["fixation", "saccade"].
+            Valid options: ["fixation", "saccade", "blink"].
+        recording : str, optional
+            Recording context to filter events by. Defaults to "scene".
+            Valid options: ["scene", "caption", "microphone"].
         exclude_last_fixation : bool, optional
             Whether to exclude the last fixation event on each scene. Defaults to True.
         get_object_labels : bool, optional
@@ -618,7 +623,8 @@ class AVSComposer:
             block_trigger_offset=1000,
             stim_channel='STI101',
             verbose=True,
-            event_types=et_event_types
+            event_types=et_event_types,
+            recording=recording
         )
         
         # Save the annotated raws
@@ -645,6 +651,7 @@ class AVSComposer:
         tmin: float,
         tmax: float, 
         event_types: List[str],
+        recording: str = "scene",
         save_epochs: bool = True,
         get_metadata: bool = True,
         get_object_labels: bool = False,
@@ -660,7 +667,11 @@ class AVSComposer:
         tmax : float
             The end of the epoch in seconds (around et event onset)
         event_types : list of str
-            The event types for which we want to make epochs. E.g. ["fixation", "saccade"]
+            The event types for which we want to make epochs. E.g. ["fixation", "saccade", "blink"]
+            Valid options: ["fixation", "saccade", "blink", "scene"]
+        recording : str, optional
+            Recording context to filter events by. Defaults to "scene".
+            Valid options: ["scene", "caption", "microphone"].
         save_epochs : bool, optional
             Whether to save the epochs to file. Defaults to True.
         get_metadata : bool, optional
@@ -672,8 +683,8 @@ class AVSComposer:
         """
     
         # Check whether event_types are valid
-        if not set(event_types).issubset(set(["fixation", "saccade", "scene"])):
-            raise ValueError("event_types must be a subset of ['fixation', 'saccade', 'scene']")
+        if not set(event_types).issubset(set(["fixation", "saccade", "blink", "scene"])):
+            raise ValueError("event_types must be a subset of ['fixation', 'saccade', 'blink', 'scene']")
         else:
             self.et_event_types = event_types
 
@@ -684,7 +695,7 @@ class AVSComposer:
         # Add the et annotations to the raw data
         # Check if raws_annotated exists:
         if not hasattr(self, "raws_annotated"):
-            self.get_et_annotations(et_event_types=["fixation", "saccade"], get_object_labels=get_object_labels)
+            self.get_et_annotations(et_event_types=event_types, recording=recording, get_object_labels=get_object_labels)
 
         events_annot = mne.events_from_annotations(
             self.raws_annotated,
@@ -707,6 +718,8 @@ class AVSComposer:
                 event_id = events_annot[1]['fixation']
             elif event_type == 'saccade':  # An epoch focussing on the saccade period
                 event_id = events_annot[1]['saccade']
+            elif event_type == 'blink':  # An epoch focussing on the blink period
+                event_id = events_annot[1]['blink']
             elif event_type == 'scene':  # An epoch focussing on the 4s scene period
                 event_id = events_annot[1]['scene']
 
@@ -735,7 +748,7 @@ class AVSComposer:
             # Add metadata to the epochs object
             if get_metadata:
                 # As metadata we will add all kinds of information about the eye tracking events
-                if event_type == "fixation" or event_type == "saccade":
+                if event_type in ["fixation", "saccade", "blink"]:
                     self.add_et_metadata_to_epochs(metadata_colnames=self.et_events.columns)
                 elif event_type == "scene":
                     self.add_scene_metadata_to_epochs(metadata_colnames=self.et_events.columns)

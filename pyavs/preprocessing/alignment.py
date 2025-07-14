@@ -1,8 +1,10 @@
 """
 MEG-ET alignment and fusion for pyAVS package.
 
-This module provides the MEGETComposer pipeline for temporal alignment and fusion of MEG 
+This module provides helper functions for temporal alignment and fusion of MEG 
 and eye-tracking data using the AVS composer approach with trigger-based alignment.
+
+For the main MEG-ET pipeline, use AVSComposer from .composer module.
 """
 
 import os
@@ -17,6 +19,10 @@ from ..dataloader.eye import load_and_enrich_eye_events
 from ..utils.validation import validate_subject_id, validate_session
 from ..utils.paths import get_max_blocks
 from .trigger_tools import get_meg_trigger_dict, get_avs_blocks, repair_meg_trigger_events as repair_meg_trigger_events_legacy
+from .composer import AVSComposer
+
+# For backward compatibility, alias AVSComposer as MEGETComposer
+MEGETComposer = AVSComposer
 
 
 def get_meg_trigger_mapping() -> Dict[str, int]:
@@ -96,7 +102,7 @@ def create_et_event_epochs(raw: mne.io.Raw, eye_events_df: pd.DataFrame,
     event_type : str, optional
         Type of eye tracking event to use ('scene', 'fixation', 'saccade', 'blink') (default: 'saccade')
     recording : str, optional
-        Recording context ('scene', 'caption', "microphone".) (default: 'scene')
+        Recording context ('scene', 'caption', 'microphone') (default: 'scene')
     tmin : float, optional
         Start time before event in seconds (default: -0.2)
     tmax : float, optional
@@ -159,13 +165,14 @@ def create_et_event_epochs(raw: mne.io.Raw, eye_events_df: pd.DataFrame,
     
     # Filter et_events_df for the specified event type and recording context
     selected_events = eye_events_df[eye_events_df['type'] == event_type]
-    selected_events = selected_events[selected_events['recording'] == recording]
+    if 'recording' in eye_events_df.columns:
+        selected_events = selected_events[selected_events['recording'] == recording]
     
     if len(selected_events) == 0:
-        raise ValueError(f"No {event_type} events found for scene viewing")
+        raise ValueError(f"No {event_type} events found for {recording} recording")
     
     if verbose:
-        print(f"Found {len(selected_events)} {event_type} events during scene viewing")
+        print(f"Found {len(selected_events)} {event_type} events during {recording} recording")
     
     # Apply systematic offset correction
     offset_seconds = offset_scene_triggers_ms / 1000.0
@@ -254,7 +261,7 @@ def create_et_event_epochs(raw: mne.io.Raw, eye_events_df: pd.DataFrame,
         print(f"Valid events for epoching: {len(mne_events)}")
     
     if len(mne_events) == 0:
-        raise ValueError("No valid fixation events within MEG recording range after applying AVS composer approach")
+        raise ValueError(f"No valid {event_type} events within MEG recording range after applying AVS composer approach")
     
     mne_events = np.array(mne_events, dtype=np.int64)
     
@@ -266,8 +273,6 @@ def create_et_event_epochs(raw: mne.io.Raw, eye_events_df: pd.DataFrame,
         print(f"Creating {len(mne_events)} epochs from {event_type} events")
         print(f"Time window: {tmin} to {tmax} seconds")
         print(f"Event ID mapping: {event_id}")
-        print(mne_events)
-
     
     # Create epochs
     epochs = mne.Epochs(
@@ -300,400 +305,3 @@ def create_et_event_epochs(raw: mne.io.Raw, eye_events_df: pd.DataFrame,
             print(f"Rejected {len(mne_events) - len(epochs)} epochs")
     
     return epochs, events_metadata
-
-
-class MEGETComposer:
-    """
-    MEG-ET data alignment and fusion using trigger-based synchronization.
-    
-    This class implements the complete pipeline for loading, aligning, and fusing MEG and 
-    eye-tracking data using the AVS composer approach with scene onset triggers.
-    """
-    
-    def __init__(self, subject_id: int, session: int, 
-                 data_dir: str, output_dir: str,
-                 blocks: Optional[List[int]] = None,
-                 verbose: bool = True):
-        """
-        Initialize MEG-ET composer.
-        
-        Parameters
-        ----------
-        subject_id : int
-            Subject identifier
-        session : int
-            Session number
-        data_dir : str
-            Path to data directory
-        output_dir : str
-            Path to output directory
-        blocks : list of int, optional
-            Block numbers to process (default: None, process all)
-        verbose : bool, optional
-            Whether to print processing information (default: True)
-        """
-        self.subject_id = validate_subject_id(subject_id)
-        self.session = validate_session(session)
-        self.data_dir = data_dir
-        self.output_dir = output_dir
-        self.blocks = blocks
-        self.verbose = verbose
-        
-        # Initialize data storage
-        self.meg_data = {}
-        self.eye_data = None
-        self.concatenated_meg = None
-        self.aligned_raw = None
-        self.epochs = None
-        self.events_metadata = None
-        
-        if self.verbose:
-            print(f"Initialized MEGETComposer for subject {self.subject_id}, session {self.session}")
-    
-    def load_all_data(self, preload: bool = True, 
-                     apply_filtering: bool = True,
-                     l_freq: float = 0.2, h_freq: float = 200.0,
-                     resample_freq: Optional[float] = None) -> None:
-        """
-        Load all MEG and eye tracking data.
-        
-        Parameters
-        ----------
-        preload : bool, optional
-            Whether to preload MEG data (default: True)
-        apply_filtering : bool, optional
-            Whether to apply filtering (default: True)
-        l_freq : float, optional
-            Low frequency cutoff (default: 0.2)
-        h_freq : float, optional
-            High frequency cutoff (default: 200.0)
-        resample_freq : float, optional
-            Resampling frequency (default: None)
-        """
-        if self.verbose:
-            print("Loading MEG data...")
-        self.load_meg_data(preload=preload)
-        
-        if self.verbose:
-            print("Loading eye tracking data...")
-        self.load_eye_data()
-        
-        if self.verbose:
-            print("Processing MEG data...")
-        self.filter_and_resample_blocks(
-            apply_filtering=apply_filtering,
-            l_freq=l_freq,
-            h_freq=h_freq,
-            resample_freq=resample_freq
-        )
-        
-        if self.verbose:
-            print("Concatenating MEG blocks...")
-        self.concatenate_meg_data()
-        
-        if self.verbose:
-            print("Data loading complete!")
-    
-    def load_meg_data(self, preload: bool = True) -> Dict[int, mne.io.Raw]:
-        """
-        Load MEG data for all blocks.
-        
-        Parameters
-        ----------
-        preload : bool, optional
-            Whether to preload data (default: True)
-            
-        Returns
-        -------
-        dict
-            Dictionary mapping block numbers to Raw objects
-        """
-        if self.blocks is None:
-            max_blocks = get_max_blocks(self.session)
-            self.blocks = list(range(1, max_blocks + 1))
-        
-        meg_data = {}
-        for block in self.blocks:
-            try:
-                raw_dict = load_meg_session(
-                    self.subject_id, self.session, 
-                    runs=[block],
-                    data_path=self.data_dir,
-                    preload=preload
-                )
-                if block in raw_dict:
-                    meg_data[block] = raw_dict[block]
-                    if self.verbose:
-                        print(f"Loaded MEG block {block}: {raw_dict[block].info['nchan']} channels, {len(raw_dict[block].times)} samples")
-            except Exception as e:
-                if self.verbose:
-                    print(f"Failed to load MEG block {block}: {e}")
-                continue
-        
-        self.meg_data = meg_data
-        return meg_data
-    
-    def filter_and_resample_blocks(self, apply_filtering: bool = True,
-                                  l_freq: float = 0.2, h_freq: float = 200.0,
-                                  resample_freq: Optional[float] = None) -> None:
-        """
-        Apply filtering and resampling to MEG blocks.
-        
-        Parameters
-        ----------
-        apply_filtering : bool, optional
-            Whether to apply filtering (default: True)
-        l_freq : float, optional
-            Low frequency cutoff (default: 0.2)
-        h_freq : float, optional
-            High frequency cutoff (default: 200.0)
-        resample_freq : float, optional
-            Resampling frequency (default: None)
-        """
-        if not self.meg_data:
-            raise ValueError("No MEG data loaded. Call load_meg_data() first.")
-        
-        for block, raw in self.meg_data.items():
-            if apply_filtering:
-                raw.filter(l_freq=l_freq, h_freq=h_freq, verbose=self.verbose)
-                if self.verbose:
-                    print(f"Filtered block {block}: {l_freq}-{h_freq} Hz")
-            
-            if resample_freq:
-                raw.resample(resample_freq, verbose=self.verbose)
-                if self.verbose:
-                    print(f"Resampled block {block} to {resample_freq} Hz")
-    
-    def load_eye_data(self) -> None:
-        """Load eye tracking data."""
-        try:
-            self.eye_data = load_and_enrich_eye_events(
-                self.subject_id, self.session,
-                data_dir=self.data_dir
-            )
-            if self.verbose:
-                print(f"Loaded eye tracking data: {len(self.eye_data)} events")
-        except Exception as e:
-            if self.verbose:
-                print(f"Failed to load eye tracking data: {e}")
-            self.eye_data = None
-    
-    def concatenate_meg_data(self, interpolate_bads: bool = True) -> None:
-        """
-        Concatenate MEG blocks into single Raw object.
-        
-        Parameters
-        ----------
-        interpolate_bads : bool, optional
-            Whether to interpolate bad channels (default: True)
-        """
-        if not self.meg_data:
-            raise ValueError("No MEG data loaded. Call load_meg_data() first.")
-        
-        # Sort blocks by number
-        sorted_blocks = sorted(self.meg_data.keys())
-        raw_list = [self.meg_data[block] for block in sorted_blocks]
-        
-        # Concatenate
-        self.concatenated_meg = mne.concatenate_raws(raw_list, preload=True)
-        
-        if interpolate_bads:
-            self.concatenated_meg.interpolate_bads()
-            if self.verbose:
-                print("Interpolated bad channels")
-        
-        if self.verbose:
-            print(f"Concatenated {len(raw_list)} MEG blocks: {self.concatenated_meg.info['nchan']} channels, {len(self.concatenated_meg.times)} samples")
-    
-    def align_meg_et_data(self, offset_scene_triggers_ms: float = 20.0) -> None:
-        """
-        Align MEG and eye tracking data using trigger-based approach.
-        
-        Parameters
-        ----------
-        offset_scene_triggers_ms : float, optional
-            Systematic offset correction in milliseconds (default: 20.0)
-        """
-        if self.concatenated_meg is None:
-            raise ValueError("No concatenated MEG data. Call concatenate_meg_data() first.")
-        
-        if self.eye_data is None:
-            raise ValueError("No eye tracking data loaded. Call load_eye_data() first.")
-        
-        # Create aligned raw data with ET annotations
-        self.aligned_raw = self._create_et_annotations_with_triggers(
-            offset_scene_triggers_ms=offset_scene_triggers_ms
-        )
-        
-        if self.verbose:
-            print(f"Aligned MEG-ET data with {len(self.aligned_raw.annotations)} annotations")
-    
-    def _create_et_annotations_with_triggers(self, offset_scene_triggers_ms: float = 20.0) -> mne.io.Raw:
-        """
-        Create ET annotations using trigger-based alignment.
-        
-        Parameters
-        ----------
-        offset_scene_triggers_ms : float, optional
-            Systematic offset correction in milliseconds (default: 20.0)
-            
-        Returns
-        -------
-        mne.io.Raw
-            Raw data with ET annotations
-        """
-        raw_with_annotations = self.concatenated_meg.copy()
-        
-        # Get MEG events
-        meg_events = mne.find_events(raw_with_annotations, stim_channel='STI101', 
-                                   consecutive=True, min_duration=0.005)
-        
-        # Repair trigger events if needed
-        meg_events_repaired = repair_meg_trigger_events(
-            meg_events, self.session, verbose=self.verbose
-        )
-        
-        # Create annotations using scene onset triggers
-        annotations = []
-        meg_trigger_mapping = get_meg_trigger_mapping()
-        scene_onset_code = meg_trigger_mapping['scene_on']
-        
-        offset_seconds = offset_scene_triggers_ms / 1000.0
-        sfreq = raw_with_annotations.info['sfreq']
-        
-        # Process each eye tracking event
-        for idx, event in self.eye_data.iterrows():
-            if 'time_in_trial' not in event or 'block' not in event or 'trial_per_block' not in event:
-                continue
-                
-            block = event['block']
-            trial_per_block = event['trial_per_block']
-            time_in_trial = event['time_in_trial']
-            
-            # Find corresponding MEG scene onset
-            trial_trigger_events = meg_events_repaired[meg_events_repaired[:, 2] == trial_per_block]
-            
-            meg_scene_onset_sample = None
-            for trial_sample, _, _ in trial_trigger_events:
-                trial_event_indices = np.where(meg_events_repaired[:, 0] == trial_sample)[0]
-                if len(trial_event_indices) > 0:
-                    trial_event_index = trial_event_indices[0]
-                    if trial_event_index > 0:
-                        prev_sample, _, prev_code = meg_events_repaired[trial_event_index - 1]
-                        if prev_code == scene_onset_code:
-                            meg_scene_onset_sample = prev_sample + (trial_sample - prev_sample) // 2
-                            break
-                        else:
-                            meg_scene_onset_sample = prev_sample
-                            break
-            
-            if meg_scene_onset_sample is not None:
-                # Calculate annotation time
-                meg_event_sample = meg_scene_onset_sample + int((time_in_trial + offset_seconds) * sfreq)
-                meg_event_time = meg_event_sample / sfreq
-                
-                # Add annotation
-                event_type = event.get('type', 'unknown')
-                duration = event.get('duration', 0.1)
-                
-                annotations.append({
-                    'onset': meg_event_time,
-                    'duration': duration,
-                    'description': f"{event_type}_{block}_{trial_per_block}"
-                })
-        
-        if annotations:
-            # Create MNE annotations
-            onsets = [ann['onset'] for ann in annotations]
-            durations = [ann['duration'] for ann in annotations]
-            descriptions = [ann['description'] for ann in annotations]
-            
-            mne_annotations = mne.Annotations(
-                onset=onsets,
-                duration=durations,
-                description=descriptions,
-                orig_time=raw_with_annotations.info['meas_date']
-            )
-            
-            raw_with_annotations.set_annotations(mne_annotations)
-        
-        return raw_with_annotations
-    
-    def create_epochs(self, event_type: str = 'saccade',
-                     tmin: float = -0.2, tmax: float = 0.8,
-                     baseline: Optional[Tuple[float, float]] = None,
-                     picks: Optional[Union[str, list]] = 'meg',
-                     reject: Optional[dict] = None,
-                     offset_scene_triggers_ms: float = 20.0) -> Tuple[mne.Epochs, pd.DataFrame]:
-        """
-        Create epochs from aligned MEG-ET data.
-        
-        Parameters
-        ----------
-        event_type : str, optional
-            Type of eye tracking event ('fixation', 'saccade', 'blink') (default: 'saccade')
-        tmin : float, optional
-            Start time before event (default: -0.2)
-        tmax : float, optional
-            End time after event (default: 0.8)
-        baseline : tuple, optional
-            Baseline time window (default: None)
-        picks : str or list, optional
-            Channels to include (default: 'meg')
-        reject : dict, optional
-            Rejection criteria (default: None)
-        offset_scene_triggers_ms : float, optional
-            Systematic offset correction in milliseconds (default: 20.0)
-            
-        Returns
-        -------
-        tuple
-            (epochs, events_metadata)
-        """
-        if self.concatenated_meg is None:
-            raise ValueError("No concatenated MEG data. Call concatenate_meg_data() first.")
-        
-        if self.eye_data is None:
-            raise ValueError("No eye tracking data loaded. Call load_eye_data() first.")
-        
-        # Create epochs using AVS composer approach
-        epochs, events_metadata = create_et_event_epochs(
-            self.concatenated_meg,
-            self.eye_data,
-            event_type=event_type,
-            tmin=tmin,
-            tmax=tmax,
-            baseline=baseline,
-            picks=picks,
-            reject=reject,
-            offset_scene_triggers_ms=offset_scene_triggers_ms,
-            verbose=self.verbose
-        )
-        
-        self.epochs = epochs
-        self.events_metadata = events_metadata
-        
-        return epochs, events_metadata
-    
-    def get_data_summary(self) -> Dict[str, Any]:
-        """
-        Get summary of loaded and processed data.
-        
-        Returns
-        -------
-        dict
-            Summary information
-        """
-        summary = {
-            'subject_id': self.subject_id,
-            'session': self.session,
-            'blocks_loaded': list(self.meg_data.keys()) if self.meg_data else [],
-            'meg_channels': self.concatenated_meg.info['nchan'] if self.concatenated_meg else 0,
-            'meg_samples': len(self.concatenated_meg.times) if self.concatenated_meg else 0,
-            'meg_duration': self.concatenated_meg.times[-1] if self.concatenated_meg else 0,
-            'eye_events': len(self.eye_data) if self.eye_data is not None else 0,
-            'epochs_created': len(self.epochs) if self.epochs else 0,
-            'annotations': len(self.aligned_raw.annotations) if self.aligned_raw else 0
-        }
-        
-        return summary

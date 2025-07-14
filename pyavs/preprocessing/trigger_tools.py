@@ -328,7 +328,8 @@ def get_meg_timestamp(meg_events: np.ndarray, trial: int, block: int,
 def add_fix_event_trigger(raw: mne.io.Raw, blocks: List[int], et_events: pd.DataFrame, 
                          session: int, block_trigger_offset: int = 1000, 
                          stim_channel: str = 'STI101', verbose: bool = True,
-                         event_types: List[str] = ['fixation', 'saccade']) -> Tuple[mne.io.Raw, List[Tuple[int, int]]]:
+                         event_types: List[str] = ['fixation', 'saccade'],
+                         recording: str = 'scene') -> Tuple[mne.io.Raw, List[Tuple[int, int]]]:
     """
     Adds eye movement based event triggers (fixation, saccade) to the raw neuro data.
     
@@ -350,6 +351,10 @@ def add_fix_event_trigger(raw: mne.io.Raw, blocks: List[int], et_events: pd.Data
         Print some output (default: True)
     event_types : list of str, optional
         List of event types to add (default: ['fixation', 'saccade'])
+        Valid options: ['fixation', 'saccade', 'blink']
+    recording : str, optional
+        Recording context to filter events by (default: 'scene')
+        Valid options: ['scene', 'caption', 'microphone']
         
     Returns
     -------
@@ -421,12 +426,12 @@ def add_fix_event_trigger(raw: mne.io.Raw, blocks: List[int], et_events: pd.Data
             for event_type in event_types:
                 scene_events = et_events.loc[
                     (et_events.sceneID == scene_id) & 
-                    (et_events.recording == 'scene') & 
+                    (et_events.recording == recording) & 
                     (et_events.type == event_type)
                 ]
                 
                 if verbose:
-                    print("We found {} {} events for scene {}".format(len(scene_events), event_type, scene_id))
+                    print("We found {} {} events for scene {} during {} recording".format(len(scene_events), event_type, scene_id, recording))
 
                 onsets = scene_events.loc[:, 'time_in_trial']
                 durations = scene_events.loc[:, 'duration']
