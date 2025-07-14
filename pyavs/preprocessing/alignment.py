@@ -12,7 +12,7 @@ import mne
 from typing import List, Optional, Tuple, Dict, Any, Union
 from datetime import timedelta
 
-from ..dataloader.meg import load_meg_events, load_meg_session
+from ..dataloader.meg import load_meg_session
 from ..dataloader.eye import load_and_enrich_eye_events
 from ..utils.validation import validate_subject_id, validate_session
 from ..utils.paths import get_max_blocks

@@ -14,7 +14,6 @@ from typing import List, Optional, Tuple, Dict, Any, Union
 from ..utils.config import get_data_path
 from ..utils.paths import get_bids_path, get_subject_session_id, get_max_blocks
 from ..utils.validation import validate_subject_id, validate_session, validate_blocks
-from ..preprocessing.meg import preprocess_meg_block, prepare_empty_room_recording
 
 
 def load_meg_raw(subject_id: int, session: int, run: int,
@@ -321,6 +320,9 @@ def load_and_preprocess_meg_run(subject_id: int, session: int, run: int,
     
     # Load raw data
     raw = load_meg_raw(subject_id, session, run, data_path, preload=True, verbose=True)
+    
+    # Import preprocessing function locally to avoid circular import
+    from ..preprocessing.meg import preprocess_meg_block
     
     # Preprocess
     raw_preprocessed = preprocess_meg_block(
