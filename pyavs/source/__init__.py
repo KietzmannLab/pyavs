@@ -11,8 +11,7 @@ from .reconstruction import (
     compute_source_power,
     compute_beamformer_filters,
     compute_population_codes,
-    extract_roi_data,
-    extract_and_save_population_codes
+    extract_roi_data
 )
 
 from .forward import (
@@ -36,7 +35,6 @@ __all__ = [
     'compute_beamformer_filters',
     'compute_population_codes',
     'extract_roi_data',
-    'extract_and_save_population_codes',
     'create_forward_model',
     'create_bem_model',
     'setup_coregistration',
