@@ -514,7 +514,7 @@ def interpolate_bad_channels(raw: mne.io.Raw,
     except Exception as e:
         logger.error(f"Error interpolating bad channels: {e}")
         raise
-    
+
     return raw_interp
 
 
@@ -594,7 +594,8 @@ def preprocess_meg_block(raw: mne.io.Raw,
         new_bads = set(bad_channels)
         all_bads = list(existing_bads.union(new_bads))
         raw_processed.info['bads'] = all_bads
-    
+    if verbose:
+        print(raw)
     # Apply Maxwell filtering
     if apply_maxwell:
         try:

@@ -343,7 +343,6 @@ def _find_cardiac_components_by_frequency(ica: ICA,
 def apply_ica(raw: mne.io.Raw,
              ica: ICA,
              exclude: Optional[List[int]] = None,
-             copy: bool = True,
              verbose: bool = True) -> mne.io.Raw:
     """
     Apply ICA to remove specified components.
@@ -376,7 +375,8 @@ def apply_ica(raw: mne.io.Raw,
             logger.info("Applying ICA with no excluded components")
     
     # Apply ICA
-    raw_clean = ica.apply(raw, copy=copy, verbose=verbose)
+    
+    raw_clean = ica.apply(raw, verbose=verbose)
     
     if verbose:
         logger.info("ICA applied successfully")
@@ -711,6 +711,8 @@ def apply_ica_to_raws(raws_dict: Dict[Any, mne.io.Raw],
     
     cleaned_raws = {}
     
+    
+    
     if use_precomputed:
         # Try to apply precomputed ICA
         if verbose:
@@ -756,7 +758,7 @@ def apply_ica_to_raws(raws_dict: Dict[Any, mne.io.Raw],
                 logger.info(f"Loading precomputed ICA from: {ica_solution_path}")
             
             ica = mne.preprocessing.read_ica(ica_solution_path, verbose=verbose)
-            
+           
             # Load exclusion components
             try:
                 with open(ica_exclusions_file, 'r') as f:
@@ -788,7 +790,7 @@ def apply_ica_to_raws(raws_dict: Dict[Any, mne.io.Raw],
                 if verbose:
                     logger.info(f"Applying precomputed ICA to block {block_id}")
                 
-                cleaned_raw = apply_ica(raw, ica, copy=True, verbose=verbose)
+                cleaned_raw = apply_ica(raw, ica, verbose=verbose)
                 cleaned_raws[block_id] = cleaned_raw
                 
             if verbose:
@@ -796,7 +798,7 @@ def apply_ica_to_raws(raws_dict: Dict[Any, mne.io.Raw],
             
             return cleaned_raws
             
-        except (FileNotFoundError, ValueError) as e:
+        except KeyError as e:#(FileNotFoundError, ValueError) as e:
             if verbose:
                 logger.error(f"Error loading precomputed ICA: {e}")
             

@@ -327,7 +327,9 @@ class AVSComposer:
                 except Exception as e:
                     logger.error(f"Error loading raw file {raw_fname}: {e}")
                     return block, None
-
+    
+        logger.info(f'Load raw data for block {block} from {raw_fname}')
+        print(raw)
         return block, raw
 
     def read_meg_sessions(
@@ -373,6 +375,7 @@ class AVSComposer:
                 if raw is not None:
                     # TODO: Add bad channel handling from logbook if needed
                     self.raws_dict[block_id] = raw
+            
         
         if self.verbose:
             logger.info(f"Found raw data for blocks: {list(self.raws_dict.keys())}")
@@ -423,6 +426,7 @@ class AVSComposer:
                     self.empty_room_available = True
                     self.raws_dict_empty_room[block] = raws_dict[block].copy()
                 # Remove the empty room recording from the raws_dict
+                
                 del raws_dict[block]
 
         if self.verbose:
@@ -511,6 +515,7 @@ class AVSComposer:
                 )
                 # We add an attribute that tells us that the data has been filtered
                 self.raws_dict[block].filtered = True
+                print(self.raws_dict[block])
         else:
             logger.info("Filtering concatenated data")
             # Filter the concatenated data using meg.py function
@@ -1005,7 +1010,7 @@ class AVSComposer:
         Notes
         -----
         This method modifies self.raws_dict in place with ICA-cleaned data.
-        ICA is applied before concatenation for optimal results.
+        ICA is applied before concatenation for optimal results. The usage of (precomputed) ica implies the interpolation of bad channels.
         """
         from .ica import apply_ica_to_raws
         
@@ -1020,7 +1025,25 @@ class AVSComposer:
         
         if self.verbose:
             logger.info("Applying ICA artifact removal to MEG blocks...")
-        
+            
+        if self.verbose:
+            logger.info(f"We will have to check whether the bad channels have been interpolated. If not, we will interpolate them now.")
+        # Check if bad channels have been interpolated
+        if not hasattr(self, 'raws_dict_interpolated') or not self.raws_dict_interpolated:
+            if self.verbose:
+                logger.info("Interpolating bad channels in raw data before applying ICA")
+            from .meg import interpolate_bad_channels
+            # Interpolate bad channels for each raw in raws_dict
+            self.raws_dict_interpolated = {
+                block_id: interpolate_bad_channels(raw, verbose=self.verbose)
+                for block_id, raw in self.raws_dict.items()
+            }   
+        else:
+            if self.verbose:
+                logger.info("Bad channels have already been interpolated in the raw data")
+        # Use the interpolated raws_dict for ICA
+        self.raws_dict = self.raws_dict_interpolated
+     
         # Apply ICA using the standalone function
         self.raws_dict = apply_ica_to_raws(
             raws_dict=self.raws_dict,

@@ -453,7 +453,7 @@ def compute_population_codes(source_data: np.ndarray,
                            time_window: Tuple[float, float],
                            times: np.ndarray,
                            baseline: Optional[Tuple[float, float]] = None,
-                           normalize: bool = True,
+                           normalize: bool = False,
                            verbose: bool = True) -> Dict[str, np.ndarray]:
     """
     Compute population codes for different experimental conditions.

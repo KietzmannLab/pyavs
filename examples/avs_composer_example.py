@@ -16,13 +16,13 @@ def main():
     """Run AVS Composer example."""
     
     # Configure logging for better output formatting
-    configure_logging(level='INFO', console=True)
+    configure_logging(level='DEBUG', console=True)
     logger = get_logger('examples.avs_composer')
     
     logger.info("=== pyAVS AVS Composer Example ===")
     
     # Configuration
-    subject_id = 1
+    subject_id = 2
     session = 1
     data_path = "/share/klab/datasets/avs/"  # Update this path as needed
     
@@ -46,7 +46,7 @@ def main():
         et_dir=data_path,
         preprocessed=True,
         recompute_prepro=False,
-        max_block=2,  # Process only first 3 blocks for demonstration
+        max_block=10,  # Process only first 3 blocks for demonstration
         min_block=1,
         verbose=True,
         interpolate_bad_channels=True,
@@ -71,17 +71,9 @@ def main():
         logger.error(f"   Error loading MEG data: {e}")
         return
     
-    # Apply ICA artifact removal to raw data blocks
-    logger.info("\n3. Applying ICA artifact removal...")
-    try:
-        composer.apply_ica_to_blocks()
-        logger.info("   ICA artifact removal completed for all blocks")
-    except Exception as e:
-        logger.error(f"   Error applying ICA: {e}")
-        # Continue without ICA if it fails
     
     # Filter MEG data (note: filtering is handled by preprocess_meg_block when recompute_prepro=True)
-    logger.info("\n4. MEG preprocessing and filtering...")
+    logger.info("\n3. MEG preprocessing and filtering...")
     if composer.recompute_prepro:
         logger.info("   Filtering handled automatically by preprocess_meg_block during data loading")
         logger.info(f"   Applied {composer.l_freq}-{composer.h_freq} Hz band-pass filter ({'causal' if composer.causal_filter else 'non-causal'})")
@@ -92,6 +84,15 @@ def main():
         except Exception as e:
             logger.error(f"   Error filtering MEG data: {e}")
             return
+        
+    # Apply ICA artifact removal to raw data blocks
+    logger.info("\n4. Applying ICA artifact removal...")
+    #try:
+    composer.apply_ica_to_blocks()
+    logger.info("   ICA artifact removal completed for all blocks")
+    #except Exception as e:
+        # Continue without ICA if it fails
+    
     
     # Concatenate MEG blocks
     logger.info("\n5. Concatenating MEG blocks...")
