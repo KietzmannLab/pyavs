@@ -15,6 +15,9 @@ from tqdm import tqdm
 
 from .loaders import load_eye_events, load_experiment_log
 from ..utils.validation import validate_subject_id, validate_session, validate_eye_events_dataframe
+from ..utils.logging import get_logger
+
+logger = get_logger('dataloader.eye')
 
 
 def load_and_enrich_eye_events(subjects: List[int], sessions: List[int],
@@ -76,7 +79,7 @@ def load_and_enrich_eye_events(subjects: List[int], sessions: List[int],
                 explog = load_experiment_log(subject, session, data_path, output_prefix)
             except FileNotFoundError as e:
                 if verbose:
-                    print(f"Subject {subject}, session {session}: {e}")
+                    logger.warning(f"Subject {subject}, session {session}: {e}")
                 continue
             
             # Add subject/session info
@@ -91,7 +94,7 @@ def load_and_enrich_eye_events(subjects: List[int], sessions: List[int],
             events['caption_task'] = pd.Series(dtype=bool)
             
             if verbose:
-                print(f'Subject {subject}, session {session}: {len(events)} events, {len(explog)} trials')
+                logger.info(f'Subject {subject}, session {session}: {len(events)} events, {len(explog)} trials')
             
             # Process messages to extract trial information
             events = _process_messages(events, messages, explog, session, preprocessed,
@@ -100,10 +103,10 @@ def load_and_enrich_eye_events(subjects: List[int], sessions: List[int],
             # Fix multi-saccades if requested
             if fix_multi_saccades:
                 if verbose:
-                    print(f'Fixing multi-saccades: {len(events[events.recording == "scene"])} scene events before')
+                    logger.info(f'Fixing multi-saccades: {len(events[events.recording == "scene"])} scene events before')
                 events = _fix_multi_saccades(events, recording='scene')
                 if verbose:
-                    print(f'After fixing: {len(events[events.recording == "scene"])} scene events')
+                    logger.info(f'After fixing: {len(events[events.recording == "scene"])} scene events')
             
             # Combine with previous subjects/sessions
             if events_all is None:
@@ -114,7 +117,7 @@ def load_and_enrich_eye_events(subjects: List[int], sessions: List[int],
                 explog_all = pd.concat([explog_all, explog], ignore_index=True)
     
     if verbose:
-        print(f'Total events loaded: {len(events_all)}')
+        logger.info(f'Total events loaded: {len(events_all)}')
     
     return explog_all, events_all
 
@@ -326,7 +329,7 @@ def add_fixation_sequence_position(events: pd.DataFrame,
         
         if verbose:
             unique_scenes = events.loc[subject_mask, 'sceneID'].dropna().nunique()
-            print(f'Subject {subject}: {unique_scenes} unique scenes')
+            logger.debug(f'Subject {subject}: {unique_scenes} unique scenes')
         
         # Process each trial
         for trial in tqdm(events.loc[subject_mask, 'trial'].dropna().unique(), 
@@ -389,9 +392,9 @@ def add_cross_event_information(events_df: pd.DataFrame, verbose: bool = False) 
     has_fixations = len(events_df[events_df['type'] == 'fixation']) > 0
     
     if not has_saccades and verbose:
-        print("Warning: No saccade events found")
+        logger.warning("No saccade events found")
     if not has_fixations and verbose:
-        print("Warning: No fixation events found")
+        logger.warning("No fixation events found")
     
     # Sort events by trial and time
     events_df = events_df.sort_values(by=['trial', 'time_in_trial']).reset_index(drop=True)
@@ -408,7 +411,7 @@ def add_cross_event_information(events_df: pd.DataFrame, verbose: bool = False) 
         events_df['object_id_pre'] = pd.Series(dtype=int)
         events_df['object_id_post'] = pd.Series(dtype=int)
     elif verbose:
-        print("Warning: No object labels available")
+        logger.warning("No object labels available")
     
     # Add sequence positions if not already present
     position_columns = ['fix_sequence', 'fix_sequence_from_last', 'sac_sequence', 'sac_sequence_from_last']

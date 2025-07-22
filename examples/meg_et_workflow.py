@@ -213,26 +213,26 @@ def storage_example():
         pyavs.set_data_path("/share/klab/datasets/avs/")
         
         # Example: Find all saccade population codes
-        print("1. Finding population codes files...")
+        logger.info("1. Finding population codes files...")
         saccade_files = pyavs.find_population_codes_files(
             subject_id=1, session=1, 
             event_type='saccade',
             sampling_rate=500
         )
-        print(f"   ✓ Found {len(saccade_files)} saccade files")
+        logger.info(f"   Found {len(saccade_files)} saccade files")
         
         # Example: Browse all parameter sets
-        print("2. Listing available parameter sets...")
+        logger.info("2. Listing available parameter sets...")
         param_sets = pyavs.list_available_parameter_sets()
-        print(f"   ✓ Found {len(param_sets)} unique parameter configurations")
+        logger.info(f"   Found {len(param_sets)} unique parameter configurations")
         
         if param_sets:
-            print("   Recent parameter sets:")
+            logger.info("   Recent parameter sets:")
             for i, params in enumerate(param_sets[:3]):
-                print(f"     {i+1}. {params.get('event_type', 'unknown')} @ {params.get('sampling_rate', 'unknown')}Hz")
+                logger.info(f"     {i+1}. {params.get('event_type', 'unknown')} @ {params.get('sampling_rate', 'unknown')}Hz")
         
     except Exception as e:
-        print(f"   Error in storage example: {e}")
+        logger.error(f"   Error in storage example: {e}")
 
 
 if __name__ == "__main__":

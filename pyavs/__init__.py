@@ -14,6 +14,11 @@ except ImportError:
 __author__ = "Philip Sulewski"
 __email__ = "psulewski@uos.de"
 
+# Initialize logging system
+from .utils.logging import configure_logging, get_logger
+# Configure with sensible defaults - users can reconfigure as needed
+configure_logging(level='INFO', console=True, file_path=None, use_colors=True)
+
 # Main API functions
 from .utils.config import set_data_path, get_data_path, setup_data_directory
 from .dataloader.loaders import load_eye_events, load_experiment_log, load_anatomical, load_scenes
@@ -118,7 +123,8 @@ def load_and_preprocess(subject_id, session, auto_download=True, blocks=None,
                         **kwargs
                     )
                 except Exception as e:
-                    print(f"Warning: Could not load block {block}: {e}")
+                    logger = get_logger('pyavs')
+                    logger.warning(f"Could not load block {block}: {e}")
                     continue
         
         result['meg_data'] = meg_data
@@ -201,7 +207,8 @@ def get_epochs(subject_data, event_type, sensor_type, tmin=-0.2, tmax=0.5,
                 if not available_blocks:
                     raise ValueError("No MEG data blocks available")
                 first_block = available_blocks[0]
-                print(f"No block specified, using first available block: {first_block}")
+                logger = get_logger('pyavs')
+                logger.info(f"No block specified, using first available block: {first_block}")
                 raw_meg = meg_data[first_block]
         elif hasattr(meg_data, 'info'):
             # Single raw object

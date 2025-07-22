@@ -12,6 +12,9 @@ from typing import List, Optional, Tuple, Dict, Any, Union
 
 from ..utils.config import get_data_path
 from ..utils.validation import validate_subject_id
+from ..utils.logging import get_logger
+
+logger = get_logger('source.forward')
 
 
 def create_bem_model(subject: str,
@@ -41,7 +44,7 @@ def create_bem_model(subject: str,
         BEM conductor model
     """
     if verbose:
-        print(f"Creating BEM model for subject {subject}")
+        logger.info(f"Creating BEM model for subject {subject}")
     
     # Check if BEM surfaces exist
     bem_dir = os.path.join(subjects_dir, subject, 'bem')
@@ -53,12 +56,12 @@ def create_bem_model(subject: str,
         surf_file = os.path.join(bem_dir, f'{subject}-{surface}.surf')
         if not os.path.exists(surf_file):
             if verbose:
-                print(f"BEM surface {surface} not found, creating...")
+                logger.info(f"BEM surface {surface} not found, creating...")
             
             # This would typically require FreeSurfer to be run
             # For now, we'll check if it exists and warn if not
-            print(f"Warning: BEM surface {surface} not found at {surf_file}")
-            print("Run FreeSurfer watershed algorithm to create BEM surfaces")
+            logger.warning(f"BEM surface {surface} not found at {surf_file}")
+            logger.info("Run FreeSurfer watershed algorithm to create BEM surfaces")
     
     try:
         # Create BEM model
@@ -71,12 +74,12 @@ def create_bem_model(subject: str,
         )
         
         if verbose:
-            print("BEM model created successfully")
+            logger.info("BEM model created successfully")
         
         return model
         
     except Exception as e:
-        print(f"Error creating BEM model: {e}")
+        logger.error(f"Error creating BEM model: {e}")
         raise
 
 
@@ -98,18 +101,18 @@ def create_bem_solution(bem_model: mne.bem.ConductorModel,
         BEM solution
     """
     if verbose:
-        print("Computing BEM solution...")
+        logger.info("Computing BEM solution...")
     
     try:
         bem_solution = mne.make_bem_solution(bem_model, verbose=verbose)
         
         if verbose:
-            print("BEM solution computed successfully")
+            logger.info("BEM solution computed successfully")
         
         return bem_solution
         
     except Exception as e:
-        print(f"Error computing BEM solution: {e}")
+        logger.error(f"Error computing BEM solution: {e}")
         raise
 
 
@@ -143,7 +146,7 @@ def create_source_space(subject: str,
         Source space
     """
     if verbose:
-        print(f"Creating source space for subject {subject}")
+        logger.info(f"Creating source space for subject {subject}")
     
     try:
         src = mne.setup_source_space(
@@ -156,12 +159,12 @@ def create_source_space(subject: str,
         )
         
         if verbose:
-            print(f"Source space created with {src[0]['nuse']} + {src[1]['nuse']} sources")
+            logger.info(f"Source space created with {src[0]['nuse']} + {src[1]['nuse']} sources")
         
         return src
         
     except Exception as e:
-        print(f"Error creating source space: {e}")
+        logger.error(f"Error creating source space: {e}")
         raise
 
 
@@ -204,7 +207,7 @@ def create_forward_model(raw: mne.io.Raw,
         Forward solution
     """
     if verbose:
-        print("Creating forward model...")
+        logger.info("Creating forward model...")
     
     try:
         fwd = mne.make_forward_solution(
@@ -220,12 +223,12 @@ def create_forward_model(raw: mne.io.Raw,
         )
         
         if verbose:
-            print(f"Forward model created with {fwd['nsource']} sources")
+            logger.info(f"Forward model created with {fwd['nsource']} sources")
         
         return fwd
         
     except Exception as e:
-        print(f"Error creating forward model: {e}")
+        logger.error(f"Error creating forward model: {e}")
         raise
 
 
@@ -256,20 +259,20 @@ def setup_coregistration(subject: str,
         Head-to-MRI transformation
     """
     if verbose:
-        print(f"Setting up coregistration for subject {subject}")
+        logger.info(f"Setting up coregistration for subject {subject}")
     
     # Check if transformation file exists
     trans_file = os.path.join(subjects_dir, subject, 'bem', f'{subject}-trans.fif')
     
     if os.path.exists(trans_file):
         if verbose:
-            print(f"Loading existing transformation: {trans_file}")
+            logger.info(f"Loading existing transformation: {trans_file}")
         trans = mne.read_trans(trans_file)
     else:
         if verbose:
-            print("No existing transformation found")
-            print("Manual coregistration required using mne.gui.coregistration()")
-            print("or automatic coregistration with mne.coreg.fit_matched_points()")
+            logger.info("No existing transformation found")
+            logger.info("Manual coregistration required using mne.gui.coregistration()")
+            logger.info("or automatic coregistration with mne.coreg.fit_matched_points()")
         
         # For automated processing, we might try to use fiducials
         try:
@@ -283,17 +286,17 @@ def setup_coregistration(subject: str,
                 trans = mne.transforms.Transform('head', 'mri', np.eye(4))
                 
                 if verbose:
-                    print("Warning: Using identity transformation - manual coregistration recommended")
+                    logger.warning("Using identity transformation - manual coregistration recommended")
             
         except Exception as e:
             if verbose:
-                print(f"Automatic coregistration failed: {e}")
+                logger.warning(f"Automatic coregistration failed: {e}")
             
             # Create identity transformation as fallback
             trans = mne.transforms.Transform('head', 'mri', np.eye(4))
             
             if verbose:
-                print("Warning: Using identity transformation - manual coregistration required")
+                logger.warning("Using identity transformation - manual coregistration required")
     
     return trans
 
@@ -346,21 +349,21 @@ def check_forward_model(fwd: mne.Forward,
         checks['issues'].append("Could not compute condition number")
     
     if verbose:
-        print("Forward model check:")
-        print(f"  Sources: {checks['n_sources']}")
-        print(f"  Channels: {checks['n_channels']}")
-        print(f"  MEG: {checks['has_meg']}")
-        print(f"  EEG: {checks['has_eeg']}")
+        logger.info("Forward model check:")
+        logger.info(f"  Sources: {checks['n_sources']}")
+        logger.info(f"  Channels: {checks['n_channels']}")
+        logger.info(f"  MEG: {checks['has_meg']}")
+        logger.info(f"  EEG: {checks['has_eeg']}")
         
         if checks['condition_number'] is not None:
-            print(f"  Condition number: {checks['condition_number']:.2e}")
+            logger.info(f"  Condition number: {checks['condition_number']:.2e}")
         
         if checks['issues']:
-            print("  Issues found:")
+            logger.warning("  Issues found:")
             for issue in checks['issues']:
-                print(f"    - {issue}")
+                logger.warning(f"    - {issue}")
         else:
-            print("  No issues found")
+            logger.info("  No issues found")
     
     return checks
 
@@ -412,7 +415,7 @@ def save_forward_model(fwd: mne.Forward,
     
     # Save
     mne.write_forward_solution(fwd_path, fwd, overwrite=overwrite)
-    print(f"Saved forward model to: {fwd_path}")
+    logger.info(f"Saved forward model to: {fwd_path}")
     
     return fwd_path
 
@@ -458,7 +461,7 @@ def load_forward_model(subject_id: int,
         raise FileNotFoundError(f"Forward model not found: {fwd_path}")
     
     if verbose:
-        print(f"Loading forward model from: {fwd_path}")
+        logger.info(f"Loading forward model from: {fwd_path}")
     
     fwd = mne.read_forward_solution(fwd_path, verbose=verbose)
     

@@ -18,7 +18,10 @@ from sklearn.preprocessing import StandardScaler
 from ..utils.config import get_data_path
 from ..utils.validation import validate_subject_id, validate_session
 from ..utils.paths import get_default_subjects_dir
+from ..utils.logging import get_logger
 from .forward import load_forward_model
+
+logger = get_logger('source.reconstruction')
 
 
 def setup_source_reconstruction(subject_id: int, session: int,
@@ -102,19 +105,19 @@ def compute_beamformer_filters(epochs: mne.Epochs,
         Beamformer filters
     """
     if verbose:
-        print("Computing beamformer filters...")
+        logger.info("Computing beamformer filters...")
     
     # Compute covariance matrices if not provided
     if data_cov is None:
         if verbose:
-            print("Computing data covariance matrix...")
+            logger.info("Computing data covariance matrix...")
         data_cov = mne.compute_covariance(
             epochs, tmin=0.0, tmax=None, method='empirical', verbose=verbose
         )
     
     if noise_cov is None:
         if verbose:
-            print("Computing noise covariance matrix...")
+            logger.info("Computing noise covariance matrix...")
         # Use baseline period for noise covariance
         noise_cov = mne.compute_covariance(
             epochs, tmin=None, tmax=0.0, method='empirical', verbose=verbose
@@ -135,12 +138,12 @@ def compute_beamformer_filters(epochs: mne.Epochs,
         )
         
         if verbose:
-            print("Beamformer filters computed successfully")
+            logger.info("Beamformer filters computed successfully")
         
         return filters
         
     except Exception as e:
-        print(f"Error computing beamformer filters: {e}")
+        logger.error(f"Error computing beamformer filters: {e}")
         raise
 
 
@@ -165,7 +168,7 @@ def apply_beamformer(epochs: mne.Epochs,
         Source space data with shape (n_epochs, n_sources, n_times)
     """
     if verbose:
-        print("Applying beamformer filters...")
+        logger.info("Applying beamformer filters...")
     
     try:
         stc_epochs = mne.beamformer.apply_lcmv_epochs(
@@ -176,12 +179,12 @@ def apply_beamformer(epochs: mne.Epochs,
         source_data = np.array([stc.data for stc in stc_epochs])
         
         if verbose:
-            print(f"Source data shape: {source_data.shape}")
+            logger.info(f"Source data shape: {source_data.shape}")
         
         return source_data
         
     except Exception as e:
-        print(f"Error applying beamformer: {e}")
+        logger.error(f"Error applying beamformer: {e}")
         raise
 
 
@@ -218,19 +221,19 @@ def compute_minimum_norm_estimate(epochs: mne.Epochs,
         Source estimates for each epoch
     """
     if verbose:
-        print("Computing minimum norm estimate...")
+        logger.info("Computing minimum norm estimate...")
     
     # Compute noise covariance if not provided
     if noise_cov is None:
         if verbose:
-            print("Computing noise covariance matrix...")
+            logger.info("Computing noise covariance matrix...")
         noise_cov = mne.compute_covariance(
             epochs, tmin=None, tmax=0.0, method='empirical', verbose=verbose
         )
     
     # Compute inverse operator
     if verbose:
-        print("Computing inverse operator...")
+        logger.info("Computing inverse operator...")
     
     inverse_operator = mne.minimum_norm.make_inverse_operator(
         epochs.info, forward, noise_cov, loose=0.2, depth=0.8, verbose=verbose
@@ -238,12 +241,12 @@ def compute_minimum_norm_estimate(epochs: mne.Epochs,
     
     # Apply inverse operator to each epoch
     if verbose:
-        print("Applying inverse operator...")
+        logger.info("Applying inverse operator...")
     
     stc_epochs = []
     for i, epoch in enumerate(epochs):
         if verbose and i % 50 == 0:
-            print(f"Processing epoch {i}/{len(epochs)}")
+            logger.info(f"Processing epoch {i}/{len(epochs)}")
         
         stc = mne.minimum_norm.apply_inverse(
             epoch, inverse_operator, lambda2=lambda2, method=method,
@@ -252,7 +255,7 @@ def compute_minimum_norm_estimate(epochs: mne.Epochs,
         stc_epochs.append(stc)
     
     if verbose:
-        print(f"Computed {len(stc_epochs)} source estimates")
+        logger.info(f"Computed {len(stc_epochs)} source estimates")
     
     return stc_epochs
 
@@ -287,7 +290,7 @@ def compute_source_power(source_data: np.ndarray,
         Source power with shape (n_epochs, n_sources)
     """
     if verbose:
-        print("Computing source power...")
+        logger.info("Computing source power...")
     
     n_epochs, n_sources, n_times = source_data.shape
     
@@ -324,7 +327,7 @@ def compute_source_power(source_data: np.ndarray,
         power = (power - baseline_power) / baseline_power
     
     if verbose:
-        print(f"Computed power for {n_epochs} epochs, {n_sources} sources")
+        logger.info(f"Computed power for {n_epochs} epochs, {n_sources} sources")
     
     return power
 
@@ -365,10 +368,10 @@ def extract_roi_data(source_data: np.ndarray,
     if subjects_dir is None:
         subjects_dir = get_default_subjects_dir()
         if verbose:
-            print(f"Using default subjects directory: {subjects_dir}")
+            logger.info(f"Using default subjects directory: {subjects_dir}")
     
     if verbose:
-        print(f"Extracting data from {len(roi_labels)} ROIs...")
+        logger.info(f"Extracting data from {len(roi_labels)} ROIs...")
     
     roi_data = {}
     
@@ -389,7 +392,7 @@ def extract_roi_data(source_data: np.ndarray,
                 matching_labels = [l for l in label if roi_name in l.name]
                 if not matching_labels:
                     if verbose:
-                        print(f"Warning: ROI {roi_name} not found")
+                        logger.warning(f"ROI {roi_name} not found")
                     continue
                 label = matching_labels[0]
             
@@ -398,7 +401,7 @@ def extract_roi_data(source_data: np.ndarray,
             
             if len(label_vertices) == 0:
                 if verbose:
-                    print(f"Warning: No vertices found for ROI {roi_name}")
+                    logger.warning(f"No vertices found for ROI {roi_name}")
                 continue
             
             # Extract data for these vertices
@@ -431,15 +434,15 @@ def extract_roi_data(source_data: np.ndarray,
             roi_data[roi_name] = aggregated_data
             
             if verbose:
-                print(f"  {roi_name}: {len(label_vertices)} vertices")
+                logger.info(f"  {roi_name}: {len(label_vertices)} vertices")
         
         except Exception as e:
             if verbose:
-                print(f"Error processing ROI {roi_name}: {e}")
+                logger.error(f"Error processing ROI {roi_name}: {e}")
             continue
     
     if verbose:
-        print(f"Successfully extracted data from {len(roi_data)} ROIs")
+        logger.info(f"Successfully extracted data from {len(roi_data)} ROIs")
     
     return roi_data
 
@@ -480,7 +483,7 @@ def compute_population_codes(source_data: np.ndarray,
         Dictionary mapping conditions to population codes
     """
     if verbose:
-        print("Computing population codes...")
+        logger.info("Computing population codes...")
     
     # Select time window
     time_mask = (times >= time_window[0]) & (times <= time_window[1])
@@ -501,7 +504,7 @@ def compute_population_codes(source_data: np.ndarray,
     for condition in conditions:
         if condition not in events_metadata.columns:
             if verbose:
-                print(f"Warning: Condition {condition} not found in metadata")
+                logger.warning(f"Condition {condition} not found in metadata")
             continue
         
         # Get unique values for this condition
@@ -529,7 +532,7 @@ def compute_population_codes(source_data: np.ndarray,
         population_codes[condition] = condition_codes
         
         if verbose:
-            print(f"  {condition}: {len(condition_codes)} conditions")
+            logger.info(f"  {condition}: {len(condition_codes)} conditions")
     
     return population_codes
 
@@ -620,7 +623,7 @@ def save_epochs_fif(epochs: mne.Epochs, data_path: str, data_type: str) -> str:
     
     # Save epochs
     epochs.save(fif_path, overwrite=True)
-    print(f"Saved epochs to: {fif_path}")
+    logger.info(f"Saved epochs to: {fif_path}")
     return fif_path
 
 
@@ -648,7 +651,7 @@ def save_source_estimate_fif(stc: mne.SourceEstimate, data_path: str, data_type:
     
     # Save source estimate
     stc.save(stc_path, ftype='stc', overwrite=True)
-    print(f"Saved source estimate to: {stc_path}")
+    logger.info(f"Saved source estimate to: {stc_path}")
     return stc_path
 
 
@@ -662,7 +665,7 @@ def save_source_estimates_list_fif(stcs: List[mne.SourceEstimate], data_path: st
         path = save_source_estimate_fif(stc, data_path, epoch_data_type)
         saved_paths.append(path)
     
-    print(f"Saved {len(stcs)} source estimates")
+    logger.info(f"Saved {len(stcs)} source estimates")
     return saved_paths[0] if saved_paths else ""
 
 
@@ -715,7 +718,7 @@ def save_numpy_source_data_fif(source_data: np.ndarray,
     
     # Save epochs
     epochs.save(fif_path, overwrite=True)
-    print(f"Saved source data as epochs to: {fif_path}")
+    logger.info(f"Saved source data as epochs to: {fif_path}")
     return fif_path
 
 
@@ -757,7 +760,7 @@ def save_numpy_source_data_h5(source_data: np.ndarray,
         f.attrs['data_type'] = data_type
         f.attrs['shape'] = source_data.shape
     
-    print(f"Saved source data to: {h5_path}")
+    logger.info(f"Saved source data to: {h5_path}")
     return h5_path
 
 
@@ -920,8 +923,8 @@ def save_population_codes_h5(population_codes: Dict[str, np.ndarray],
     if filter_params is None:
         filter_params = {'l_freq': 1.0, 'h_freq': 40.0}
     
-    print(f"Saving population codes to: {h5_path}")
-    print(f"Event type: {event_type}, ROIs: {len(rois)}, Epochs: {len(random_epochs) if random_epochs is not None else 'unknown'}")
+    logger.info(f"Saving population codes to: {h5_path}")
+    logger.info(f"Event type: {event_type}, ROIs: {len(rois)}, Epochs: {len(random_epochs) if random_epochs is not None else 'unknown'}")
     
     # Save to HDF5 file following original format
     with h5py.File(h5_path, 'w') as storage:
@@ -952,11 +955,11 @@ def save_population_codes_h5(population_codes: Dict[str, np.ndarray],
         # Store population codes for each ROI
         for roi_name in rois:
             if roi_name not in population_codes:
-                print(f"Warning: ROI {roi_name} not found in population_codes")
+                logger.warning(f"ROI {roi_name} not found in population_codes")
                 continue
                 
             roi_data = population_codes[roi_name]
-            print(f"Saving ROI: {roi_name}, shape: {roi_data.shape}")
+            logger.info(f"Saving ROI: {roi_name}, shape: {roi_data.shape}")
             
             # Create ROI group if it doesn't exist
             if roi_name not in storage.keys():
@@ -981,7 +984,7 @@ def save_population_codes_h5(population_codes: Dict[str, np.ndarray],
         # Flush to ensure data is written
         storage.flush()
     
-    print(f"Successfully saved population codes to: {h5_path}")
+    logger.info(f"Successfully saved population codes to: {h5_path}")
     return h5_path
 
 
@@ -1046,8 +1049,8 @@ def extract_and_save_population_codes(epochs: mne.Epochs,
     - For 'stc': Uses the full source space data
     - For 'mag', 'grad': Uses sensor space data from epochs
     """
-    print(f"Extracting population codes for {len(rois)} ROIs")
-    print(f"Source estimates: {len(source_estimates)} epochs")
+    logger.info(f"Extracting population codes for {len(rois)} ROIs")
+    logger.info(f"Source estimates: {len(source_estimates)} epochs")
     
     # Prepare population codes dictionary
     population_codes = {}
@@ -1057,7 +1060,7 @@ def extract_and_save_population_codes(epochs: mne.Epochs,
     
     # Process each ROI
     for roi_name in rois:
-        print(f"Processing ROI: {roi_name}")
+        logger.info(f"Processing ROI: {roi_name}")
         
         if roi_name == 'stc':
             # Full source space data
@@ -1098,15 +1101,15 @@ def extract_and_save_population_codes(epochs: mne.Epochs,
                     roi_data = np.array(roi_data)  # Shape: (n_epochs, n_times, n_sources_in_roi)
                     roi_data = roi_data.transpose(0, 2, 1)  # Shape: (n_epochs, n_sources_in_roi, n_times)
                 else:
-                    print(f"Warning: Label file not found for ROI {roi_name}, skipping")
+                    logger.warning(f"Label file not found for ROI {roi_name}, skipping")
                     continue
                     
             except Exception as e:
-                print(f"Error processing ROI {roi_name}: {e}")
+                logger.error(f"Error processing ROI {roi_name}: {e}")
                 continue
         
         population_codes[roi_name] = roi_data
-        print(f"  Extracted {roi_name}: shape {roi_data.shape}")
+        logger.info(f"  Extracted {roi_name}: shape {roi_data.shape}")
     
     # Prepare metadata
     if hasattr(epochs, 'metadata') and epochs.metadata is not None:
@@ -1204,7 +1207,7 @@ def load_source_data_fif(subject_id: int, session: int, data_type: str, data_pat
     fif_path = os.path.join(epochs_dir, fif_filename)
     
     if os.path.exists(fif_path):
-        print(f"Loading epochs from: {fif_path}")
+        logger.info(f"Loading epochs from: {fif_path}")
         return mne.read_epochs(fif_path, verbose=False)
     
     # Try source estimates
@@ -1216,7 +1219,7 @@ def load_source_data_fif(subject_id: int, session: int, data_type: str, data_pat
     for ext in stc_extensions:
         stc_path = os.path.join(source_dir, stc_basename + ext)
         if os.path.exists(stc_path):
-            print(f"Loading source estimate from: {stc_path}")
+            logger.info(f"Loading source estimate from: {stc_path}")
             return mne.read_source_estimate(stc_path.replace(ext, ''))
     
     raise FileNotFoundError(f"No .fif data found for subject {subject_id}, session {session}, data_type {data_type}")
@@ -1246,7 +1249,7 @@ def load_source_data_h5(subject_id: int, session: int, data_type: str, data_path
         
         metadata_df = pd.DataFrame(metadata) if metadata else None
         
-    print(f"Loaded source data from: {h5_path}")
+    logger.info(f"Loaded source data from: {h5_path}")
     return source_data, metadata_df
 
 

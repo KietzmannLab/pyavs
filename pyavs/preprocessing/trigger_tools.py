@@ -16,6 +16,10 @@ import matplotlib.pyplot as plt
 from typing import List, Dict, Tuple, Optional, Union
 
 from ..utils.paths import get_max_blocks
+from ..utils.logging import get_logger
+
+# Module logger
+logger = get_logger('preprocessing.trigger_tools')
 
 
 def get_meg_trigger_dict() -> Dict[str, int]:
@@ -57,7 +61,7 @@ def get_avs_blocks(session_num: int, lower_bound: Optional[int] = None,
         Array of all avs blocks in the requested session
     """
     # Based on the session number we can compute the block numbers for this session
-    print("Computing blocks for session", session_num)
+    logger.info(f"Computing blocks for session {session_num}")
     if session_num == 1:
         min_block_this_session = 1
         max_block_this_session = 10
@@ -79,7 +83,8 @@ def get_avs_blocks(session_num: int, lower_bound: Optional[int] = None,
         (blocks_this_session >= lower_bound_this_session) & 
         (blocks_this_session <= upper_bound_this_session)
     ]
-    print("Blocks in session", session_num, ":", blocks_this_session_sel) if verbose else None
+    if verbose:
+        logger.debug(f"Blocks in session {session_num}: {blocks_this_session_sel}")
     return blocks_this_session_sel
 
 
@@ -128,7 +133,7 @@ def repair_meg_trigger_events(events: np.ndarray, session: int,
     blocks_this_session = get_avs_blocks(session_num=session, verbose=False)
 
     if verbose:
-        print("blocks_this_session", blocks_this_session)
+        logger.info(f"Session {session}: Processing {len(blocks_this_session)} blocks ({blocks_this_session[0]} to {blocks_this_session[-1]})")
     
     # Now we can derive the affected event numbers for this session
     # For this we also have to account for the fact that for a block number higher than 127 
@@ -141,9 +146,8 @@ def repair_meg_trigger_events(events: np.ndarray, session: int,
     # We store the trigger timestamps of trigger values that we want to change in a list
     corrupt_timestamps = []
     
-    for block_trigger in block_triggers_this_session:
-        if verbose:
-            print("block_trigger", block_trigger)
+    corrupt_trigger_count = 0
+    for block_trigger_idx, block_trigger in enumerate(block_triggers_this_session):
         
         # Get all events with that trigger
         events_with_block_trigger = events[events[:, 2] == block_trigger]
@@ -154,9 +158,9 @@ def repair_meg_trigger_events(events: np.ndarray, session: int,
             # Get the indices of the scene onset triggers
             scene_onset_indices = np.where(events_with_block_trigger[:, 1] == meg_trigger_dict['scene_on'])[0]
 
-            # How many do we exclude this block?
-            if verbose:
-                print("scene_onset_indices", len(scene_onset_indices))
+            # Count corrupt triggers for this block
+            corrupt_count_this_block = len(scene_onset_indices) - 1 if len(scene_onset_indices) > 1 else 0
+            corrupt_trigger_count += corrupt_count_this_block
 
             # We need to exclude one trigger from the deletion list. This is the one that was 
             # correctly sent for the current block and trial
@@ -188,17 +192,17 @@ def repair_meg_trigger_events(events: np.ndarray, session: int,
             # In this case we have no overlap with any other trigger and can just add them to the list of triggers
             # to be modified with the new offset
             corrupt_timestamps.append(list(events_with_block_trigger[:, 0]))
+            corrupt_trigger_count += len(events_with_block_trigger)
             continue
 
+    # Count total corrupt events
+    corrupt_timestamps_timestamps = [item for sublist in corrupt_timestamps for item in sublist]
+    
     if verbose:
-        print("blocks_triggers_this_session", block_triggers_this_session)
+        logger.info(f"Trigger repair summary: {len(corrupt_timestamps_timestamps)} corrupt triggers found across {len(blocks_this_session)} blocks")
     
     # If any block trigger interferes with the trial number between 1 and 30 we have to remove that trial number from the triggers
     # This is because in this case the trial number is coded in the same way as the block number
-
-    # Remove all events with a timestamp in the list of timestamps to be removed
-    # First we need to flatten the list
-    corrupt_timestamps_timestamps = [item for sublist in corrupt_timestamps for item in sublist]
 
     # Now we can modify the corrupt block triggers in the events structure by adding the new block trigger offset
     # First we need to get the indices of the events that we want to modify
@@ -213,7 +217,7 @@ def repair_meg_trigger_events(events: np.ndarray, session: int,
         # Get indexes of events that are too low because of the reset after 127 in the trigger sending bottleneck
         too_low_ids = events[corrupt_timestamps_indices, 2] < blocks_this_session[0]
         if verbose:
-            print("We got {} events with a block trigger value that is too low because of the reset after 127 in the trigger sending bottleneck".format(np.sum(too_low_ids)))
+            logger.debug(f"Session {session}: {np.sum(too_low_ids)} events with low trigger values due to 127+ reset")
         
         # Compute an offset that we need to add to the trigger values
         additional_offset = too_low_ids * 128  # TODO: Why multiplication?
@@ -293,14 +297,12 @@ def get_meg_timestamp(meg_events: np.ndarray, trial: int, block: int,
             # This is a special case we do not have block triggers (see notes in repair_events function), 
             # we can circumvent this when all blocks are present in the raw data
             if verbose:
-                print("We did not find a MEG event for the requested trial number in the requested block. "
-                      "This is because we do not have the correct block triggers in the raw data."
-                      "We can circumvent this when all blocks are present in the raw data.")
+                logger.warning("MEG event not found for requested trial/block - using fallback method")
             meg_event_for_trial_this_block = meg_events_for_trial_number[11]
             timestamp_onset = meg_event_for_trial_this_block[0]
         else:
             if verbose:
-                print("No MEG event found for trial {} in block {}".format(trial, block))
+                logger.warning(f"No MEG event found for trial {trial} in block {block}")
             return None
     else:
         timestamp_onset = meg_event_for_trial_this_block[0][0]
@@ -308,17 +310,16 @@ def get_meg_timestamp(meg_events: np.ndarray, trial: int, block: int,
     if optimized_timing or use_block_trigger:
         # What index in all MEG events is the current event
         index_of_current_event = np.where(meg_events[:, 0] == timestamp_onset)[0][0]
-        print("index_of_current_event", index_of_current_event)
         
         # What is the index of the previous event
         index_of_previous_event = index_of_current_event - 1
-        print("index_of_previous_event", index_of_previous_event)
         
         # Get timestamp of previous event
         timestamp_previous_event = meg_events[index_of_previous_event, 0]
         
         if optimized_timing:
-            print("difference between previous and current event", (timestamp_onset - timestamp_previous_event))
+            if verbose:
+                logger.debug(f"Trial {trial}, Block {block}: Optimizing timestamp (diff: {timestamp_onset - timestamp_previous_event:.3f}ms)")
             # Make a linear interpolation between the previous and the current event
             timestamp_onset = timestamp_previous_event + (timestamp_onset - timestamp_previous_event) / 2
         elif use_block_trigger:
@@ -379,6 +380,9 @@ def add_fix_event_trigger(raw: mne.io.Raw, blocks: List[int], et_events: pd.Data
     missing_trials = list()
     raw_annotated = raw.copy()
     counter = 0
+    total_events_added = {event_type: 0 for event_type in event_types}
+    processed_trials = 0
+    skipped_trials = 0
 
     time_of_first_sample = raw.first_samp / raw.info['sfreq']
     time_format = '%Y-%m-%d %H:%M:%S.%f'
@@ -386,22 +390,24 @@ def add_fix_event_trigger(raw: mne.io.Raw, blocks: List[int], et_events: pd.Data
     new_orig_time = (meas_date + timedelta(seconds=time_of_first_sample))
     
     if verbose:
-        print('time_of_first_sample', time_of_first_sample, 'new_orig_time', new_orig_time, 'first_samp', raw.first_samp)
+        logger.info(f'Processing {len(blocks)} blocks for session {session}')
+        logger.debug(f'Time of first sample: {time_of_first_sample:.3f}s, Recording start: {new_orig_time}')
     
-    for block in blocks:
+    for block_idx, block in enumerate(blocks, 1):
         block = int(block)
+        block_events_added = {event_type: 0 for event_type in event_types}
+        block_trials_processed = 0
+        block_trials_skipped = 0
+        
         if verbose:
-            print("block", block)
+            logger.info(f"Processing block {block} ({block_idx}/{len(blocks)})")
 
         unique_trials_this_block = np.unique(et_events.loc[et_events.block == block, 'trial_per_block'])
         if len(unique_trials_this_block) < 1:
-            print('No trial_data for trial, block', unique_trials_this_block, block)
+            logger.warning(f'No trial data found for block {block}')
             continue
         
         for trial_this_block in unique_trials_this_block:
-            if trial_this_block % 10 == 0:
-                if verbose:
-                    print("trial_this_block", trial_this_block)
             
             meg_timestamp_scene_on = get_meg_timestamp(
                 trigger_events, 
@@ -412,9 +418,12 @@ def add_fix_event_trigger(raw: mne.io.Raw, blocks: List[int], et_events: pd.Data
             )
             
             if meg_timestamp_scene_on is None:
-                print('No trigger data for trial ', trial_this_block, ' block ', block)
+                if verbose:
+                    logger.warning(f'No trigger data for trial {trial_this_block} in block {block}')
                 # We track the missing trials
                 missing_trials.append((block, trial_this_block))
+                block_trials_skipped += 1
+                skipped_trials += 1
                 continue
             
             meg_time_scene_on = meg_timestamp_scene_on / raw.info['sfreq']
@@ -432,8 +441,8 @@ def add_fix_event_trigger(raw: mne.io.Raw, blocks: List[int], et_events: pd.Data
                     (et_events.type == event_type)
                 ]
                 
-                if verbose:
-                    print("We found {} {} events for scene {} during {} recording".format(len(scene_events), event_type, scene_id, recording))
+                block_events_added[event_type] += len(scene_events)
+                total_events_added[event_type] += len(scene_events)
 
                 onsets = scene_events.loc[:, 'time_in_trial']
                 durations = scene_events.loc[:, 'duration']
@@ -441,8 +450,7 @@ def add_fix_event_trigger(raw: mne.io.Raw, blocks: List[int], et_events: pd.Data
 
                 if counter == 0:
                     if verbose:
-                        print('Adding annotations')
-                        print("initialize annotations structure")
+                        logger.info('Initializing annotations structure')
                     annotations = mne.Annotations(
                         onset=onsets + meg_time_scene_on_from_first_samp,  # in seconds
                         duration=durations,  # in seconds, too
@@ -457,6 +465,9 @@ def add_fix_event_trigger(raw: mne.io.Raw, blocks: List[int], et_events: pd.Data
                     )
                 counter += 1
             
+            block_trials_processed += 1
+            processed_trials += 1
+            
             # Add trial marker to MEG files
             if counter != 0:
                 annotations = annotations.append(
@@ -465,11 +476,24 @@ def add_fix_event_trigger(raw: mne.io.Raw, blocks: List[int], et_events: pd.Data
                     description=['scene'],
                 )
             else:
-                print('WARNING: No annotations added. Presumably there was an error with identifying the et events')
+                logger.warning('No annotations added - error identifying eye-tracking events')
+        
+        # Print block summary
+        if verbose and (block_events_added[event_types[0]] > 0 or block_trials_skipped > 0):
+            event_summary = ', '.join([f"{count} {event_type}s" for event_type, count in block_events_added.items() if count > 0])
+            logger.info(f"Block {block} complete: {block_trials_processed} trials processed, {block_trials_skipped} skipped, {event_summary} added")
 
+    # Print final summary
+    if verbose:
+        total_events = sum(total_events_added.values())
+        event_summary = ', '.join([f"{count} {event_type}s" for event_type, count in total_events_added.items()])
+        logger.info(f"Processing complete: {processed_trials} trials processed, {skipped_trials} skipped, {total_events} total events added ({event_summary})")
+        if missing_trials:
+            logger.warning(f"Missing trials: {len(missing_trials)} trials had no MEG trigger data")
+    
     if counter != 0:
         raw_annotated = raw_annotated.set_annotations(annotations)
         return raw_annotated, missing_trials
     else:
-        print('WARNING: No annotations added. Presumably there was an error with identifying the et events')
+        logger.error('No annotations added - error identifying eye-tracking events')
         return None, missing_trials

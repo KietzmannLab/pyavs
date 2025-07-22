@@ -15,7 +15,12 @@ from mne.preprocessing import find_bad_channels_maxwell
 from ..utils.config import get_data_path
 from ..utils.paths import get_subject_session_id, convert_session_to_letter
 from ..utils.validation import validate_subject_id, validate_session
+from ..utils.logging import get_logger
 from .ica import compute_ica, find_eye_components, apply_ica, load_ica
+
+
+# Initialize logger
+logger = get_logger('preprocessing.meg')
 
 
 def get_calibration_files(package_dir: Optional[str] = None) -> Dict[str, str]:
@@ -49,13 +54,13 @@ def get_calibration_files(package_dir: Optional[str] = None) -> Dict[str, str]:
     missing_files = []
     for file_type, file_path in files.items():
         if not os.path.exists(file_path):
-            print(f"Warning: {file_type} file not found at {file_path}")
+            logger.warning(f"{file_type} file not found at {file_path}")
             missing_files.append(file_type)
     
     if missing_files:
-        print(f"Missing calibration files: {missing_files}")
-        print(f"Expected calibration directory: {calibration_dir}")
-        print("Note: Calibration files can be provided explicitly to avoid this issue")
+        logger.warning(f"Missing calibration files: {missing_files}")
+        logger.info(f"Expected calibration directory: {calibration_dir}")
+        logger.info("Note: Calibration files can be provided explicitly to avoid this issue")
     
     return files
 
@@ -145,7 +150,7 @@ def apply_maxwell_filter(raw: mne.io.Raw,
     # Find bad channels automatically if requested
     if find_bad_channels:
         if verbose:
-            print("Detecting bad channels...")
+            logger.info("Detecting bad channels...")
         
         # Ensure no bad channels are set initially for detection
         original_bads = raw_filtered.info['bads'].copy()
@@ -161,20 +166,20 @@ def apply_maxwell_filter(raw: mne.io.Raw,
             
             detected_bads = auto_noisy_chs + auto_flat_chs
             if verbose:
-                print(f"Detected noisy channels: {auto_noisy_chs}")
-                print(f"Detected flat channels: {auto_flat_chs}")
+                logger.info(f"Detected noisy channels: {auto_noisy_chs}")
+                logger.info(f"Detected flat channels: {auto_flat_chs}")
             
             # Combine with original bad channels
             all_bads = list(set(original_bads + detected_bads))
             raw_filtered.info['bads'] = all_bads
             
         except Exception as e:
-            print(f"Warning: Bad channel detection failed: {e}")
+            logger.warning(f"Bad channel detection failed: {e}")
             raw_filtered.info['bads'] = original_bads
     
     # Apply Maxwell filtering
     if verbose:
-        print("Applying Maxwell filtering...")
+        logger.info("Applying Maxwell filtering...")
     
     maxwell_kwargs = {
         'cross_talk': crosstalk_file,
@@ -202,12 +207,12 @@ def apply_maxwell_filter(raw: mne.io.Raw,
         raw_sss = mne.preprocessing.maxwell_filter(raw_filtered, **maxwell_kwargs)
         
         if verbose:
-            print("Maxwell filtering completed successfully")
+            logger.info("Maxwell filtering completed successfully")
         
         return raw_sss
         
     except Exception as e:
-        print(f"Error applying Maxwell filtering: {e}")
+        logger.error(f"Error applying Maxwell filtering: {e}")
         raise
 
 
@@ -287,10 +292,10 @@ def filter_meg(raw: mne.io.Raw,
     if causal:
         phase = 'minimum'
         if verbose:
-            print(f"Applying causal bandpass filter: {l_freq}-{h_freq} Hz (phase=minimum)")
+            logger.info(f"Applying causal bandpass filter: {l_freq}-{h_freq} Hz (phase=minimum)")
     else:
         if verbose:
-            print(f"Applying bandpass filter: {l_freq}-{h_freq} Hz (phase={phase})")
+            logger.info(f"Applying bandpass filter: {l_freq}-{h_freq} Hz (phase={phase})")
     
     raw_filtered = raw.copy()
     
@@ -313,7 +318,7 @@ def filter_meg(raw: mne.io.Raw,
     )
     
     if verbose and causal:
-        print("Note: Causal filtering introduces phase delay but preserves temporal order")
+        logger.info("Note: Causal filtering introduces phase delay but preserves temporal order")
     
     return raw_filtered
 
@@ -358,7 +363,7 @@ def resample_meg(raw: mne.io.Raw,
     """
     if verbose:
         original_sfreq = raw.info['sfreq']
-        print(f"Resampling from {original_sfreq} Hz to {sfreq} Hz")
+        logger.info(f"Resampling from {original_sfreq} Hz to {sfreq} Hz")
     
     raw_resampled = raw.copy()
     
@@ -410,7 +415,7 @@ def load_bad_channels(subject_id: int, session: int, block: int,
         bad_channels_file = os.path.join(package_dir, 'preprocessing', 'calibration', 'bad_channels.csv')
     
     if not os.path.exists(bad_channels_file):
-        print(f"Warning: Bad channels file not found: {bad_channels_file}")
+        logger.warning(f"Bad channels file not found: {bad_channels_file}")
         return []
     
     try:
@@ -437,7 +442,7 @@ def load_bad_channels(subject_id: int, session: int, block: int,
         return bad_channels
         
     except Exception as e:
-        print(f"Error loading bad channels: {e}")
+        logger.error(f"Error loading bad channels: {e}")
         return []
 
 
@@ -487,11 +492,11 @@ def interpolate_bad_channels(raw: mne.io.Raw,
     
     if len(raw_interp.info['bads']) == 0:
         if verbose:
-            print("No bad channels to interpolate")
+            logger.info("No bad channels to interpolate")
         return raw_interp
     
     if verbose:
-        print(f"Interpolating {len(raw_interp.info['bads'])} bad channels: {raw_interp.info['bads']}")
+        logger.info(f"Interpolating {len(raw_interp.info['bads'])} bad channels: {raw_interp.info['bads']}")
     
     try:
         raw_interp.interpolate_bads(
@@ -504,10 +509,10 @@ def interpolate_bad_channels(raw: mne.io.Raw,
         )
         
         if verbose:
-            print("Channel interpolation completed")
+            logger.info("Channel interpolation completed")
             
     except Exception as e:
-        print(f"Error interpolating bad channels: {e}")
+        logger.error(f"Error interpolating bad channels: {e}")
         raise
     
     return raw_interp
@@ -574,7 +579,7 @@ def preprocess_meg_block(raw: mne.io.Raw,
         Preprocessed raw data
     """
     if verbose:
-        print(f"Preprocessing MEG data for subject {subject_id}, session {session}, block {block}")
+        logger.info(f"Preprocessing MEG data for subject {subject_id}, session {session}, block {block}")
     
     raw_processed = raw.copy()
     
@@ -582,7 +587,7 @@ def preprocess_meg_block(raw: mne.io.Raw,
     if interpolate_bads:
         bad_channels = load_bad_channels(subject_id, session, block, bad_channels_file)
         if verbose and bad_channels:
-            print(f"Loading bad channels from logbook: {bad_channels}")
+            logger.info(f"Loading bad channels from logbook: {bad_channels}")
         
         # Add to existing bad channels
         existing_bads = set(raw_processed.info['bads'])
@@ -601,8 +606,8 @@ def preprocess_meg_block(raw: mne.io.Raw,
             )
         except FileNotFoundError as e:
             if verbose:
-                print(f"Error applying Maxwell filtering: {e}")
-                print("Skipping Maxwell filtering and continuing with preprocessing...")
+                logger.error(f"Error applying Maxwell filtering: {e}")
+                logger.info("Skipping Maxwell filtering and continuing with preprocessing...")
             # Continue without Maxwell filtering
     
     # Interpolate bad channels
@@ -628,7 +633,7 @@ def preprocess_meg_block(raw: mne.io.Raw,
         )
     
     if verbose:
-        print("MEG preprocessing completed")
+        logger.info("MEG preprocessing completed")
     
     return raw_processed
 
@@ -663,7 +668,7 @@ def prepare_empty_room_recording(raw_empty_room: mne.io.Raw,
         Prepared empty room recording
     """
     if verbose:
-        print("Preparing empty room recording for Maxwell filtering")
+        logger.info("Preparing empty room recording for Maxwell filtering")
     
     try:
         raw_er_prepared = mne.preprocessing.maxwell_filter_prepare_emptyroom(
@@ -677,12 +682,12 @@ def prepare_empty_room_recording(raw_empty_room: mne.io.Raw,
         )
         
         if verbose:
-            print("Empty room preparation completed")
+            logger.info("Empty room preparation completed")
         
         return raw_er_prepared
         
     except Exception as e:
-        print(f"Error preparing empty room recording: {e}")
+        logger.error(f"Error preparing empty room recording: {e}")
         raise
 
 
@@ -762,7 +767,7 @@ def apply_precomputed_ica(raw: mne.io.Raw,
     )
     
     if verbose:
-        print(f"Loading precomputed ICA solution from: {ica_solution_path}")
+        logger.info(f"Loading precomputed ICA solution from: {ica_solution_path}")
     
     # Check if ICA solution file exists
     if not os.path.exists(ica_solution_path):
@@ -772,7 +777,7 @@ def apply_precomputed_ica(raw: mne.io.Raw,
     try:
         ica = mne.preprocessing.read_ica(ica_solution_path, verbose=verbose)
         if verbose:
-            print(f"  Loaded ICA solution with {ica.n_components_} components")
+            logger.info(f"  Loaded ICA solution with {ica.n_components_} components")
     except Exception as e:
         raise ValueError(f"Error loading ICA solution: {e}")
     
@@ -790,24 +795,24 @@ def apply_precomputed_ica(raw: mne.io.Raw,
                 ica.exclude = exclude_components
                 
                 if verbose:
-                    print(f"  Excluding {len(exclude_components)} ICA components: {exclude_components}")
+                    logger.info(f"  Excluding {len(exclude_components)} ICA components: {exclude_components}")
             else:
                 if verbose:
-                    print(f"  Warning: No exclusions found for session {session}")
+                    logger.warning(f"  No exclusions found for session {session}")
         else:
             if verbose:
-                print(f"  Warning: No exclusions found for subject {subject_id}")
+                logger.warning(f"  No exclusions found for subject {subject_id}")
     
     except Exception as e:
         if verbose:
-            print(f"  Warning: Could not load ICA exclusions: {e}")
+            logger.warning(f"  Could not load ICA exclusions: {e}")
     
     # Apply ICA to the data
     try:
         raw_ica = apply_ica(raw, ica, verbose=verbose)
         
         if verbose:
-            print(f"  Applied precomputed ICA to {subject_session_id}")
+            logger.info(f"  Applied precomputed ICA to {subject_session_id}")
         
         return raw_ica
     

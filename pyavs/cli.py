@@ -13,6 +13,10 @@ from pathlib import Path
 from typing import Optional, List
 
 import pyavs
+from pyavs.utils.logging import get_logger, configure_logging, set_log_level
+
+# Module logger
+logger = get_logger('cli')
 
 
 def main():
@@ -38,6 +42,10 @@ Examples:
     
     parser.add_argument('--data-path', type=str, help='Path to AVS dataset')
     parser.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
+    parser.add_argument('--log-level', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'], 
+                       default='INFO', help='Logging level (default: INFO)')
+    parser.add_argument('--log-file', type=str, help='Log to file')
+    parser.add_argument('--no-colors', action='store_true', help='Disable colored output')
     parser.add_argument('--config', type=str, help='Path to configuration file')
     
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
@@ -98,6 +106,21 @@ Examples:
     
     args = parser.parse_args()
     
+    # Configure logging based on arguments
+    configure_logging(
+        level=args.log_level,
+        console=True,
+        file_path=args.log_file,
+        use_colors=not args.no_colors
+    )
+    
+    # If verbose flag is set, override to DEBUG level
+    if args.verbose:
+        set_log_level('DEBUG')
+        logger.debug("Verbose mode enabled - log level set to DEBUG")
+    
+    logger.info(f"pyAVS CLI started with log level: {args.log_level}")
+    
     # Load configuration if provided
     if args.config:
         load_config(args.config)
@@ -105,6 +128,7 @@ Examples:
     # Set data path
     if args.data_path:
         pyavs.set_data_path(args.data_path)
+        logger.info(f"Data path set to: {args.data_path}")
     
     # Execute command
     if args.command == 'check-data':
@@ -125,27 +149,27 @@ Examples:
 
 def check_data_command(args):
     """Check data availability command."""
-    print(f"Checking data availability for subject {args.subject}, session {args.session}")
+    logger.info(f"Checking data availability for subject {args.subject}, session {args.session}")
     
     try:
         availability = pyavs.check_data_availability(args.subject, args.session)
         
-        print("\nData availability:")
+        logger.info("Data availability:")
         for data_type, available in availability.items():
             status = "✓" if available else "✗"
-            print(f"  {status} {data_type}")
+            logger.info(f"  {status} {data_type}")
             
     except Exception as e:
-        print(f"Error checking data: {e}")
+        logger.error(f"Error checking data: {e}")
         sys.exit(1)
 
 
 def preprocess_command(args):
     """Preprocessing command."""
-    print(f"Preprocessing subject {args.subject}, session {args.session}")
+    logger.info(f"Preprocessing subject {args.subject}, session {args.session}")
     
     if args.blocks:
-        print(f"Processing blocks: {args.blocks}")
+        logger.info(f"Processing blocks: {args.blocks}")
     
     try:
         subject_data = pyavs.load_and_preprocess(
@@ -157,9 +181,9 @@ def preprocess_command(args):
             apply_ica=args.apply_ica
         )
         
-        print("Preprocessing completed successfully!")
-        print(f"MEG data: {'✓' if subject_data['meg_data'] is not None else '✗'}")
-        print(f"Eye data: {'✓' if subject_data['eye_events'] is not None else '✗'}")
+        logger.info("Preprocessing completed successfully!")
+        logger.info(f"MEG data: {'✓' if subject_data['meg_data'] is not None else '✗'}")
+        logger.info(f"Eye data: {'✓' if subject_data['eye_events'] is not None else '✗'}")
         
         if args.output_dir:
             # Save preprocessed data
@@ -181,16 +205,16 @@ def preprocess_command(args):
             with open(output_file, 'w') as f:
                 json.dump(save_data, f, indent=2)
             
-            print(f"Preprocessing info saved to: {output_file}")
+            logger.info(f"Preprocessing info saved to: {output_file}")
             
     except Exception as e:
-        print(f"Error during preprocessing: {e}")
+        logger.error(f"Error during preprocessing: {e}")
         sys.exit(1)
 
 
 def create_epochs_command(args):
     """Create epochs command."""
-    print(f"Creating {args.event_type} epochs for subject {args.subject}, session {args.session}")
+    logger.info(f"Creating {args.event_type} epochs for subject {args.subject}, session {args.session}")
     
     try:
         # Load preprocessed data
@@ -210,29 +234,29 @@ def create_epochs_command(args):
         )
         
         if epochs is not None:
-            print(f"Created {len(epochs)} epochs")
-            print(f"Epoch duration: {args.tmin} to {args.tmax} s")
-            print(f"Baseline: {baseline}")
+            logger.info(f"Created {len(epochs)} epochs")
+            logger.info(f"Epoch duration: {args.tmin} to {args.tmax} s")
+            logger.info(f"Baseline: {baseline}")
             
             if args.save:
                 # Save epochs
                 filename = f"sub-{args.subject:02d}_ses-{args.session:02d}_{args.event_type}-epo.fif"
                 epochs.save(filename, overwrite=True)
-                print(f"Epochs saved to: {filename}")
+                logger.info(f"Epochs saved to: {filename}")
         else:
-            print(f"No epochs created (sensor_type: {args.sensor_type})")
+            logger.warning(f"No epochs created (sensor_type: {args.sensor_type})")
             
-        print(f"Events dataframe: {len(events)} events")
+        logger.info(f"Events dataframe: {len(events)} events")
         
     except Exception as e:
-        print(f"Error creating epochs: {e}")
+        logger.error(f"Error creating epochs: {e}")
         sys.exit(1)
 
 
 def source_reconstruction_command(args):
     """Source reconstruction command."""
-    print(f"Performing source reconstruction for subject {args.subject}, session {args.session}")
-    print(f"Method: {args.method}")
+    logger.info(f"Performing source reconstruction for subject {args.subject}, session {args.session}")
+    logger.info(f"Method: {args.method}")
     
     try:
         # Load preprocessed data
@@ -246,7 +270,7 @@ def source_reconstruction_command(args):
         )
         
         if len(epochs) == 0:
-            print("No epochs available for source reconstruction")
+            logger.warning("No epochs available for source reconstruction")
             return
         
         # Load forward model
@@ -257,8 +281,8 @@ def source_reconstruction_command(args):
             epochs, forward_model, method=args.method
         )
         
-        print(f"Source reconstruction completed")
-        print(f"Source data shape: {source_data.shape}")
+        logger.info(f"Source reconstruction completed")
+        logger.info(f"Source data shape: {source_data.shape}")
         
         # Extract ROI data if requested
         if args.roi_labels:
@@ -268,7 +292,7 @@ def source_reconstruction_command(args):
                 args.roi_labels,
                 subjects_dir=get_default_subjects_dir()
             )
-            print(f"Extracted data from {len(roi_data)} ROIs")
+            logger.info(f"Extracted data from {len(roi_data)} ROIs")
         
         # Save source data if requested
         if args.save_source_data:
@@ -276,18 +300,18 @@ def source_reconstruction_command(args):
                 source_data, events, args.subject, args.session,
                 data_type=f'{args.method}_source_estimates'
             )
-            print(f"Source data saved to: {save_path}")
+            logger.info(f"Source data saved to: {save_path}")
             
     except Exception as e:
-        print(f"Error during source reconstruction: {e}")
+        logger.error(f"Error during source reconstruction: {e}")
         sys.exit(1)
 
 
 def batch_command(args):
     """Batch processing command."""
-    print(f"Running batch {args.workflow} workflow")
-    print(f"Subjects: {args.subjects}")
-    print(f"Sessions: {args.sessions}")
+    logger.info(f"Running batch {args.workflow} workflow")
+    logger.info(f"Subjects: {args.subjects}")
+    logger.info(f"Sessions: {args.sessions}")
     
     # Create all subject/session combinations
     combinations = []
@@ -295,16 +319,16 @@ def batch_command(args):
         for session in args.sessions:
             combinations.append((subject, session))
     
-    print(f"Total combinations: {len(combinations)}")
+    logger.info(f"Total combinations: {len(combinations)}")
     
     if args.parallel and args.n_jobs > 1:
-        print(f"Running in parallel with {args.n_jobs} jobs")
+        logger.info(f"Running in parallel with {args.n_jobs} jobs")
         # TODO: Implement parallel processing
-        print("Parallel processing not yet implemented - running sequentially")
+        logger.warning("Parallel processing not yet implemented - running sequentially")
     
     # Process each combination
     for i, (subject, session) in enumerate(combinations):
-        print(f"\nProcessing {i+1}/{len(combinations)}: Subject {subject}, Session {session}")
+        logger.info(f"Processing {i+1}/{len(combinations)}: Subject {subject}, Session {session}")
         
         try:
             if args.workflow == 'preprocess':
@@ -312,35 +336,35 @@ def batch_command(args):
             elif args.workflow == 'epochs':
                 subject_data = pyavs.load_and_preprocess(subject, session)
                 epochs, events = pyavs.get_epochs(subject_data, 'fixation', 'meg')
-                print(f"  Created {len(epochs)} epochs")
+                logger.info(f"  Created {len(epochs)} epochs")
             elif args.workflow == 'source':
                 subject_data = pyavs.load_and_preprocess(subject, session)
                 epochs, events = pyavs.get_epochs(subject_data, 'fixation', 'meg')
                 forward_model = pyavs.load_forward_model(subject, session)
                 source_data = pyavs.apply_source_reconstruction(epochs, forward_model)
-                print(f"  Source data shape: {source_data.shape}")
+                logger.info(f"  Source data shape: {source_data.shape}")
             
-            print(f"  ✓ Completed")
+            logger.info(f"  ✓ Completed")
             
         except Exception as e:
-            print(f"  ✗ Error: {e}")
+            logger.error(f"  ✗ Error: {e}")
             continue
     
-    print("\nBatch processing completed!")
+    logger.info("Batch processing completed!")
 
 
 def setup_command(args):
     """Setup command."""
-    print("Setting up pyAVS configuration...")
+    logger.info("Setting up pyAVS configuration...")
     
     # Set data path
     pyavs.set_data_path(args.data_path)
-    print(f"Data path set to: {args.data_path}")
+    logger.info(f"Data path set to: {args.data_path}")
     
     # Set FreeSurfer directory if provided
     if args.freesurfer_dir:
         os.environ['SUBJECTS_DIR'] = args.freesurfer_dir
-        print(f"FreeSurfer subjects directory set to: {args.freesurfer_dir}")
+        logger.info(f"FreeSurfer subjects directory set to: {args.freesurfer_dir}")
     
     # Create configuration file if requested
     if args.create_config:
@@ -359,9 +383,9 @@ def setup_command(args):
         with open(config_path, 'w') as f:
             json.dump(config, f, indent=2)
         
-        print(f"Configuration file created: {config_path}")
+        logger.info(f"Configuration file created: {config_path}")
     
-    print("Setup completed!")
+    logger.info("Setup completed!")
 
 
 def load_config(config_path: str):
@@ -376,10 +400,10 @@ def load_config(config_path: str):
         if 'freesurfer_dir' in config:
             os.environ['SUBJECTS_DIR'] = config['freesurfer_dir']
         
-        print(f"Configuration loaded from: {config_path}")
+        logger.info(f"Configuration loaded from: {config_path}")
         
     except Exception as e:
-        print(f"Error loading configuration: {e}")
+        logger.error(f"Error loading configuration: {e}")
         sys.exit(1)
 
 

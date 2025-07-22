@@ -13,6 +13,11 @@ from typing import List, Optional, Tuple, Dict, Any, Union
 import matplotlib.pyplot as plt
 
 from ..utils.validation import validate_subject_id, validate_session
+from ..utils.logging import get_logger
+
+
+# Initialize logger
+logger = get_logger('preprocessing.ica')
 
 
 def compute_ica(raw: mne.io.Raw,
@@ -60,7 +65,7 @@ def compute_ica(raw: mne.io.Raw,
         Fitted ICA object
     """
     if verbose:
-        print("Computing ICA decomposition...")
+        logger.info("Computing ICA decomposition...")
     
     # Set default parameters
     if fit_params is None:
@@ -95,10 +100,10 @@ def compute_ica(raw: mne.io.Raw,
         )
         
         if verbose:
-            print(f"ICA fitted with {ica.n_components_} components")
+            logger.info(f"ICA fitted with {ica.n_components_} components")
         
     except Exception as e:
-        print(f"Error fitting ICA: {e}")
+        logger.error(f"Error fitting ICA: {e}")
         raise
     
     return ica
@@ -134,7 +139,7 @@ def find_eye_components(ica: ICA,
         Indices of eye movement components
     """
     if verbose:
-        print("Detecting eye movement components...")
+        logger.info("Detecting eye movement components...")
     
     eye_components = []
     
@@ -148,7 +153,7 @@ def find_eye_components(ica: ICA,
             
         except Exception as e:
             if verbose:
-                print(f"Automatic EOG detection failed: {e}")
+                logger.warning(f"Automatic EOG detection failed: {e}")
     
     elif method == 'correlation' and eye_events_df is not None:
         # Use eye tracking events for correlation-based detection
@@ -159,14 +164,14 @@ def find_eye_components(ica: ICA,
     else:
         # Manual/visual inspection required
         if verbose:
-            print("No automatic detection method available")
-            print("Manual component inspection recommended")
+            logger.info("No automatic detection method available")
+            logger.info("Manual component inspection recommended")
     
     if verbose:
         if eye_components:
-            print(f"Found {len(eye_components)} eye movement components: {eye_components}")
+            logger.info(f"Found {len(eye_components)} eye movement components: {eye_components}")
         else:
-            print("No eye movement components detected")
+            logger.info("No eye movement components detected")
     
     return eye_components
 
@@ -183,7 +188,7 @@ def _find_eye_components_by_correlation(ica: ICA,
     
     if eye_regressor is None:
         if verbose:
-            print("Could not create eye movement regressor")
+            logger.warning("Could not create eye movement regressor")
         return []
     
     # Get ICA sources
@@ -200,9 +205,9 @@ def _find_eye_components_by_correlation(ica: ICA,
     eye_components = [i for i, corr in enumerate(correlations) if corr > threshold]
     
     if verbose and eye_components:
-        print("Component correlations with eye movements:")
+        logger.info("Component correlations with eye movements:")
         for comp in eye_components:
-            print(f"  Component {comp}: r = {correlations[comp]:.3f}")
+            logger.info(f"  Component {comp}: r = {correlations[comp]:.3f}")
     
     return eye_components
 
@@ -263,7 +268,7 @@ def find_cardiac_components(ica: ICA,
         Indices of cardiac components
     """
     if verbose:
-        print("Detecting cardiac components...")
+        logger.info("Detecting cardiac components...")
     
     cardiac_components = []
     
@@ -277,8 +282,8 @@ def find_cardiac_components(ica: ICA,
             
         except Exception as e:
             if verbose:
-                print(f"Automatic ECG detection failed: {e}")
-                print("Trying frequency-based detection...")
+                logger.warning(f"Automatic ECG detection failed: {e}")
+                logger.info("Trying frequency-based detection...")
             
             # Fall back to frequency-based detection
             cardiac_components = _find_cardiac_components_by_frequency(
@@ -292,9 +297,9 @@ def find_cardiac_components(ica: ICA,
     
     if verbose:
         if cardiac_components:
-            print(f"Found {len(cardiac_components)} cardiac components: {cardiac_components}")
+            logger.info(f"Found {len(cardiac_components)} cardiac components: {cardiac_components}")
         else:
-            print("No cardiac components detected")
+            logger.info("No cardiac components detected")
     
     return cardiac_components
 
@@ -366,15 +371,15 @@ def apply_ica(raw: mne.io.Raw,
     
     if verbose:
         if ica.exclude:
-            print(f"Applying ICA, excluding components: {ica.exclude}")
+            logger.info(f"Applying ICA, excluding components: {ica.exclude}")
         else:
-            print("Applying ICA with no excluded components")
+            logger.info("Applying ICA with no excluded components")
     
     # Apply ICA
     raw_clean = ica.apply(raw, copy=copy, verbose=verbose)
     
     if verbose:
-        print("ICA applied successfully")
+        logger.info("ICA applied successfully")
     
     return raw_clean
 
@@ -420,7 +425,7 @@ def plot_ica_components(ica: ICA,
     
     if save_path:
         fig.savefig(save_path, dpi=150, bbox_inches='tight')
-        print(f"ICA components plot saved to: {save_path}")
+        logger.info(f"ICA components plot saved to: {save_path}")
     
     return fig
 
@@ -467,7 +472,7 @@ def plot_ica_sources(ica: ICA,
     
     if save_path:
         fig.savefig(save_path, dpi=150, bbox_inches='tight')
-        print(f"ICA sources plot saved to: {save_path}")
+        logger.info(f"ICA sources plot saved to: {save_path}")
     
     return fig
 
@@ -522,7 +527,7 @@ def save_ica(ica: ICA,
     
     # Save
     ica.save(ica_path, overwrite=overwrite)
-    print(f"Saved ICA to: {ica_path}")
+    logger.info(f"Saved ICA to: {ica_path}")
     
     return ica_path
 
@@ -571,7 +576,7 @@ def load_ica(subject_id: int,
         raise FileNotFoundError(f"ICA file not found: {ica_path}")
     
     if verbose:
-        print(f"Loading ICA from: {ica_path}")
+        logger.info(f"Loading ICA from: {ica_path}")
     
     ica = mne.preprocessing.read_ica(ica_path, verbose=verbose)
     
@@ -611,7 +616,7 @@ def preprocess_with_ica(raw: mne.io.Raw,
         (cleaned_raw, ica) - Cleaned MEG data and ICA object
     """
     if verbose:
-        print("Starting ICA preprocessing pipeline...")
+        logger.info("Starting ICA preprocessing pipeline...")
     
     # Compute ICA
     ica = compute_ica(raw, n_components=n_components, verbose=verbose)
@@ -635,7 +640,7 @@ def preprocess_with_ica(raw: mne.io.Raw,
     exclude_components = list(set(exclude_components))
     
     if verbose:
-        print(f"Total components to exclude: {len(exclude_components)}")
+        logger.info(f"Total components to exclude: {len(exclude_components)}")
     
     # Apply ICA if requested
     if apply_automatically and exclude_components:
@@ -645,8 +650,8 @@ def preprocess_with_ica(raw: mne.io.Raw,
         ica.exclude = exclude_components
         
         if verbose and exclude_components:
-            print("Components identified but not automatically applied")
-            print("Use apply_ica() to remove artifacts")
+            logger.info("Components identified but not automatically applied")
+            logger.info("Use apply_ica() to remove artifacts")
     
     return raw_clean, ica
 
@@ -702,14 +707,14 @@ def apply_ica_to_raws(raws_dict: Dict[Any, mne.io.Raw],
     from ..utils.paths import get_subject_session_id, convert_session_to_letter
     
     if verbose:
-        print(f"Applying ICA to {len(raws_dict)} blocks for subject {subject_id}, session {session}")
+        logger.info(f"Applying ICA to {len(raws_dict)} blocks for subject {subject_id}, session {session}")
     
     cleaned_raws = {}
     
     if use_precomputed:
         # Try to apply precomputed ICA
         if verbose:
-            print("Attempting to use precomputed ICA solutions...")
+            logger.info("Attempting to use precomputed ICA solutions...")
             
         # Get default paths if not provided
         if ica_solutions_dir is None or ica_exclusions_file is None:
@@ -748,7 +753,7 @@ def apply_ica_to_raws(raws_dict: Dict[Any, mne.io.Raw],
         # Try to load precomputed ICA
         try:
             if verbose:
-                print(f"Loading precomputed ICA from: {ica_solution_path}")
+                logger.info(f"Loading precomputed ICA from: {ica_solution_path}")
             
             ica = mne.preprocessing.read_ica(ica_solution_path, verbose=verbose)
             
@@ -766,44 +771,44 @@ def apply_ica_to_raws(raws_dict: Dict[Any, mne.io.Raw],
                         ica.exclude = exclude_components
                         
                         if verbose:
-                            print(f"Excluding {len(exclude_components)} ICA components: {exclude_components}")
+                            logger.info(f"Excluding {len(exclude_components)} ICA components: {exclude_components}")
                     else:
                         if verbose:
-                            print(f"Warning: No exclusions found for session {session}")
+                            logger.warning(f"No exclusions found for session {session}")
                 else:
                     if verbose:
-                        print(f"Warning: No exclusions found for subject {subject_id}")
+                        logger.warning(f"No exclusions found for subject {subject_id}")
             
             except Exception as e:
                 if verbose:
-                    print(f"Warning: Could not load ICA exclusions: {e}")
+                    logger.warning(f"Could not load ICA exclusions: {e}")
             
             # Apply precomputed ICA to all blocks
             for block_id, raw in raws_dict.items():
                 if verbose:
-                    print(f"Applying precomputed ICA to block {block_id}")
+                    logger.info(f"Applying precomputed ICA to block {block_id}")
                 
                 cleaned_raw = apply_ica(raw, ica, copy=True, verbose=verbose)
                 cleaned_raws[block_id] = cleaned_raw
                 
             if verbose:
-                print("Successfully applied precomputed ICA to all blocks")
+                logger.info("Successfully applied precomputed ICA to all blocks")
             
             return cleaned_raws
             
         except (FileNotFoundError, ValueError) as e:
             if verbose:
-                print(f"Error loading precomputed ICA: {e}")
+                logger.error(f"Error loading precomputed ICA: {e}")
             
             if not compute_new_ica:
                 if verbose:
-                    print("compute_new_ica=False, returning original data without ICA")
+                    logger.info("compute_new_ica=False, returning original data without ICA")
                 return raws_dict
     
     # Compute new ICA if precomputed failed or not requested
     if compute_new_ica or not use_precomputed:
         if verbose:
-            print("Computing new ICA for artifact removal...")
+            logger.info("Computing new ICA for artifact removal...")
         
         # Use the first block for ICA computation (or concatenate if needed)
         first_block = list(raws_dict.values())[0]
@@ -819,22 +824,22 @@ def apply_ica_to_raws(raws_dict: Dict[Any, mne.io.Raw],
             exclude_components = eye_components + cardiac_components
             
             if verbose and exclude_components:
-                print(f"Found {len(exclude_components)} artifact components: {exclude_components}")
+                logger.info(f"Found {len(exclude_components)} artifact components: {exclude_components}")
         
         # Apply ICA to all blocks
         for block_id, raw in raws_dict.items():
             if verbose:
-                print(f"Applying computed ICA to block {block_id}")
+                logger.info(f"Applying computed ICA to block {block_id}")
             
             cleaned_raw = apply_ica(raw, ica, exclude=exclude_components, copy=True, verbose=verbose)
             cleaned_raws[block_id] = cleaned_raw
         
         if verbose:
-            print("Successfully applied computed ICA to all blocks")
+            logger.info("Successfully applied computed ICA to all blocks")
         
         return cleaned_raws
     
     # If we get here, return original data
     if verbose:
-        print("No ICA processing applied, returning original data")
+        logger.info("No ICA processing applied, returning original data")
     return raws_dict

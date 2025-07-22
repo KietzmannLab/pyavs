@@ -18,11 +18,15 @@ from ..dataloader.meg import load_meg_session
 from ..dataloader.eye import load_and_enrich_eye_events
 from ..utils.validation import validate_subject_id, validate_session
 from ..utils.paths import get_max_blocks
+from ..utils.logging import get_logger
 from .trigger_tools import get_meg_trigger_dict, get_avs_blocks, repair_meg_trigger_events as repair_meg_trigger_events_legacy
 from .composer import AVSComposer
 
 # For backward compatibility, alias AVSComposer as MEGETComposer
 MEGETComposer = AVSComposer
+
+# Initialize logger
+logger = get_logger('preprocessing.alignment')
 
 
 def get_meg_trigger_mapping() -> Dict[str, int]:
@@ -160,8 +164,8 @@ def create_et_event_epochs(raw: mne.io.Raw, eye_events_df: pd.DataFrame,
     scene_onset_code = meg_trigger_mapping['scene_on']  # Code 100
     
     if verbose:
-        print(f"Found {len(meg_events)} MEG events")
-        print(f"Looking for scene onset triggers with code {scene_onset_code}")
+        logger.info(f"Found {len(meg_events)} MEG events")
+        logger.info(f"Looking for scene onset triggers with code {scene_onset_code}")
     
     # Filter et_events_df for the specified event type and recording context
     selected_events = eye_events_df[eye_events_df['type'] == event_type]
@@ -172,7 +176,7 @@ def create_et_event_epochs(raw: mne.io.Raw, eye_events_df: pd.DataFrame,
         raise ValueError(f"No {event_type} events found for {recording} recording")
     
     if verbose:
-        print(f"Found {len(selected_events)} {event_type} events during {recording} recording")
+        logger.info(f"Found {len(selected_events)} {event_type} events during {recording} recording")
     
     # Apply systematic offset correction
     offset_seconds = offset_scene_triggers_ms / 1000.0
@@ -232,7 +236,7 @@ def create_et_event_epochs(raw: mne.io.Raw, eye_events_df: pd.DataFrame,
         if meg_scene_onset_sample is None:
             missing_triggers += 1
             if verbose and missing_triggers <= 5:  # Limit verbose output
-                print(f"No MEG scene onset found for block {block}, trial {trial_per_block}")
+                logger.warning(f"No MEG scene onset found for block {block}, trial {trial_per_block}")
             continue
         
         # Calculate MEG event time: scene_onset_time + time_in_trial + offset
@@ -256,9 +260,9 @@ def create_et_event_epochs(raw: mne.io.Raw, eye_events_df: pd.DataFrame,
         valid_indices.append(idx)
     
     if verbose:
-        print(f"Missing MEG scene onset triggers: {missing_triggers}")
-        print(f"Events out of MEG recording range: {out_of_range}")
-        print(f"Valid events for epoching: {len(mne_events)}")
+        logger.info(f"Missing MEG scene onset triggers: {missing_triggers}")
+        logger.info(f"Events out of MEG recording range: {out_of_range}")
+        logger.info(f"Valid events for epoching: {len(mne_events)}")
     
     if len(mne_events) == 0:
         raise ValueError(f"No valid {event_type} events within MEG recording range after applying AVS composer approach")
@@ -270,9 +274,9 @@ def create_et_event_epochs(raw: mne.io.Raw, eye_events_df: pd.DataFrame,
     event_id = {f'{event_type}_{i}': i for i in unique_event_ids}
     
     if verbose:
-        print(f"Creating {len(mne_events)} epochs from {event_type} events")
-        print(f"Time window: {tmin} to {tmax} seconds")
-        print(f"Event ID mapping: {event_id}")
+        logger.info(f"Creating {len(mne_events)} epochs from {event_type} events")
+        logger.info(f"Time window: {tmin} to {tmax} seconds")
+        logger.info(f"Event ID mapping: {event_id}")
     
     # Create epochs
     epochs = mne.Epochs(
@@ -300,8 +304,8 @@ def create_et_event_epochs(raw: mne.io.Raw, eye_events_df: pd.DataFrame,
     events_metadata['meg_time_from_scene_onset'] = events_metadata['time_in_trial'] + offset_seconds
     
     if verbose:
-        print(f"Created {len(epochs)} valid epochs")
+        logger.info(f"Created {len(epochs)} valid epochs")
         if len(epochs) < len(mne_events):
-            print(f"Rejected {len(mne_events) - len(epochs)} epochs")
+            logger.info(f"Rejected {len(mne_events) - len(epochs)} epochs")
     
     return epochs, events_metadata

@@ -14,6 +14,9 @@ from typing import List, Optional, Tuple, Dict, Any, Union
 from ..utils.config import get_data_path
 from ..utils.paths import get_bids_path, get_subject_session_id, get_max_blocks
 from ..utils.validation import validate_subject_id, validate_session, validate_blocks
+from ..utils.logging import get_logger
+
+logger = get_logger('dataloader.meg')
 
 
 def load_meg_raw(subject_id: int, session: int, run: int,
@@ -64,7 +67,7 @@ def load_meg_raw(subject_id: int, session: int, run: int,
         raise FileNotFoundError(f"MEG file not found: {meg_path}")
     
     if verbose:
-        print(f"Loading MEG data from: {meg_path}")
+        logger.info(f"Loading MEG data from: {meg_path}")
     
     try:
         raw = mne.io.read_raw_fif(meg_path, preload=preload, verbose=verbose)
@@ -125,7 +128,7 @@ def load_meg_preprocessed(subject_id: int, session: int, run: int,
         raise FileNotFoundError(f"Preprocessed MEG file not found: {meg_path}")
     
     if verbose:
-        print(f"Loading preprocessed MEG data from: {meg_path}")
+        logger.info(f"Loading preprocessed MEG data from: {meg_path}")
     
     try:
         raw = mne.io.read_raw_fif(meg_path, preload=preload, verbose=verbose)
@@ -187,15 +190,15 @@ def load_meg_session(subject_id: int, session: int,
             
         except FileNotFoundError as e:
             if verbose:
-                print(f"Warning: Could not load run {run}: {e}")
+                logger.warning(f"Could not load run {run}: {e}")
             continue
         except Exception as e:
             if verbose:
-                print(f"Error loading run {run}: {e}")
+                logger.error(f"Error loading run {run}: {e}")
             continue
     
     if verbose:
-        print(f"Successfully loaded {len(raws_dict)} runs: {list(raws_dict.keys())}")
+        logger.info(f"Successfully loaded {len(raws_dict)} runs: {list(raws_dict.keys())}")
     
     return raws_dict
 
@@ -259,18 +262,18 @@ def load_empty_room_recording(subject_id: int, session: int,
     
     if not os.path.exists(er_path):
         if verbose:
-            print(f"Empty room recording not found: {er_path}")
+            logger.warning(f"Empty room recording not found: {er_path}")
         return None
     
     if verbose:
-        print(f"Loading empty room recording from: {er_path}")
+        logger.info(f"Loading empty room recording from: {er_path}")
     
     try:
         raw_er = mne.io.read_raw_fif(er_path, preload=preload, verbose=verbose)
         return raw_er
     except Exception as e:
         if verbose:
-            print(f"Error loading empty room recording: {e}")
+            logger.error(f"Error loading empty room recording: {e}")
         return None
 
 
@@ -313,10 +316,10 @@ def load_and_preprocess_meg_run(subject_id: int, session: int, run: int,
             raw_preprocessed = load_meg_preprocessed(
                 subject_id, session, run, data_path, preload=True, verbose=True
             )
-            print("Loaded existing preprocessed data")
+            logger.info("Loaded existing preprocessed data")
             return raw_preprocessed
         except FileNotFoundError:
-            print("No preprocessed data found, will compute from raw")
+            logger.info("No preprocessed data found, will compute from raw")
     
     # Load raw data
     raw = load_meg_raw(subject_id, session, run, data_path, preload=True, verbose=True)
@@ -381,7 +384,7 @@ def save_preprocessed_meg(raw: mne.io.Raw, subject_id: int, session: int, run: i
     
     # Save
     raw.save(meg_path, overwrite=overwrite)
-    print(f"Saved preprocessed MEG data to: {meg_path}")
+    logger.info(f"Saved preprocessed MEG data to: {meg_path}")
     
     return meg_path
 
@@ -414,7 +417,7 @@ def concatenate_meg_runs(raws_dict: Dict[int, mne.io.Raw],
     raw_list = [raws_dict[run] for run in sorted_runs]
     
     if verbose:
-        print(f"Concatenating {len(raw_list)} runs: {sorted_runs}")
+        logger.info(f"Concatenating {len(raw_list)} runs: {sorted_runs}")
     
     # Concatenate raw data
     raw_concatenated = mne.concatenate_raws(raw_list, preload=None, verbose=verbose)
@@ -423,7 +426,7 @@ def concatenate_meg_runs(raws_dict: Dict[int, mne.io.Raw],
     events_concatenated = None
     if events_list is not None and len(events_list) == len(raw_list):
         if verbose:
-            print("Concatenating events")
+            logger.info("Concatenating events")
         
         events_concatenated = mne.concatenate_events(events_list, verbose=verbose)
     
@@ -482,14 +485,14 @@ def load_meg_events(raw: mne.io.Raw,
         )
         
         if verbose:
-            print(f"Found {len(events)} events")
+            logger.info(f"Found {len(events)} events")
             unique_ids = np.unique(events[:, 2])
-            print(f"Unique event IDs: {unique_ids}")
+            logger.info(f"Unique event IDs: {unique_ids}")
         
         return events
         
     except Exception as e:
-        print(f"Error extracting events: {e}")
+        logger.error(f"Error extracting events: {e}")
         return np.array([]).reshape(0, 3)
 
 

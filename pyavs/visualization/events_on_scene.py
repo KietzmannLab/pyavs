@@ -22,6 +22,9 @@ from tqdm import tqdm
 from ..dataloader.loaders import load_eye_events, load_experiment_log
 from ..dataloader.eye import load_and_enrich_eye_events
 from ..utils.config import get_data_path
+from ..utils.logging import get_logger
+
+logger = get_logger('visualization.events_on_scene')
 
 
 class EyeTrackingPlotter:
@@ -64,7 +67,7 @@ class EyeTrackingPlotter:
         self.data_path = Path(data_path)
         
         # Load eye tracking data using pyavs
-        print(f"Loading eye tracking data for subjects {subjects}, sessions {sessions}...")
+        logger.info(f"Loading eye tracking data for subjects {subjects}, sessions {sessions}...")
         self.explog, self.df = load_and_enrich_eye_events(
             subjects=subjects, 
             sessions=sessions, 
@@ -79,9 +82,9 @@ class EyeTrackingPlotter:
             (self.df['sceneID'].notna())
         ].copy()
         
-        print(f"Loaded {len(self.df)} fixations from {self.df['sceneID'].nunique()} scenes")
-        print(f"Subjects: {sorted(self.df['subject'].unique())}")
-        print(f"Sessions: {sorted(self.df['session'].unique())}")
+        logger.info(f"Loaded {len(self.df)} fixations from {self.df['sceneID'].nunique()} scenes")
+        logger.info(f"Subjects: {sorted(self.df['subject'].unique())}")
+        logger.info(f"Sessions: {sorted(self.df['session'].unique())}")
     
     def load_scene(self, scene_id):
         """Load and scale scene image."""
@@ -125,7 +128,7 @@ class EyeTrackingPlotter:
         fixes = self.df[mask].copy()
         
         if len(fixes) == 0:
-            print(f"No fixations found for scene {scene_id}")
+            logger.warning(f"No fixations found for scene {scene_id}")
             return
         
         # Sort by time or sequence if available
@@ -212,7 +215,7 @@ class EyeTrackingPlotter:
         fixes = self.df[mask]
         
         if len(fixes) == 0:
-            print(f"No fixations found for scene {scene_id}")
+            logger.warning(f"No fixations found for scene {scene_id}")
             return
         
         # Convert coordinates to image space
@@ -311,7 +314,7 @@ class EyeTrackingPlotter:
         scene_fixes = self.df[self.df['sceneID'] == scene_id]
         
         if len(scene_fixes) == 0:
-            print(f"No fixations found for scene {scene_id}")
+            logger.warning(f"No fixations found for scene {scene_id}")
             return
         
         # Get unique subjects
@@ -411,7 +414,7 @@ class EyeTrackingPlotter:
         fig, axes = plt.subplots(rows, cols, figsize=(15, 5*rows))
         axes = axes.flatten() if n_scenes > 1 else [axes]
         
-        print(f"Creating overview for {n_scenes} scenes...")
+        logger.info(f"Creating overview for {n_scenes} scenes...")
         
         for i, scene_id in enumerate(tqdm(top_scenes, desc="Processing scenes")):
             ax = axes[i]

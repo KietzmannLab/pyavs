@@ -11,6 +11,11 @@ from typing import List, Optional, Tuple, Dict, Any, Union
 from tqdm import tqdm
 
 from ..utils.validation import validate_eye_events_dataframe
+from ..utils.logging import get_logger
+
+
+# Initialize logger
+logger = get_logger('preprocessing.eye')
 
 
 def preprocess_eye_events(events_df: pd.DataFrame,
@@ -54,9 +59,9 @@ def preprocess_eye_events(events_df: pd.DataFrame,
     # Validate input dataframe
     warnings = validate_eye_events_dataframe(events_df)
     if warnings and verbose:
-        print("Input validation warnings:")
+        logger.warning("Input validation warnings:")
         for warning in warnings:
-            print(f"  - {warning}")
+            logger.warning(f"  - {warning}")
     
     # Make a copy to avoid modifying original
     events_clean = events_df.copy()
@@ -69,7 +74,7 @@ def preprocess_eye_events(events_df: pd.DataFrame,
         events_clean = events_clean[events_clean['type'] != 'blink']
         removed_count = before_count - len(events_clean)
         if verbose:
-            print(f"Removed {removed_count} blink events")
+            logger.info(f"Removed {removed_count} blink events")
     
     # Remove short fixations
     if remove_short_fixations:
@@ -80,7 +85,7 @@ def preprocess_eye_events(events_df: pd.DataFrame,
         events_clean = events_clean[~fixation_mask | duration_mask]
         removed_count = before_count - len(events_clean)
         if verbose:
-            print(f"Removed {removed_count} short fixations (< {min_fixation_duration}s)")
+            logger.info(f"Removed {removed_count} short fixations (< {min_fixation_duration}s)")
     
     # Remove long saccades
     if remove_long_saccades:
@@ -91,7 +96,7 @@ def preprocess_eye_events(events_df: pd.DataFrame,
         events_clean = events_clean[~saccade_mask | duration_mask]
         removed_count = before_count - len(events_clean)
         if verbose:
-            print(f"Removed {removed_count} long saccades (> {max_saccade_duration}s)")
+            logger.info(f"Removed {removed_count} long saccades (> {max_saccade_duration}s)")
     
     # Remove outlier positions
     if remove_outlier_positions:
@@ -99,16 +104,16 @@ def preprocess_eye_events(events_df: pd.DataFrame,
         events_clean = _remove_position_outliers(events_clean, screen_resolution, verbose)
         removed_count = before_count - len(events_clean)
         if verbose:
-            print(f"Removed {removed_count} events with outlier positions")
+            logger.info(f"Removed {removed_count} events with outlier positions")
     
     final_count = len(events_clean)
     total_removed = initial_count - final_count
     
     if verbose:
-        print(f"\nPreprocessing summary:")
-        print(f"  Initial events: {initial_count}")
-        print(f"  Final events: {final_count}")
-        print(f"  Total removed: {total_removed} ({total_removed/initial_count*100:.1f}%)")
+        logger.info(f"\nPreprocessing summary:")
+        logger.info(f"  Initial events: {initial_count}")
+        logger.info(f"  Final events: {final_count}")
+        logger.info(f"  Total removed: {total_removed} ({total_removed/initial_count*100:.1f}%)")
     
     return events_clean
 
@@ -129,7 +134,7 @@ def _remove_position_outliers(events_df: pd.DataFrame,
     
     if not pos_columns:
         if verbose:
-            print("No position columns found for outlier detection")
+            logger.info("No position columns found for outlier detection")
         return events_df
     
     # Create masks for valid positions
@@ -186,7 +191,7 @@ def remove_artifacts(events_df: pd.DataFrame,
     
     if verbose:
         removed_count = long_fixations.sum()
-        print(f"Removed {removed_count} long fixations (> {max_fixation_duration}s)")
+        logger.info(f"Removed {removed_count} long fixations (> {max_fixation_duration}s)")
     
     # Remove saccades with extremely large amplitudes
     if 'amplitude' in events_clean.columns:
@@ -198,7 +203,7 @@ def remove_artifacts(events_df: pd.DataFrame,
         
         if verbose:
             removed_count = large_saccades.sum()
-            print(f"Removed {removed_count} large saccades (> {max_saccade_amplitude} pixels)")
+            logger.info(f"Removed {removed_count} large saccades (> {max_saccade_amplitude} pixels)")
     
     # Remove saccades that are too close together
     events_clean = _remove_close_saccades(events_clean, min_intersaccadic_interval, verbose)
@@ -207,7 +212,7 @@ def remove_artifacts(events_df: pd.DataFrame,
     total_removed = initial_count - final_count
     
     if verbose:
-        print(f"Total artifacts removed: {total_removed} ({total_removed/initial_count*100:.1f}%)")
+        logger.info(f"Total artifacts removed: {total_removed} ({total_removed/initial_count*100:.1f}%)")
     
     return events_clean
 
@@ -252,7 +257,7 @@ def _remove_close_saccades(events_df: pd.DataFrame,
                 indices_to_remove.add(next_idx)
     
     if verbose and indices_to_remove:
-        print(f"Removed {len(indices_to_remove)} saccades with short intersaccadic intervals")
+        logger.info(f"Removed {len(indices_to_remove)} saccades with short intersaccadic intervals")
     
     # Remove flagged saccades
     events_clean = events_sorted.drop(index=indices_to_remove)

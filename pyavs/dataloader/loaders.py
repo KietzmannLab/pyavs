@@ -13,6 +13,9 @@ from typing import List, Optional, Tuple, Dict, Any, Union
 from ..utils.config import get_data_path, get_input_paths
 from ..utils.paths import get_legacy_paths, get_bids_path
 from ..utils.validation import validate_subject_id, validate_session, validate_blocks
+from ..utils.logging import get_logger
+
+logger = get_logger('dataloader.loaders')
 
 
 def load_eye_events(subject_id: int, session: int, 

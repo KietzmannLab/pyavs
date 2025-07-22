@@ -24,8 +24,13 @@ from ..dataloader.eye import load_and_enrich_eye_events, add_fixation_sequence_p
 from ..utils.config import get_data_path
 from ..utils.paths import get_subject_session_id, get_max_blocks
 from ..utils.validation import validate_subject_id, validate_session
+from ..utils.logging import get_logger
 from .trigger_tools import get_meg_trigger_dict, repair_meg_trigger_events, add_fix_event_trigger, get_avs_blocks
 from .meg import preprocess_meg_block
+
+
+# Initialize logger
+logger = get_logger('preprocessing.composer')
 
 
 class AVSComposer:
@@ -140,7 +145,7 @@ class AVSComposer:
         self.max_block = max_block
         self.min_block = min_block
         self.blocks_this_session = get_avs_blocks(self.session_num, self.min_block, self.max_block)
-        print('Selected blocks this session: ', self.blocks_this_session)
+        logger.info(f'Selected blocks this session: {self.blocks_this_session}')
         
         # Set up other parameters
         self.stim_channel = stim_channel
@@ -204,7 +209,7 @@ class AVSComposer:
         """
         
         if self.verbose:
-            print('Loading data for subject', self.subject, 'session', self.session)
+            logger.info(f'Loading data for subject {self.subject}, session {self.session}')
         
         if self.preprocessed:
             fif_suffix = "_raw-sss.fif"
@@ -220,15 +225,15 @@ class AVSComposer:
             raw_fname = os.path.join(self.prepro_dir, self.sub_sess_id + block + fif_suffix)
             # Check if the file exists
             if not os.path.isfile(raw_fname) and not compute_missing_prepro:
-                print('Warning: Empty room recording file not found.', raw_fname)
+                logger.warning(f'Empty room recording file not found: {raw_fname}')
                 return block, None
             empty_room_recording = True
         else:
             raw_fname = os.path.join(dir_stem, self.sub_sess_id + str(block).zfill(2) + fif_suffix)
-            print("checking for preprocessed data in: ", raw_fname)
+            logger.debug(f"Checking for preprocessed data in: {raw_fname}")
 
         if os.path.exists(raw_fname) and not self.recompute_prepro:
-            print("Found preprocessed data in: ", raw_fname)
+            logger.info(f"Found preprocessed data in: {raw_fname}")
             try:
                 raw = mne.io.read_raw_fif(
                     raw_fname,
@@ -236,18 +241,18 @@ class AVSComposer:
                     verbose=self.verbose
                 )
             except Exception as e:
-                print(f"Error loading file {raw_fname}: {e}")
+                logger.error(f"Error loading file {raw_fname}: {e}")
                 return block, None
         else:
             if self.preprocessed:
-                print('No preprocessed raw data found for block', block, raw_fname)
+                logger.warning(f'No preprocessed raw data found for block {block}: {raw_fname}')
                 if compute_missing_prepro or self.recompute_prepro:
-                    print('Computing preprocessed data for block', block)
+                    logger.info(f'Computing preprocessed data for block {block}')
                     if empty_room_recording:
                         raw_fname = os.path.join(self.session_dir, self.sub_sess_id + block + ".fif")
                         # Check whether the file exists
                         if not os.path.isfile(raw_fname):
-                            print('Warning: Empty room recording file not found', raw_fname)
+                            logger.warning(f'Empty room recording file not found: {raw_fname}')
                             return block, None
                     else:
                         raw_fname = os.path.join(self.session_dir, self.sub_sess_id + str(block).zfill(2) + ".fif")
@@ -259,7 +264,7 @@ class AVSComposer:
                             verbose=self.verbose
                         )
                     except Exception as e:
-                        print(f"Error loading raw file for recompute {raw_fname}: {e}")
+                        logger.error(f"Error loading raw file for recompute {raw_fname}: {e}")
                         return block, None
                     
                     if empty_room_recording:
@@ -268,10 +273,10 @@ class AVSComposer:
                         # We use the first block of the session
                         raw_reference_fname = os.path.join(self.prepro_dir, self.sub_sess_id + str(1).zfill(2) + "_raw-sss.fif")
                         if not os.path.isfile(raw_reference_fname):
-                            print('Warning: Preprocessed reference raw file not found. Trying without prepro.', raw_reference_fname)
+                            logger.warning(f'Preprocessed reference raw file not found. Trying without prepro: {raw_reference_fname}')
                             raw_reference_fname = os.path.join(self.session_dir, self.sub_sess_id + str(1).zfill(2) + ".fif")
                             if not os.path.isfile(raw_reference_fname):
-                                print('Warning: Reference raw file not found.', raw_reference_fname)
+                                logger.warning(f'Reference raw file not found: {raw_reference_fname}')
                                 return block, None
                         
                         try:
@@ -290,7 +295,7 @@ class AVSComposer:
                                 verbose=self.verbose
                             )
                         except Exception as e:
-                            print(f"Error preparing empty room recording: {e}")
+                            logger.error(f"Error preparing empty room recording: {e}")
                             return block, None
 
                     # Apply preprocessing using pyAVS preprocessing function
@@ -307,10 +312,10 @@ class AVSComposer:
                             verbose=self.verbose
                         )
                     except Exception as e:
-                        print(f"Error preprocessing block {block}: {e}")
+                        logger.error(f"Error preprocessing block {block}: {e}")
                         return block, None
                 else:
-                    print('Warning: No raw data found for block', block, 'and compute_missing_prepro is set to False')
+                    logger.warning(f'No raw data found for block {block} and compute_missing_prepro is set to False')
                     return block, None
             else:
                 try:
@@ -320,7 +325,7 @@ class AVSComposer:
                         verbose=self.verbose
                     )
                 except Exception as e:
-                    print(f"Error loading raw file {raw_fname}: {e}")
+                    logger.error(f"Error loading raw file {raw_fname}: {e}")
                     return block, None
 
         return block, raw
@@ -370,7 +375,7 @@ class AVSComposer:
                     self.raws_dict[block_id] = raw
         
         if self.verbose:
-            print("Found raw data for blocks", list(self.raws_dict.keys()))
+            logger.info(f"Found raw data for blocks: {list(self.raws_dict.keys())}")
         
         return self.raws_dict
 
@@ -391,7 +396,7 @@ class AVSComposer:
             Flag indicating whether to load preprocessed data. Defaults to True.
         """
 
-        print('Loading data for subject', self.subject, 'session', self.session)
+        logger.info(f'Loading data for subject {self.subject}, session {self.session}')
         
         if self.max_block is None:
             if self.session == 'a':
@@ -403,7 +408,7 @@ class AVSComposer:
             self.min_block = 1
 
         if self.verbose:
-            print('Loading data for blocks', self.min_block, 'to', self.max_block)
+            logger.info(f'Loading data for blocks {self.min_block} to {self.max_block}')
 
         raws_dict = self.read_meg_sessions(
             compute_missing_prepro=compute_missing_prepro,
@@ -421,7 +426,7 @@ class AVSComposer:
                 del raws_dict[block]
 
         if self.verbose:
-            print('Empty room recordings available: ', self.empty_room_available)
+            logger.info(f'Empty room recordings available: {self.empty_room_available}')
         
         self.raws_dict = raws_dict
 
@@ -466,7 +471,7 @@ class AVSComposer:
             causal = self.causal_filter
         
         if self.verbose:
-            print('Filtering data for subject', self.subject, 'session', self.session)
+            logger.info(f'Filtering data for subject {self.subject}, session {self.session}')
             
         # Check if data is already filtered by examining MNE info
         if concatenated and hasattr(self, 'raws_concatenated'):
@@ -479,13 +484,13 @@ class AVSComposer:
         if raw_to_check and self.verbose:
             # Check for existing filters in MNE info
             if raw_to_check.info.get('lowpass') is not None:
-                print(f'   Data already has lowpass filter at {raw_to_check.info["lowpass"]} Hz')
+                logger.info(f'   Data already has lowpass filter at {raw_to_check.info["lowpass"]} Hz')
             if raw_to_check.info.get('highpass') is not None:
-                print(f'   Data already has highpass filter at {raw_to_check.info["highpass"]} Hz')
+                logger.info(f'   Data already has highpass filter at {raw_to_check.info["highpass"]} Hz')
             
             # Additional warning if recompute_prepro was used
             if self.recompute_prepro:
-                print('   WARNING: Data may already be filtered by preprocess_meg_block during initialization')
+                logger.warning('   Data may already be filtered by preprocess_meg_block during initialization')
         
         # Check if raws have already been concatenated
         if concatenated is None:
@@ -493,7 +498,7 @@ class AVSComposer:
         
         if not concatenated:
             # Filter the data per block using meg.py function
-            print("Filtering data per block")
+            logger.info("Filtering data per block")
             for block in self.raws_dict.keys():
                 self.raws_dict[block] = filter_meg(
                     self.raws_dict[block],
@@ -507,7 +512,7 @@ class AVSComposer:
                 # We add an attribute that tells us that the data has been filtered
                 self.raws_dict[block].filtered = True
         else:
-            print("Filtering concatenated data")
+            logger.info("Filtering concatenated data")
             # Filter the concatenated data using meg.py function
             self.raws_concatenated = filter_meg(
                 self.raws_concatenated,
@@ -544,27 +549,27 @@ class AVSComposer:
         
         # Check if current sampling frequency is equal to target sampling frequency
         if self.raws_dict[list(self.raws_dict.keys())[0]].info['sfreq'] == target_sfreq:
-            print('Data is already sampled at the target sampling frequency')
+            logger.info('Data is already sampled at the target sampling frequency')
             return
         
         # Check if we are down sampling or up sampling
         if self.raws_dict[list(self.raws_dict.keys())[0]].info['sfreq'] > target_sfreq:
-            print('Downsampling data to', target_sfreq, 'Hz')
+            logger.info(f'Downsampling data to {target_sfreq} Hz')
         else:
             # This is not recommended
-            print('Warning: Upsampling data to', target_sfreq, 'Hz', 'this is not recommended!')
+            logger.warning(f'Upsampling data to {target_sfreq} Hz - this is not recommended!')
 
         if self.verbose:
-            print('Resampling data for subject', self.subject, 'session', self.session)
+            logger.info(f'Resampling data for subject {self.subject}, session {self.session}')
             
             # Check current sampling frequency from MNE info
             current_sfreq = self.raws_dict[list(self.raws_dict.keys())[0]].info['sfreq']
-            print(f'   Current sampling frequency: {current_sfreq} Hz')
-            print(f'   Target sampling frequency: {target_sfreq} Hz')
+            logger.info(f'   Current sampling frequency: {current_sfreq} Hz')
+            logger.info(f'   Target sampling frequency: {target_sfreq} Hz')
             
             # Additional warning if recompute_prepro was used
             if self.recompute_prepro:
-                print('   WARNING: Data may already be resampled by preprocess_meg_block during initialization')
+                logger.warning('   Data may already be resampled by preprocess_meg_block during initialization')
         
         # Check if raws have already been concatenated
         concatenated = hasattr(self, 'raws_concatenated')
@@ -597,7 +602,7 @@ class AVSComposer:
         """
         
         if self.verbose:
-            print('Concatenating raws')
+            logger.info('Concatenating raws')
         
         raws_list = list(self.raws_dict.values())
         
@@ -609,8 +614,8 @@ class AVSComposer:
             if self.interpolate_bad_channels:
                 from .meg import interpolate_bad_channels
                 if self.verbose:
-                    print('Interpolating bad channels')
-                print("bads: ", [raw.info['bads'] for raw in raws_list])
+                    logger.info('Interpolating bad channels')
+                logger.debug(f"bads: {[raw.info['bads'] for raw in raws_list]}")
                 raws_list = [interpolate_bad_channels(raw, verbose=self.verbose) for raw in raws_list]
             else:
                 # We ignore the bad channels labels and hope that the MaxFilter did reasonably well in dealing with them
@@ -626,7 +631,7 @@ class AVSComposer:
                 if self.interpolate_bad_channels:
                     from .meg import interpolate_bad_channels
                     if self.verbose:
-                        print('Interpolating bad channels in empty room data')
+                        logger.info('Interpolating bad channels in empty room data')
                     # Remove duplicates from the bads list
                     for raw in raws_list_empty_room:
                         raw.info['bads'] = list(set(raw.info['bads']))
@@ -644,7 +649,7 @@ class AVSComposer:
         """
         
         if self.verbose:
-            print('Finding events')
+            logger.info('Finding events')
         
         self.meg_trigger_events = mne.find_events(
             self.raws_concatenated,
@@ -690,7 +695,7 @@ class AVSComposer:
         
         # Now we have to read in the eye tracking events
         if self.verbose:
-            print('Reading in eye tracking events')
+            logger.info('Reading in eye tracking events')
 
         self.explog, self.et_events = load_and_enrich_eye_events(
             [self.subject],
@@ -701,7 +706,7 @@ class AVSComposer:
         )
         # subselect the recording context 
         if self.verbose:
-            print('Subselecting eye tracking events for recording context:', recording)
+            logger.info(f'Subselecting eye tracking events for recording context: {recording}')
         assert recording in ["scene", "caption", "microphone"], "Invalid recording context"
         self.et_events = self.et_events[self.et_events["recording"] == recording]
         if self.et_events.empty:
@@ -711,14 +716,15 @@ class AVSComposer:
 
         # Now we will extract the annotations from the eye tracking events
         if self.verbose:
-            print('Extracting annotations from eye tracking events')
+            logger.info('Extracting annotations from eye tracking events')
 
         self.et_events = add_fixation_sequence_position(self.et_events)
         
         # Now we will remove the last fixation event on each scene
         if exclude_last_fixation:
             if self.verbose:
-                print("We removed " + str(len(self.et_events) - len(self.et_events[self.et_events["fix_sequence_from_last"] != 0])) + " fixation events from the eye tracking events, because they were the last fixation event on a scene")
+                removed_count = len(self.et_events) - len(self.et_events[self.et_events["fix_sequence_from_last"] != 0])
+                logger.info(f"Removed {removed_count} fixation events because they were the last fixation event on a scene")
             self.et_events = self.et_events[self.et_events["fix_sequence_from_last"] != 0]
 
         # Now we add fixation based triggers to the MEG signal
@@ -738,14 +744,12 @@ class AVSComposer:
         if save_annotated_raw:
             # Now we will save the annotated raws
             if self.verbose:
-                print('Saving annotated raws')
+                logger.info('Saving annotated raws')
             self.raws_annotated.save(os.path.join(self.output_dir, self.sub_sess_id + '_annotated_raws.fif'), overwrite=True)
 
         # Print warning that informs about the number of missing trials
         if len(missing_trials) > 0:
-            print("Warning: " + str(
-                len(missing_trials)) + " trials could not be annotated in the MEG data. They were removed from the eye tracking events. Session: " + str(
-                self.session_num))
+            logger.warning(f"{len(missing_trials)} trials could not be annotated in the MEG data. They were removed from the eye tracking events. Session: {self.session_num}")
         
         for missing_trial in missing_trials:
             # Unpack the (block, trial) tuple and remove the respective events from the et_events dataframe
@@ -797,7 +801,7 @@ class AVSComposer:
 
         # Now we will make the event epochs
         if self.verbose:
-            print('Making event epochs.')
+            logger.info('Making event epochs.')
 
         # Add the et annotations to the raw data
         # Check if raws_annotated exists:
@@ -815,7 +819,7 @@ class AVSComposer:
 
         # Now we will make the event epochs
         if self.verbose:
-            print('Making event epochs for event type:', event_type)
+            logger.info(f'Making event epochs for event type: {event_type}')
         
         # We will make the epochs
         if event_type == 'fixation':  # An epoch focussing on the fixation period
@@ -858,7 +862,7 @@ class AVSComposer:
                 self.add_scene_metadata_to_epochs(metadata_colnames=self.et_events.columns)
 
         if self.verbose:
-            print("Event epochs created successfully")
+            logger.info("Event epochs created successfully")
 
     def add_et_metadata_to_epochs(self, metadata_colnames: Optional[List[str]] = None):
         """
@@ -887,11 +891,11 @@ class AVSComposer:
             metadata_colnames = events_df_for_metadata.columns
         
         if len(events_df_for_metadata) != len(self.et_epochs):
-            print("len events_df_for_metadata: " + str(len(events_df_for_metadata)))
-            print("len epochs: " + str(len(self.et_epochs)))
-            print(np.unique(events_df_for_metadata.block))
-            print(np.unique(events_df_for_metadata.type))
-            print(np.unique(events_df_for_metadata.recording))
+            logger.error(f"len events_df_for_metadata: {len(events_df_for_metadata)}")
+            logger.error(f"len epochs: {len(self.et_epochs)}")
+            logger.debug(f"Unique blocks: {np.unique(events_df_for_metadata.block)}")
+            logger.debug(f"Unique types: {np.unique(events_df_for_metadata.type)}")
+            logger.debug(f"Unique recordings: {np.unique(events_df_for_metadata.recording)}")
             # add some diagnostic prints
         
             raise ValueError("The amount of events in the events dataframe and the epochs object are not the same. This should not happen. Please check your data.")
@@ -901,22 +905,22 @@ class AVSComposer:
             durations_from_annot = durations_from_annot_df.loc[durations_from_annot_df.description == et_event_type, "duration"]
             
             if not np.array_equal(events_df_for_metadata["duration"].values, durations_from_annot.values):
-                print(events_df_for_metadata["duration"].values)
-                print(events_df_for_metadata["duration"])
-                print(self.et_epochs.annotations.duration)
+                logger.debug(f"Events dataframe duration values: {events_df_for_metadata['duration'].values}")
+                logger.debug(f"Events dataframe duration column: {events_df_for_metadata['duration']}")
+                logger.debug(f"Epochs annotations duration: {self.et_epochs.annotations.duration}")
                 raise ValueError("The event durations in the events dataframe and the epochs object are not the same. This should not happen. Please check your data.")
             else:
                 if self.verbose:
-                    print("All checks passed. The amount of events and the event durations are identical. We will now add the metadata to the epochs object")
+                    logger.info("All checks passed. The amount of events and the event durations are identical. Adding metadata to the epochs object")
                 
                 # Now we will add the metadata to the epochs object
                 for colname in metadata_colnames:
                     if colname not in self.et_events.columns:
-                        print(f"Warning: The column {colname} is not in the events dataframe. Please check your data")
+                        logger.warning(f"The column {colname} is not in the events dataframe. Please check your data")
                     else:
                         self.et_epochs.metadata[colname] = events_df_for_metadata[colname].values
         
-        print("Metadata added to epochs object")
+        logger.info("Metadata added to epochs object")
     
     def add_scene_metadata_to_epochs(self, metadata_colnames: Optional[List[str]] = None):
         """
@@ -943,7 +947,7 @@ class AVSComposer:
         # We have to keep the order of scenes as stated e.g. by "trial" column
         events_df_for_metadata_grouped = events_df_for_metadata.groupby("trial").agg(lambda x: list(x))
         # Sort by trial
-        print(events_df_for_metadata_grouped)
+        logger.debug(f"Grouped metadata: {events_df_for_metadata_grouped}")
         
         # Now we will add the metadata to the epochs object
         self.et_epochs.metadata = events_df_for_metadata_grouped
@@ -952,7 +956,7 @@ class AVSComposer:
         self.et_epochs.metadata["time_to_first_event"] = self.et_epochs.metadata["time_in_trial"].apply(lambda x: x[0])
         self.et_epochs.metadata["type_of_first_event"] = self.et_epochs.metadata["type"].apply(lambda x: x[0])
         
-        print("Scene metadata added to epochs object")
+        logger.info("Scene metadata added to epochs object")
 
     def get_data_summary(self) -> Dict[str, Any]:
         """
@@ -1007,7 +1011,7 @@ class AVSComposer:
         
         if not self.raws_dict:
             if self.verbose:
-                print("No raw data loaded. Please run load_meg_data() first.")
+                logger.warning("No raw data loaded. Please run load_meg_data() first.")
             return
         
         # Use instance variables as defaults
@@ -1015,7 +1019,7 @@ class AVSComposer:
             use_precomputed = self.use_precomputed_ica
         
         if self.verbose:
-            print("Applying ICA artifact removal to MEG blocks...")
+            logger.info("Applying ICA artifact removal to MEG blocks...")
         
         # Apply ICA using the standalone function
         self.raws_dict = apply_ica_to_raws(
@@ -1031,4 +1035,4 @@ class AVSComposer:
         )
         
         if self.verbose:
-            print("ICA artifact removal completed for all blocks")
+            logger.info("ICA artifact removal completed for all blocks")

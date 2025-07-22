@@ -11,6 +11,10 @@ from typing import Optional, Union, Dict, Any, List, Tuple
 import mne
 from mne.viz import plot_topomap
 
+from ..utils.logging import get_logger
+
+logger = get_logger('visualization.meg')
+
 
 def plot_evoked_joint(evoked: mne.Evoked, 
                      times: Optional[Union[float, List[float]]] = None,
@@ -103,7 +107,7 @@ def plot_median_erf(epochs: mne.Epochs,
             epochs = epochs[event_type]
     
     # Compute median across epochs
-    print(f"Computing median ERF from {len(epochs)} epochs...")
+    logger.info(f"Computing median ERF from {len(epochs)} epochs...")
     
     # Get data and compute median
     data = epochs.get_data()  # Shape: (n_epochs, n_channels, n_times)

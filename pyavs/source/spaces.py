@@ -11,6 +11,9 @@ import numpy as np
 from typing import List, Optional, Tuple, Dict, Any, Union
 
 from ..utils.paths import get_glasser_rois, get_default_subjects_dir
+from ..utils.logging import get_logger
+
+logger = get_logger('source.spaces')
 
 
 def create_source_space(subject: str,
@@ -46,8 +49,8 @@ def create_source_space(subject: str,
         Cortical source space
     """
     if verbose:
-        print(f"Creating cortical source space for {subject}")
-        print(f"Spacing: {spacing}, Surface: {surface}")
+        logger.info(f"Creating cortical source space for {subject}")
+        logger.info(f"Spacing: {spacing}, Surface: {surface}")
     
     try:
         src = mne.setup_source_space(
@@ -64,14 +67,14 @@ def create_source_space(subject: str,
             lh_vertices = src[0]['nuse']
             rh_vertices = src[1]['nuse']
             total_vertices = lh_vertices + rh_vertices
-            print(f"Created source space with {total_vertices} sources")
-            print(f"  Left hemisphere: {lh_vertices}")
-            print(f"  Right hemisphere: {rh_vertices}")
+            logger.info(f"Created source space with {total_vertices} sources")
+            logger.info(f"  Left hemisphere: {lh_vertices}")
+            logger.info(f"  Right hemisphere: {rh_vertices}")
         
         return src
         
     except Exception as e:
-        print(f"Error creating source space: {e}")
+        logger.error(f"Error creating source space: {e}")
         raise
 
 
@@ -114,8 +117,8 @@ def setup_volume_source_space(subject: str,
         Volume source space
     """
     if verbose:
-        print(f"Creating volume source space for {subject}")
-        print(f"Spacing: {pos} mm")
+        logger.info(f"Creating volume source space for {subject}")
+        logger.info(f"Spacing: {pos} mm")
     
     try:
         src = mne.setup_volume_source_space(
@@ -131,12 +134,12 @@ def setup_volume_source_space(subject: str,
         )
         
         if verbose:
-            print(f"Created volume source space with {src[0]['nuse']} sources")
+            logger.info(f"Created volume source space with {src[0]['nuse']} sources")
         
         return src
         
     except Exception as e:
-        print(f"Error creating volume source space: {e}")
+        logger.error(f"Error creating volume source space: {e}")
         raise
 
 
@@ -167,7 +170,7 @@ def get_roi_labels(roi_names: Union[str, List[str]],
         List of ROI labels
     """
     if verbose:
-        print(f"Loading ROI labels for {subject}")
+        logger.info(f"Loading ROI labels for {subject}")
     
     try:
         # Load all labels from parcellation
@@ -193,18 +196,18 @@ def get_roi_labels(roi_names: Union[str, List[str]],
                 
                 if not matching_labels:
                     if verbose:
-                        print(f"Warning: ROI '{roi_name}' not found in parcellation")
+                        logger.warning(f"ROI '{roi_name}' not found in parcellation")
                     continue
                 
                 selected_labels.extend(matching_labels)
         
         if verbose:
-            print(f"Found {len(selected_labels)} ROI labels")
+            logger.info(f"Found {len(selected_labels)} ROI labels")
         
         return selected_labels
         
     except Exception as e:
-        print(f"Error loading ROI labels: {e}")
+        logger.error(f"Error loading ROI labels: {e}")
         raise
 
 
@@ -238,7 +241,7 @@ def get_glasser_roi_labels(area: str = 'all',
     roi_names = get_glasser_rois(area)
     
     if verbose:
-        print(f"Glasser atlas ROIs for '{area}': {len(roi_names)} regions")
+        logger.info(f"Glasser atlas ROIs for '{area}': {len(roi_names)} regions")
     
     return roi_names
 
@@ -273,7 +276,7 @@ def create_mixed_source_space(subject: str,
         Mixed source space
     """
     if verbose:
-        print(f"Creating mixed source space for {subject}")
+        logger.info(f"Creating mixed source space for {subject}")
     
     # Create surface source space
     surf_src = create_source_space(
@@ -291,18 +294,18 @@ def create_mixed_source_space(subject: str,
         
         if add_interpolator:
             if verbose:
-                print("Adding interpolation matrix...")
+                logger.info("Adding interpolation matrix...")
             # This would add interpolation between surface and volume sources
             # Implementation depends on specific use case
         
         if verbose:
             total_sources = sum(s['nuse'] for s in mixed_src)
-            print(f"Created mixed source space with {total_sources} total sources")
+            logger.info(f"Created mixed source space with {total_sources} total sources")
         
         return mixed_src
         
     except Exception as e:
-        print(f"Error creating mixed source space: {e}")
+        logger.error(f"Error creating mixed source space: {e}")
         raise
 
 
@@ -336,7 +339,7 @@ def morph_source_space(src: mne.SourceSpaces,
         Morphed source space
     """
     if verbose:
-        print(f"Morphing source space from {subject_from} to {subject_to}")
+        logger.info(f"Morphing source space from {subject_from} to {subject_to}")
     
     try:
         # Create morph maps
@@ -356,12 +359,12 @@ def morph_source_space(src: mne.SourceSpaces,
             morphed_src = src.copy()
         
         if verbose:
-            print("Source space morphing completed")
+            logger.info("Source space morphing completed")
         
         return morphed_src
         
     except Exception as e:
-        print(f"Error morphing source space: {e}")
+        logger.error(f"Error morphing source space: {e}")
         raise
 
 
@@ -419,7 +422,7 @@ def save_source_space(src: mne.SourceSpaces,
     
     # Save
     src.save(src_path, overwrite=overwrite)
-    print(f"Saved source space to: {src_path}")
+    logger.info(f"Saved source space to: {src_path}")
     
     return src_path
 
@@ -472,7 +475,7 @@ def load_source_space(subject_id: int,
         raise FileNotFoundError(f"Source space not found: {src_path}")
     
     if verbose:
-        print(f"Loading source space from: {src_path}")
+        logger.info(f"Loading source space from: {src_path}")
     
     src = mne.read_source_spaces(src_path, verbose=verbose)
     
