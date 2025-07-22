@@ -27,7 +27,7 @@ from ..utils.validation import validate_subject_id, validate_session
 from ..utils.logging import get_logger
 from .trigger_tools import get_meg_trigger_dict, repair_meg_trigger_events, add_fix_event_trigger, get_avs_blocks
 from .meg import preprocess_meg_block
-from ..data_io import save_annotated_raw
+from ..io.write import save_annotated_raw
 
 
 # Initialize logger

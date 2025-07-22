@@ -20,14 +20,8 @@ from ..utils.validation import validate_subject_id, validate_session
 from ..utils.paths import get_default_subjects_dir
 from ..utils.logging import get_logger
 from .forward import load_forward_model
-from ..data_io import (
-    save_annotated_raw,
-    save_source_data,
-    save_population_codes_h5,
-    load_source_data,
-    find_population_codes_files,
-    list_available_parameter_sets
-)
+from ..io.write import save_source_data, save_population_codes_h5
+from ..io.read import load_source_data, find_population_codes_files, list_available_parameter_sets
 
 logger = get_logger('source.reconstruction')
 
