@@ -27,6 +27,7 @@ from ..utils.validation import validate_subject_id, validate_session
 from ..utils.logging import get_logger
 from .trigger_tools import get_meg_trigger_dict, repair_meg_trigger_events, add_fix_event_trigger, get_avs_blocks
 from .meg import preprocess_meg_block
+from ..data_io import save_annotated_raw
 
 
 # Initialize logger
@@ -747,10 +748,10 @@ class AVSComposer:
         
         # Save the annotated raws
         if save_annotated_raw:
-            # Now we will save the annotated raws
+            # Now we will save the annotated raws to the derivatives/annotated directory
             if self.verbose:
                 logger.info('Saving annotated raws')
-            self.raws_annotated.save(os.path.join(self.output_dir, self.sub_sess_id + '_annotated_raws.fif'), overwrite=True)
+            save_annotated_raw(self.raws_annotated, self.subject, self.session_num, self.data_dir)
 
         # Print warning that informs about the number of missing trials
         if len(missing_trials) > 0:
