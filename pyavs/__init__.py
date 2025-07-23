@@ -20,7 +20,22 @@ from .utils.logging import configure_logging, get_logger
 configure_logging(level='INFO', console=True, file_path=None, use_colors=True)
 
 # Main API functions
-from .utils.config import set_data_path, get_data_path, setup_data_directory
+from .config import get_config, set_config, load_config, save_config
+# Backward compatibility
+from .config.manager import get_config as _get_global_config
+def set_data_path(path): 
+    config = _get_global_config()
+    config.paths.data_path = path
+    config.paths.setup_paths()
+def get_data_path(): 
+    config = _get_global_config()
+    return config.paths.data_path
+def setup_data_directory(path=None):
+    config = _get_global_config()
+    if path:
+        config.paths.data_path = path
+    config.paths.setup_paths()
+    return config.paths.data_path
 from .dataloader.loaders import load_eye_events, load_experiment_log, load_anatomical, load_scenes
 from .dataloader.eye import load_and_enrich_eye_events, add_fixation_sequence_position, add_cross_event_information
 from .dataloader.meg import load_meg_raw, load_meg_preprocessed, load_meg_session, load_and_preprocess_meg_run
@@ -251,7 +266,6 @@ def check_data_availability(subject_id, session):
         Dictionary with availability status for each data type
     """
     from .utils.validation import validate_data_integrity
-    from .utils.config import get_data_path
     
     data_path = get_data_path()
     if data_path is None:

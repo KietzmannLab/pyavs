@@ -37,40 +37,55 @@ logger = get_logger('compute_population_codes')
 def main():
     """Main population code computation workflow."""
     
-    # Configuration - matches avs_compute_population_codes script
+    # Configuration - using pyAVS config system
     configure_logging(level='INFO', console=True)
     logger.info("=== pyAVS Population Code Computation ===")
     
-    # Core parameters (adjust as needed)
-    subject_id = 2
-    sessions = np.arange(1, 2, dtype=int)  # Process session 1 (extend as needed)
-    event_type = "saccade"  # or "fixation"
-    tmin, tmax = -0.500, 0.800  # Epoch time window in seconds
+    # Initialize configuration
+    from pyavs.config import get_config
+    config = get_config()
     
-    # Data paths
-    data_path = "/share/klab/datasets/avs/"  # Update this path
+    # You can modify config parameters as needed:
+    # config.analysis.subject_id = 2
+    # config.analysis.sessions = [1]
+    # config.analysis.event_type = "saccade"
+    # config.analysis.tmin = -0.5
+    # config.analysis.tmax = 0.8
+    # config.processing.resample_freq = 500
+    # config.analysis.rois = ["stc"]
+    # config.analysis.method = "beamformer"
     
-    # Processing parameters
-    resample_to_hz = 500
-    filter_params = {
-        "l_freq": 0.2, 
-        "h_freq": 200, 
-        "causal_filter": True
-    }
+    # Or load from a config file:
+    # config.load('my_config.json')
     
-    # ROI configuration
-    rois = ["stc"]  # Options: ['mag','grad'] for sensor-level, or source ROIs like ["V1", "V2", "stc"]
-    hemi = "both"
-    method = 'beamformer'  # 'erf' for sensor-level, 'beamformer' for source-level
-    atlas = 'glasser'
-    pick_ori = "normal"  # "max-power", "loose", "normal", "vector"
+    # Validate configuration
+    try:
+        config.validate()
+    except Exception as e:
+        logger.error(f"Configuration validation failed: {e}")
+        return
     
-    # ICA parameters (use composer's built-in ICA functionality)
-    use_precomputed_ica = True
-    apply_ica = False  # Set to True to compute ICA on-the-fly instead
+    logger.info(f"Configuration: Subject {config.analysis.subject_id}, "
+                f"Sessions {config.analysis.sessions}, "
+                f"Event type: {config.analysis.event_type}")
     
-    # Other parameters
-    n_jobs = -1
+    # Extract commonly used parameters for compatibility
+    subject_id = config.analysis.subject_id
+    sessions = config.analysis.sessions
+    event_type = config.analysis.event_type
+    tmin, tmax = config.analysis.tmin, config.analysis.tmax
+    data_path = config.paths.data_path
+    resample_to_hz = config.processing.resample_freq
+    filter_params = config.processing.filter_params
+    rois = config.analysis.rois
+    hemi = config.analysis.hemi
+    method = config.analysis.method
+    atlas = config.analysis.atlas
+    pick_ori = config.analysis.pick_ori
+    n_jobs = config.analysis.n_jobs
+    blocks = config.analysis.blocks
+    use_precomputed_ica = config.processing.use_precomputed_ica
+    apply_ica = config.processing.apply_ica
     
     try:
         # Set data path
@@ -99,21 +114,20 @@ def main():
             # Step 1: Initialize AVS Composer
             logger.info("Step 1: Initializing AVS Composer...")
             
+            # Get composer kwargs from config
+            composer_kwargs = config.get_composer_kwargs()
+            
             composer = AVSComposer(
                 subject=subject_id,
                 session_num=session_num,
-                data_dir=data_path,
                 output_dir=output_dir,
-                verbose=True,
                 preprocessed=True,
                 recompute_prepro=False,
                 max_block=2,  # Adjust as needed
-                min_block=1,
-                interpolate_bad_channels=True,
-                use_precomputed_ica=use_precomputed_ica,
-                apply_ica=apply_ica,
-                n_jobs=n_jobs,
+                use_precomputed_ica=config.processing.use_precomputed_ica,
+                apply_ica=config.processing.apply_ica,
                 resample_freq=resample_to_hz,
+                **composer_kwargs,
                 **filter_params
             )
             
@@ -217,23 +231,22 @@ def main():
                 # The filters were computed with the same parameters, so they'll be in the same directory
                 logger.info("Filters are stored alongside population codes in parameter-specific directory")
             
+            # Get population codes kwargs from config
+            pop_codes_kwargs = config.get_population_codes_kwargs()
+            
             # Use the pyAVS io function to save population codes
             saved_path = save_population_codes_h5(
                 population_codes=population_codes,
                 metadata=metadata,
                 subject_id=subject_id,
                 session=session_num,
-                event_type=event_type,
                 blocks=composer.blocks_this_session,
                 times=epochs.times,
-                rois=rois,
-                sampling_rate=resample_to_hz,
-                filter_params=filter_params,
-                data_path=data_path,
-                hemi=hemi
+                **pop_codes_kwargs
             )
             
             logger.info(f"Population codes saved to: {saved_path}")
+            logger.info("Configuration file saved alongside population codes for reproducibility")
             logger.info(f"Session {session_num} completed successfully!")
             
             # Clean up memory
@@ -291,20 +304,18 @@ def compute_source_population_codes(epochs, composer, subject_id, session_num,
         # Load or compute per-session LCMV filters with full parameter set
         logger.info(f"Loading/computing LCMV filters for event type: {event_type}")
         
-        # Load or compute filters with full parameter set for consistent storage
+        # Get filter kwargs from config for consistent parameter usage
+        from pyavs.config import get_config
+        config = get_config()
+        filter_kwargs = config.get_filter_kwargs()
+        
+        # Load or compute filters with config-derived parameters
         filters = load_or_compute_lcmv_filters(
             data_path=data_path,
             subject_id=subject_id,
             sessions=[session_num],  # Only need current session for application
             event_type=event_type,
-            tmin=tmin,
-            tmax=tmax,
-            filter_params=filter_params,
-            resample_freq=resample_to_hz,
-            rois=source_rois,
-            blocks=blocks,
-            hemi=hemi,
-            pick_ori=pick_ori
+            **filter_kwargs
         )
         
         # Apply beamformer filters to epochs

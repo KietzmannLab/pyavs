@@ -416,6 +416,18 @@ def save_population_codes_h5(population_codes: Dict[str, np.ndarray],
             'description': f"Data for {event_type} events at {sampling_rate}Hz"
         })
         
+        # Save complete configuration alongside population codes
+        try:
+            from ..config import get_config
+            config = get_config()
+            config_file = os.path.join(param_dir, 'config.json')
+            config.save(config_file, format='json')
+        except Exception as e:
+            # Log warning but don't fail the save operation
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Could not save config file: {e}")
+        
         # Create filename with original naming convention
         sub_sess_id = f"as{subject_id:02d}{'abcde'[session-1] if session <= 5 else session}"
         h5_filename = f"{sub_sess_id}_{data_type}_{event_type}_{sampling_rate}hz_{param_signature[:8]}.h5"

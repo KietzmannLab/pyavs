@@ -1,0 +1,73 @@
+{
+  "analysis": {
+    "subject_id": 2,
+    "sessions": [1, 2],
+    "event_type": "saccade",
+    "tmin": -0.5,
+    "tmax": 0.8,
+    "rois": ["stc"],
+    "hemi": "both",
+    "method": "beamformer",
+    "atlas": "glasser",
+    "pick_ori": "normal",
+    "n_jobs": -1,
+    "random_seed": 42,
+    "blocks": null,
+    "min_block": 1,
+    "max_block": null
+  },
+  "processing": {
+    "resample_freq": 500,
+    "filter_params": {
+      "l_freq": 0.2,
+      "h_freq": 200,
+      "picks": null,
+      "causal": true
+    },
+    "use_precomputed_ica": true,
+    "apply_ica": false,
+    "ica_solutions_dir": null,
+    "ica_exclusion_dir": null,
+    "interpolate_bad_channels": true,
+    "apply_ransac": false,
+    "apply_autoreject": false,
+    "partition_random_epochs": 1.0,
+    "n_epochs_per_session": 350,
+    "compression": "gzip"
+  },
+  "source": {
+    "reg": 0.05,
+    "weight_norm": null,
+    "rank": "info",
+    "reduce_rank": false,
+    "noise_cov_method": "empirical",
+    "data_cov_method": "auto",
+    "forward_spacing": "oct6",
+    "mindist": 5.0,
+    "bem_conductivity": [0.3, 0.006, 0.3],
+    "coord_frame": "head",
+    "save_stcs": false,
+    "save_filters": true
+  },
+  "paths": {
+    "data_path": "/share/klab/datasets/avs",
+    "server": "uos",
+    "output_prefix": "as",
+    "cache_dir": null,
+    "raw_dir": null,
+    "results_dir": null,
+    "project_dir": null,
+    "input_dir": null
+  },
+  "data": {
+    "data_type": "population_codes",
+    "exclude_bad_channels": true,
+    "exclude_bad_epochs": true,
+    "preload": true,
+    "verbose": true,
+    "save_metadata": true,
+    "save_times": true,
+    "save_random_epochs": false,
+    "output_format": "h5"
+  }
+}

@@ -32,6 +32,14 @@ from .read import (
     load_source_data  # Alias
 )
 
+# Configuration I/O functions
+from .config_io import (
+    load_config_from_population_codes,
+    find_configs_for_subject,
+    list_available_configs,
+    reproduce_analysis_from_config
+)
+
 __all__ = [
     # Writing functions
     'save_data_h5',
@@ -54,5 +62,11 @@ __all__ = [
     'load_scenes',
     'find_population_codes_files',
     'list_available_parameter_sets',
-    'load_source_data'  # Alias
+    'load_source_data',  # Alias
+    
+    # Configuration I/O functions
+    'load_config_from_population_codes',
+    'find_configs_for_subject',
+    'list_available_configs',
+    'reproduce_analysis_from_config'
 ]
