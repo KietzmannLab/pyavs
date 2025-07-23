@@ -17,7 +17,7 @@ from typing import List, Optional, Dict, Union, Tuple
 from pathlib import Path
 
 from ..utils.paths import get_derivatives_path, get_subject_session_id
-from ..utils.logging import setup_logger
+from ..utils.logging import get_logger
 
 
 def _generate_parameter_signature(**params) -> str:
@@ -106,7 +106,7 @@ def compute_cross_session_data_covariance(
     rd_epochs_all_sess : mne.Epochs
         Concatenated epochs from all sessions
     """
-    logger = logging.getLogger(__name__)
+    logger = get_logger(__name__)
     
     if filter_params is None:
         filter_params = {"l_freq": 0.2, "h_freq": 200, "picks": None, "causal": True}
@@ -274,7 +274,7 @@ def compute_per_session_lcmv_filters(
     filters : dict
         Dictionary mapping session -> beamformer filters
     """
-    logger = logging.getLogger(__name__)
+    logger = get_logger(__name__)
     
     if filter_params is None:
         filter_params = {"l_freq": 0.2, "h_freq": 200, "picks": None, "causal": True}
@@ -436,7 +436,7 @@ def load_or_compute_lcmv_filters(
     filters : dict
         Dictionary mapping session -> beamformer filters
     """
-    logger = logging.getLogger(__name__)
+    logger = get_logger(__name__)
     
     if filter_params is None:
         filter_params = {"l_freq": 0.2, "h_freq": 200, "picks": None, "causal": True}

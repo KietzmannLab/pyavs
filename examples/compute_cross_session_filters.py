@@ -20,7 +20,7 @@ from typing import List, Optional
 # Add pyavs to path if not installed
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from pyavs.utils.logging import setup_logger
+from pyavs.utils.logging import get_logger
 from pyavs.utils.config import get_config
 from pyavs.source.filters import (
     compute_cross_session_data_covariance,
@@ -55,7 +55,7 @@ def main():
     
     # Set up logging
     log_level = logging.INFO if args.verbose else logging.WARNING
-    logger = setup_logger(__name__, level=log_level)
+    logger = get_logger(__name__)
     
     # Initialize configuration
     from pyavs.config import get_config, load_config

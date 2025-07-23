@@ -18,7 +18,7 @@ from typing import List, Optional, Dict, Tuple
 # Add pyavs to path if not installed
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from pyavs.utils.logging import setup_logger
+from pyavs.utils.logging import get_logger
 from pyavs.utils.config import get_config
 from pyavs.utils.paths import get_derivatives_path
 from pyavs.dataloader.meg import load_raw_meg
@@ -288,7 +288,7 @@ def diagnose_covariance_generalization(
 def main():
     """Main function to compute noise covariance matrices."""
     # Set up logging
-    logger = setup_logger(__name__, level=logging.INFO)
+    logger = get_logger(__name__)
     
     # Get configuration
     config = get_config()
