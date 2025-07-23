@@ -112,6 +112,9 @@ def main():
             tmax=args.tmax,
             filter_params=filter_params,
             resample_freq=args.resample_freq,
+            rois=None,  # Could be an argument  
+            blocks=None,  # Could be an argument
+            hemi='both',  # Could be an argument
             block_selection=args.block_selection,
             overwrite=args.overwrite
         )
@@ -126,6 +129,14 @@ def main():
             subject_id=args.subject_id,
             sessions=args.sessions,
             event_type=args.event_type,
+            tmin=args.tmin,
+            tmax=args.tmax,
+            filter_params=filter_params,
+            resample_freq=args.resample_freq,
+            rois=None,
+            blocks=None,
+            hemi='both',
+            n_epochs_per_session=args.n_epochs_per_session,
             cross_session_epochs=cross_session_epochs,
             pick_ori=args.pick_ori,
             reg=args.reg,
@@ -134,12 +145,24 @@ def main():
         
         logger.info(f"Successfully computed filters for {len(filters)} sessions")
         
-        # Summary
-        from pyavs.utils.paths import get_derivatives_path
-        filter_dir = os.path.join(
-            get_derivatives_path(data_path, args.subject_id),
-            'source_reconstruction', 'beamformer_filters', args.event_type
+        # Summary - using parameter signature path
+        from pyavs.source.filters import _generate_parameter_signature
+        
+        param_signature = _generate_parameter_signature(
+            event_type=args.event_type,
+            sampling_rate=args.resample_freq,
+            filter_params=filter_params,
+            hemi='both',
+            rois=None,
+            blocks=None,
+            tmin=args.tmin,
+            tmax=args.tmax,
+            n_epochs_per_session=args.n_epochs_per_session
         )
+        
+        param_dir = os.path.join(data_path, 'derivatives', 'pyavs', 'population_codes', param_signature)
+        subject_group = f"sub{((args.subject_id - 1) // 5) * 5 + 1:02d}-{min(((args.subject_id - 1) // 5 + 1) * 5, 99):02d}"
+        filter_dir = os.path.join(param_dir, subject_group, 'beamformer_filters')
         
         logger.info("="*60)
         logger.info("FILTER COMPUTATION SUMMARY")
@@ -148,16 +171,14 @@ def main():
         logger.info(f"Event type: {args.event_type}")
         logger.info(f"Sessions processed: {sorted(filters.keys())}")
         logger.info(f"Cross-session epochs: {len(cross_session_epochs)} epochs")
+        logger.info(f"Parameter signature: {param_signature}")
         logger.info(f"Filter directory: {filter_dir}")
         logger.info("="*60)
         
         # Verification
         logger.info("Verifying saved filters...")
         for session in args.sessions:
-            filter_file = os.path.join(
-                filter_dir, 
-                f'sub-{args.subject_id:02d}_ses-{session:02d}_task-avs_desc-{args.event_type}_beamformer.h5'
-            )
+            filter_file = os.path.join(filter_dir, f'lcmv_filters_sess{session:02d}.h5')
             if os.path.exists(filter_file):
                 file_size = os.path.getsize(filter_file) / (1024*1024)  # MB
                 logger.info(f"  Session {session}: {file_size:.1f} MB")

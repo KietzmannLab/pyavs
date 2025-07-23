@@ -11,11 +11,46 @@ import mne
 import numpy as np
 import h5py
 import logging
+import json
+import hashlib
 from typing import List, Optional, Dict, Union, Tuple
 from pathlib import Path
 
 from ..utils.paths import get_derivatives_path, get_subject_session_id
 from ..utils.logging import setup_logger
+
+
+def _generate_parameter_signature(**params) -> str:
+    """Generate a unique signature string based on processing parameters."""
+    clean_params = {}
+    
+    for key, value in params.items():
+        if value is None:
+            continue
+        elif isinstance(value, (list, tuple, np.ndarray)):
+            if isinstance(value, np.ndarray):
+                value = value.tolist()
+            if isinstance(value, list) and len(value) > 0 and isinstance(value[0], str):
+                value = sorted(value)
+            clean_params[key] = tuple(value)
+        elif isinstance(value, dict):
+            clean_params[key] = tuple(sorted(value.items()))
+        else:
+            clean_params[key] = value
+    
+    # Create deterministic string representation
+    param_string = json.dumps(clean_params, sort_keys=True, separators=(',', ':'))
+    
+    # Generate hash
+    param_hash = hashlib.sha256(param_string.encode()).hexdigest()
+    
+    # Create readable signature
+    event_type = clean_params.get('event_type', 'unknown')
+    sampling_rate = clean_params.get('sampling_rate', 'unknown')
+    
+    signature = f"{event_type}_{sampling_rate}hz_{param_hash[:16]}"
+    
+    return signature
 
 
 def compute_cross_session_data_covariance(
@@ -28,6 +63,9 @@ def compute_cross_session_data_covariance(
     tmax: float = 0.8,
     filter_params: Optional[Dict] = None,
     resample_freq: Optional[int] = 500,
+    rois: Optional[List[str]] = None,
+    blocks: Optional[List[int]] = None,
+    hemi: str = 'both',
     block_selection: str = 'all',
     random_seed: int = 42,
     overwrite: bool = False
@@ -70,22 +108,36 @@ def compute_cross_session_data_covariance(
     """
     logger = logging.getLogger(__name__)
     
-    # Set up paths
-    derivatives_dir = get_derivatives_path(data_path, subject_id)
-    filter_dir = os.path.join(derivatives_dir, 'source_reconstruction', 'beamformer_filters', event_type)
+    if filter_params is None:
+        filter_params = {"l_freq": 0.2, "h_freq": 200, "picks": None, "causal": True}
+    
+    # Generate parameter signature for this specific analysis configuration
+    param_signature = _generate_parameter_signature(
+        event_type=event_type,
+        sampling_rate=resample_freq,
+        filter_params=filter_params,
+        hemi=hemi,
+        rois=rois,
+        blocks=blocks,
+        tmin=tmin,
+        tmax=tmax,
+        n_epochs_per_session=n_epochs_per_session
+    )
+    
+    # Set up paths with parameter signature
+    param_dir = os.path.join(data_path, 'derivatives', 'pyavs', 'population_codes', param_signature)
+    subject_group = f"sub{((subject_id - 1) // 5) * 5 + 1:02d}-{min(((subject_id - 1) // 5 + 1) * 5, 99):02d}"
+    filter_dir = os.path.join(param_dir, subject_group, 'beamformer_filters')
     os.makedirs(filter_dir, exist_ok=True)
     
-    # Filename for cross-session epochs
-    epochs_file = os.path.join(filter_dir, f'cross_session_epochs_{event_type}_{n_epochs_per_session}per.fif')
+    # Filename for cross-session epochs with parameter signature
+    epochs_file = os.path.join(filter_dir, f'cross_session_epochs_{n_epochs_per_session}per.fif')
     
     if os.path.exists(epochs_file) and not overwrite:
         logger.info(f"Loading existing cross-session epochs: {epochs_file}")
         return mne.read_epochs(epochs_file, preload=True)
     
     logger.info(f"Computing cross-session data covariance for {len(sessions)} sessions")
-    
-    if filter_params is None:
-        filter_params = {"l_freq": 0.2, "h_freq": 200, "picks": None, "causal": True}
     
     rng = np.random.RandomState(random_seed)
     rd_epochs_all_sess = None
@@ -171,6 +223,14 @@ def compute_per_session_lcmv_filters(
     subject_id: int,
     sessions: List[int],
     event_type: str,
+    tmin: float = -0.5,
+    tmax: float = 0.8,
+    filter_params: Optional[Dict] = None,
+    resample_freq: Optional[int] = 500,
+    rois: Optional[List[str]] = None,
+    blocks: Optional[List[int]] = None,
+    hemi: str = 'both',
+    n_epochs_per_session: int = 350,
     cross_session_epochs: Optional[mne.Epochs] = None,
     pick_ori: str = "normal",
     reg: float = 0.05,
@@ -216,9 +276,29 @@ def compute_per_session_lcmv_filters(
     """
     logger = logging.getLogger(__name__)
     
-    # Set up paths
+    if filter_params is None:
+        filter_params = {"l_freq": 0.2, "h_freq": 200, "picks": None, "causal": True}
+    
+    # Generate parameter signature for consistent storage with population codes
+    param_signature = _generate_parameter_signature(
+        event_type=event_type,
+        sampling_rate=resample_freq,
+        filter_params=filter_params,
+        hemi=hemi,
+        rois=rois,
+        blocks=blocks,
+        tmin=tmin,
+        tmax=tmax,
+        n_epochs_per_session=n_epochs_per_session
+    )
+    
+    # Set up paths with parameter signature (same as population codes)
+    param_dir = os.path.join(data_path, 'derivatives', 'pyavs', 'population_codes', param_signature)
+    subject_group = f"sub{((subject_id - 1) // 5) * 5 + 1:02d}-{min(((subject_id - 1) // 5 + 1) * 5, 99):02d}"
+    filter_dir = os.path.join(param_dir, subject_group, 'beamformer_filters')
+    
+    # Also get noise covariance path
     derivatives_dir = get_derivatives_path(data_path, subject_id)
-    filter_dir = os.path.join(derivatives_dir, 'source_reconstruction', 'beamformer_filters', event_type)
     cov_dir = os.path.join(derivatives_dir, 'source_reconstruction', 'noise_covariance')
     
     os.makedirs(filter_dir, exist_ok=True)
@@ -246,6 +326,15 @@ def compute_per_session_lcmv_filters(
             subject_id=subject_id,
             sessions=sessions,
             event_type=event_type,
+            tmin=tmin,
+            tmax=tmax,
+            filter_params=filter_params,
+            resample_freq=resample_freq,
+            apply_fixation_mask=apply_fixation_mask,
+            rois=rois,
+            blocks=blocks,
+            hemi=hemi,
+            n_epochs_per_session=n_epochs_per_session,
             overwrite=overwrite
         )
     
@@ -261,7 +350,7 @@ def compute_per_session_lcmv_filters(
     filters = {}
     
     for session in sessions:
-        filter_file = os.path.join(filter_dir, f'sub-{subject_id:02d}_ses-{session:02d}_task-avs_desc-{event_type}_beamformer.h5')
+        filter_file = os.path.join(filter_dir, f'lcmv_filters_sess{session:02d}.h5')
         
         if os.path.exists(filter_file) and not overwrite:
             logger.info(f"Loading existing filter: {filter_file}")
@@ -316,6 +405,14 @@ def load_or_compute_lcmv_filters(
     subject_id: int,
     sessions: List[int],
     event_type: str,
+    tmin: float = -0.5,
+    tmax: float = 0.8,
+    filter_params: Optional[Dict] = None,
+    resample_freq: Optional[int] = 500,
+    rois: Optional[List[str]] = None,
+    blocks: Optional[List[int]] = None,
+    hemi: str = 'both',
+    n_epochs_per_session: int = 350,
     **filter_kwargs
 ) -> Dict[int, mne.beamformer.Beamformer]:
     """
@@ -341,15 +438,33 @@ def load_or_compute_lcmv_filters(
     """
     logger = logging.getLogger(__name__)
     
-    derivatives_dir = get_derivatives_path(data_path, subject_id)
-    filter_dir = os.path.join(derivatives_dir, 'source_reconstruction', 'beamformer_filters', event_type)
+    if filter_params is None:
+        filter_params = {"l_freq": 0.2, "h_freq": 200, "picks": None, "causal": True}
+    
+    # Generate parameter signature for consistent storage with population codes
+    param_signature = _generate_parameter_signature(
+        event_type=event_type,
+        sampling_rate=resample_freq,
+        filter_params=filter_params,
+        hemi=hemi,
+        rois=rois,
+        blocks=blocks,
+        tmin=tmin,
+        tmax=tmax,
+        n_epochs_per_session=n_epochs_per_session
+    )
+    
+    # Set up paths with parameter signature (same as population codes)
+    param_dir = os.path.join(data_path, 'derivatives', 'pyavs', 'population_codes', param_signature)
+    subject_group = f"sub{((subject_id - 1) // 5) * 5 + 1:02d}-{min(((subject_id - 1) // 5 + 1) * 5, 99):02d}"
+    filter_dir = os.path.join(param_dir, subject_group, 'beamformer_filters')
     
     # Check which filters exist
     existing_filters = {}
     missing_sessions = []
     
     for session in sessions:
-        filter_file = os.path.join(filter_dir, f'sub-{subject_id:02d}_ses-{session:02d}_task-avs_desc-{event_type}_beamformer.h5')
+        filter_file = os.path.join(filter_dir, f'lcmv_filters_sess{session:02d}.h5')
         
         if os.path.exists(filter_file):
             try:
@@ -370,6 +485,14 @@ def load_or_compute_lcmv_filters(
             subject_id=subject_id,
             sessions=missing_sessions,
             event_type=event_type,
+            tmin=tmin,
+            tmax=tmax,
+            filter_params=filter_params,
+            resample_freq=resample_freq,
+            rois=rois,
+            blocks=blocks,
+            hemi=hemi,
+            n_epochs_per_session=n_epochs_per_session,
             **filter_kwargs
         )
         

@@ -66,8 +66,6 @@ def save_data_h5(data: Union[np.ndarray, mne.Epochs, mne.io.Raw, Dict[str, np.nd
                  rois: Optional[List[str]] = None,
                  sampling_rate: int = 500,
                  filter_params: Optional[Dict[str, float]] = None,
-                 apply_fixation_mask: bool = False,
-                 fixation_masks: Optional[np.ndarray] = None,
                  offset_data: Optional[Dict[str, np.ndarray]] = None,
                  data_path: Optional[str] = None,
                  hemi: str = 'both',
@@ -108,10 +106,6 @@ def save_data_h5(data: Union[np.ndarray, mne.Epochs, mne.io.Raw, Dict[str, np.nd
         Sampling rate in Hz (default: 500)
     filter_params : dict, optional
         Filter parameters with 'l_freq' and 'h_freq' keys
-    apply_fixation_mask : bool, optional
-        Whether fixation masking was applied (default: False)
-    fixation_masks : np.ndarray, optional
-        Boolean masks for fixation periods
     offset_data : dict, optional
         Offset-locked data for fixation events
     data_path : str, optional
@@ -182,8 +176,6 @@ def save_data_h5(data: Union[np.ndarray, mne.Epochs, mne.io.Raw, Dict[str, np.nd
         rois=rois,
         sampling_rate=sampling_rate,
         filter_params=filter_params,
-        apply_fixation_mask=apply_fixation_mask,
-        fixation_masks=fixation_masks,
         offset_data=offset_data,
         data_path=data_path,
         hemi=hemi,
@@ -322,8 +314,6 @@ def save_population_codes_h5(population_codes: Dict[str, np.ndarray],
                             random_epochs: Optional[np.ndarray] = None,
                             sampling_rate: int = 500,
                             filter_params: Optional[Dict[str, float]] = None,
-                            apply_fixation_mask: bool = False,
-                            fixation_masks: Optional[np.ndarray] = None,
                             offset_data: Optional[Dict[str, np.ndarray]] = None,
                             data_path: Optional[str] = None,
                             hemi: str = 'both',
@@ -361,10 +351,6 @@ def save_population_codes_h5(population_codes: Dict[str, np.ndarray],
         Sampling rate in Hz (default: 500)
     filter_params : dict, optional
         Filter parameters with 'l_freq' and 'h_freq' keys (default: None)
-    apply_fixation_mask : bool, optional
-        Whether fixation masking was applied (default: False)
-    fixation_masks : np.ndarray, optional
-        Boolean masks for fixation periods (default: None)
     offset_data : dict, optional
         Offset-locked data for fixation events (default: None)
     data_path : str, optional
@@ -403,7 +389,6 @@ def save_population_codes_h5(population_codes: Dict[str, np.ndarray],
             event_type=event_type,
             sampling_rate=sampling_rate,
             filter_params=filter_params,
-            apply_fixation_mask=apply_fixation_mask,
             hemi=hemi,
             rois=rois,
             blocks=blocks
@@ -423,7 +408,6 @@ def save_population_codes_h5(population_codes: Dict[str, np.ndarray],
             'event_type': event_type,
             'sampling_rate': sampling_rate,
             'filter_params': filter_params,
-            'apply_fixation_mask': apply_fixation_mask,
             'hemi': hemi,
             'rois': rois,
             'blocks': blocks,
@@ -434,7 +418,7 @@ def save_population_codes_h5(population_codes: Dict[str, np.ndarray],
         
         # Create filename with original naming convention
         sub_sess_id = f"as{subject_id:02d}{'abcde'[session-1] if session <= 5 else session}"
-        h5_filename = f"{sub_sess_id}_{data_type}_{event_type}_{sampling_rate}hz_masked_{apply_fixation_mask}_{param_signature[:8]}.h5"
+        h5_filename = f"{sub_sess_id}_{data_type}_{event_type}_{sampling_rate}hz_{param_signature[:8]}.h5"
         
     else:
         # Standard directory structure for other data types
@@ -490,9 +474,7 @@ def save_population_codes_h5(population_codes: Dict[str, np.ndarray],
         if event_type == "fixation":
             storage.attrs["offset_lock_steps"] = True
         
-        # Store fixation masks (if not applying them)
-        if not apply_fixation_mask and fixation_masks is not None:
-            storage.create_dataset("fixation_masks", data=fixation_masks, dtype=bool, compression=compression)
+        # Fixation mask functionality removed
         
         # Save metadata if available
         if not metadata.empty:

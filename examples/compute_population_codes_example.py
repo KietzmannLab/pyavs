@@ -196,7 +196,8 @@ def main():
                 try:
                     source_population_codes = compute_source_population_codes(
                         epochs, composer, subject_id, session_num, 
-                        source_rois, method, pick_ori, output_dir, event_type, data_path
+                        source_rois, method, pick_ori, output_dir, event_type, data_path,
+                        tmin, tmax, filter_params, resample_to_hz, hemi, blocks
                     )
                     population_codes.update(source_population_codes)
                 except Exception as e:
@@ -210,6 +211,12 @@ def main():
             # Prepare metadata
             metadata = epochs.metadata if hasattr(epochs, 'metadata') and epochs.metadata is not None else pd.DataFrame()
             
+            # Check if we computed filters and store them too
+            filters_to_save = None
+            if source_rois and method == 'beamformer':
+                # The filters were computed with the same parameters, so they'll be in the same directory
+                logger.info("Filters are stored alongside population codes in parameter-specific directory")
+            
             # Use the pyAVS io function to save population codes
             saved_path = save_population_codes_h5(
                 population_codes=population_codes,
@@ -222,8 +229,6 @@ def main():
                 rois=rois,
                 sampling_rate=resample_to_hz,
                 filter_params=filter_params,
-                apply_fixation_mask=False,  # We removed fixation masking
-                fixation_masks=None,
                 data_path=data_path,
                 hemi=hemi
             )
@@ -273,7 +278,8 @@ def compute_sensor_population_codes(epochs, sensor_rois):
 
 
 def compute_source_population_codes(epochs, composer, subject_id, session_num, 
-                                  source_rois, method, pick_ori, output_dir, event_type, data_path):
+                                  source_rois, method, pick_ori, output_dir, event_type, data_path,
+                                  tmin, tmax, filter_params, resample_to_hz, hemi, blocks=None):
     """Compute population codes for source-level data using per-session LCMV filters."""
     
     logger.info("Setting up source reconstruction with per-session LCMV filters...")
@@ -282,13 +288,22 @@ def compute_source_population_codes(epochs, composer, subject_id, session_num,
         # Import the new filter management system
         from pyavs.source.filters import load_or_compute_lcmv_filters, apply_lcmv_to_epochs
         
-        # Load or compute per-session LCMV filters
+        # Load or compute per-session LCMV filters with full parameter set
         logger.info(f"Loading/computing LCMV filters for event type: {event_type}")
+        
+        # Load or compute filters with full parameter set for consistent storage
         filters = load_or_compute_lcmv_filters(
             data_path=data_path,
             subject_id=subject_id,
             sessions=[session_num],  # Only need current session for application
             event_type=event_type,
+            tmin=tmin,
+            tmax=tmax,
+            filter_params=filter_params,
+            resample_freq=resample_to_hz,
+            rois=source_rois,
+            blocks=blocks,
+            hemi=hemi,
             pick_ori=pick_ori
         )
         
