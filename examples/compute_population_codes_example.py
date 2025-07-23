@@ -196,7 +196,7 @@ def main():
                 try:
                     source_population_codes = compute_source_population_codes(
                         epochs, composer, subject_id, session_num, 
-                        source_rois, method, pick_ori, output_dir
+                        source_rois, method, pick_ori, output_dir, event_type, data_path
                     )
                     population_codes.update(source_population_codes)
                 except Exception as e:
@@ -273,44 +273,28 @@ def compute_sensor_population_codes(epochs, sensor_rois):
 
 
 def compute_source_population_codes(epochs, composer, subject_id, session_num, 
-                                  source_rois, method, pick_ori, output_dir):
-    """Compute population codes for source-level data."""
+                                  source_rois, method, pick_ori, output_dir, event_type, data_path):
+    """Compute population codes for source-level data using per-session LCMV filters."""
     
-    # This is a simplified version - in practice, you would use the full source reconstruction pipeline
-    logger.info("Setting up source reconstruction...")
+    logger.info("Setting up source reconstruction with per-session LCMV filters...")
     
     try:
-        # Load forward model (would need to exist)
-        forward_fname = os.path.join(composer.subject_dir, "src", f"as{subject_id:02d}-fwd.fif")
-        forward = mne.read_forward_solution(forward_fname)
-        logger.info("Loaded forward model")
+        # Import the new filter management system
+        from pyavs.source.filters import load_or_compute_lcmv_filters, apply_lcmv_to_epochs
         
-        # Load or compute noise covariance
-        from pyavs.utils.paths import get_derivatives_path
-        
-        cov_dir = os.path.join(get_derivatives_path(data_path, subject_id), 'source_reconstruction', 'noise_covariance')
-        cov_file = os.path.join(cov_dir, f'sub-{subject_id:02d}_task-avs_desc-emptyroom_cov.fif')
-        
-        if os.path.exists(cov_file):
-            logger.info(f"Loading pre-computed noise covariance: {cov_file}")
-            cov = mne.read_cov(cov_file)
-        else:
-            logger.warning(f"Pre-computed noise covariance not found at {cov_file}")
-            logger.info("Computing noise covariance from epochs baseline period")
-            cov = mne.compute_covariance(epochs, tmin=epochs.tmin, tmax=0, method='empirical', rank='info')
-        
-        # Create beamformer filters
-        filters = mne.beamformer.make_lcmv(
-            epochs.info, forward, cov, reg=0.05, 
-            pick_ori=pick_ori, weight_norm='unit-noise-gain'
+        # Load or compute per-session LCMV filters
+        logger.info(f"Loading/computing LCMV filters for event type: {event_type}")
+        filters = load_or_compute_lcmv_filters(
+            data_path=data_path,
+            subject_id=subject_id,
+            sessions=[session_num],  # Only need current session for application
+            event_type=event_type,
+            pick_ori=pick_ori
         )
         
-        # Apply beamformer
-        logger.info("Applying beamformer to epochs...")
-        stcs = []
-        for epoch_idx in range(len(epochs)):
-            stc = mne.beamformer.apply_lcmv(epochs[epoch_idx], filters)
-            stcs.append(stc)
+        # Apply beamformer filters to epochs
+        logger.info(f"Applying LCMV beamformer for session {session_num}...")
+        stcs = apply_lcmv_to_epochs(epochs, filters, session_num)
         
         # Extract ROI data
         population_codes = {}

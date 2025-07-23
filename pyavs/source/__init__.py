@@ -28,6 +28,13 @@ from .spaces import (
     get_glasser_roi_labels
 )
 
+from .filters import (
+    compute_cross_session_data_covariance,
+    compute_per_session_lcmv_filters,
+    load_or_compute_lcmv_filters,
+    apply_lcmv_to_epochs
+)
+
 __all__ = [
     'setup_source_reconstruction',
     'apply_source_reconstruction', 
@@ -42,5 +49,9 @@ __all__ = [
     'create_source_space',
     'setup_volume_source_space',
     'get_roi_labels',
-    'get_glasser_roi_labels'
+    'get_glasser_roi_labels',
+    'compute_cross_session_data_covariance',
+    'compute_per_session_lcmv_filters',
+    'load_or_compute_lcmv_filters',
+    'apply_lcmv_to_epochs'
 ]
