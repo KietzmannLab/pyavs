@@ -70,13 +70,13 @@ def main():
         composer.resample_meg_data()
         
         # Load eye tracking events and create epochs
-        composer.extract_annotations(
+        composer.get_et_annotations(
             et_event_type="fixation",
             save_annotated_raw=False  # We'll handle saving manually
         )
         
         # Create epochs around fixation events
-        epochs = composer.make_epochs(
+        epochs = composer.make_et_event_epochs(
             tmin=-0.2,          # 200ms before fixation
             tmax=0.5,           # 500ms after fixation
             baseline=(-0.2, 0), # Baseline correction
