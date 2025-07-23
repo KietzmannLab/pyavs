@@ -413,6 +413,10 @@ def save_population_codes_h5(population_codes: Dict[str, np.ndarray],
         subject_group = f"sub{((subject_id - 1) // 5) * 5 + 1:02d}-{min(((subject_id - 1) // 5 + 1) * 5, 99):02d}"
         output_dir = os.path.join(param_dir, subject_group)
         
+        # Create directories
+        os.makedirs(param_dir, exist_ok=True)
+        os.makedirs(output_dir, exist_ok=True)
+        
         # Save parameter metadata
         metadata_file = os.path.join(param_dir, 'parameters.json')
         _save_parameter_metadata(metadata_file, {

@@ -285,8 +285,19 @@ def compute_source_population_codes(epochs, composer, subject_id, session_num,
         forward = mne.read_forward_solution(forward_fname)
         logger.info("Loaded forward model")
         
-        # Compute noise covariance
-        cov = mne.compute_covariance(epochs, tmin=epochs.tmin, tmax=0)
+        # Load or compute noise covariance
+        from pyavs.utils.paths import get_derivatives_path
+        
+        cov_dir = os.path.join(get_derivatives_path(data_path, subject_id), 'source_reconstruction', 'noise_covariance')
+        cov_file = os.path.join(cov_dir, f'sub-{subject_id:02d}_task-avs_desc-emptyroom_cov.fif')
+        
+        if os.path.exists(cov_file):
+            logger.info(f"Loading pre-computed noise covariance: {cov_file}")
+            cov = mne.read_cov(cov_file)
+        else:
+            logger.warning(f"Pre-computed noise covariance not found at {cov_file}")
+            logger.info("Computing noise covariance from epochs baseline period")
+            cov = mne.compute_covariance(epochs, tmin=epochs.tmin, tmax=0, method='empirical', rank='info')
         
         # Create beamformer filters
         filters = mne.beamformer.make_lcmv(

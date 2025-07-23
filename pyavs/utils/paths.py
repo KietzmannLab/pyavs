@@ -134,7 +134,7 @@ def get_bids_path(data_path: str, subject_id: int, session: int,
     return os.path.join(data_path, subject_dir, session_dir, datatype, filename)
 
 
-def get_derivatives_path(data_path: str, subject_id: int, session: int,
+def get_derivatives_path(data_path: str, subject_id: int, session: Optional[int] = None,
                         pipeline: str = 'pyavs', suffix: str = None,
                         extension: str = None) -> str:
     """
@@ -146,8 +146,8 @@ def get_derivatives_path(data_path: str, subject_id: int, session: int,
         Base data directory path
     subject_id : int
         Subject ID
-    session : int
-        Session number
+    session : int, optional
+        Session number. If None, returns subject-level derivatives path
     pipeline : str, optional
         Processing pipeline name (default: 'pyavs')
     suffix : str, optional
@@ -162,20 +162,38 @@ def get_derivatives_path(data_path: str, subject_id: int, session: int,
     """
     # Build derivatives path structure
     subject_dir = f"sub-{subject_id:02d}"
-    session_dir = f"ses-{session:02d}"
     
-    # Base filename
-    filename_parts = [f"sub-{subject_id:02d}", f"ses-{session:02d}"]
-    
-    if suffix:
-        filename_parts.append(suffix)
-    
-    filename = "_".join(filename_parts)
-    
-    if extension:
-        filename += extension
-    
-    return os.path.join(data_path, 'derivatives', pipeline, subject_dir, session_dir, filename)
+    if session is not None:
+        session_dir = f"ses-{session:02d}"
+        
+        # Base filename
+        filename_parts = [f"sub-{subject_id:02d}", f"ses-{session:02d}"]
+        
+        if suffix:
+            filename_parts.append(suffix)
+        
+        filename = "_".join(filename_parts)
+        
+        if extension:
+            filename += extension
+        
+        return os.path.join(data_path, 'derivatives', pipeline, subject_dir, session_dir, filename)
+    else:
+        # Subject-level derivatives path
+        if suffix or extension:
+            filename_parts = [f"sub-{subject_id:02d}"]
+            
+            if suffix:
+                filename_parts.append(suffix)
+            
+            filename = "_".join(filename_parts)
+            
+            if extension:
+                filename += extension
+            
+            return os.path.join(data_path, 'derivatives', pipeline, subject_dir, filename)
+        else:
+            return os.path.join(data_path, 'derivatives', pipeline, subject_dir)
 
 
 def get_legacy_paths(data_path: str, subject_id: int, session: int,
