@@ -18,9 +18,6 @@ import os
 import numpy as np
 import pandas as pd
 import mne
-import h5py
-from sklearn.decomposition import PCA
-import json
 
 # Import pyAVS modules
 import pyavs
@@ -213,18 +210,28 @@ def main():
             # Step 6: Save population codes to HDF5
             logger.info("Step 6: Saving population codes...")
             
-            storage_fname = os.path.join(
-                output_dir, 
-                f"{composer.sub_sess_id}_population_codes_{event_type}_{resample_to_hz}hz.h5"
+            # Prepare metadata
+            metadata = epochs.metadata if hasattr(epochs, 'metadata') and epochs.metadata is not None else pd.DataFrame()
+            
+            # Use the pyAVS io function to save population codes
+            saved_path = save_population_codes_h5(
+                population_codes=population_codes,
+                metadata=metadata,
+                subject_id=subject_id,
+                session=session_num,
+                event_type=event_type,
+                blocks=composer.blocks_this_session,
+                times=epochs.times,
+                rois=rois,
+                sampling_rate=resample_to_hz,
+                filter_params=filter_params,
+                apply_fixation_mask=False,  # We removed fixation masking
+                fixation_masks=None,
+                data_path=data_path,
+                hemi=hemi
             )
             
-            save_population_codes_to_h5(
-                storage_fname, population_codes, composer, 
-                epochs, event_type, rois, hemi, 
-                resample_to_hz, filter_params
-            )
-            
-            logger.info(f"Population codes saved to: {storage_fname}")
+            logger.info(f"Population codes saved to: {saved_path}")
             logger.info(f"Session {session_num} completed successfully!")
             
             # Clean up memory
@@ -235,7 +242,7 @@ def main():
         logger.info("- MEG data loading and preprocessing with composer's ICA integration")
         logger.info("- Eye tracking event processing and epoch creation")
         logger.info("- Sensor-level and source-level population code computation")
-        logger.info("- HDF5 data storage with comprehensive metadata")
+        logger.info("- HDF5 data storage using pyAVS io functions")
         logger.info("- Replication of AVS machine room population code workflow")
         
     except Exception as e:
@@ -341,30 +348,6 @@ def create_mock_source_data(epochs, source_rois):
     return population_codes
 
 
-def save_population_codes_to_h5(storage_fname, population_codes, composer, 
-                               epochs, event_type, rois, hemi, 
-                               resample_to_hz, filter_params):
-    """Save population codes to HDF5 file with comprehensive metadata."""
-    
-    with h5py.File(storage_fname, "w") as storage:
-        # Save attributes
-        storage.attrs["subject"] = composer.subject
-        storage.attrs["session"] = composer.session_num
-        storage.attrs["blocks"] = composer.blocks_this_session
-        storage.attrs["times"] = epochs.times
-        storage.attrs["event_type"] = event_type
-        storage.attrs["rois"] = rois
-        storage.attrs["hemi"] = hemi
-        storage.attrs["hz"] = resample_to_hz
-        storage.attrs["filter"] = [filter_params["l_freq"], filter_params["h_freq"]]
-        
-        # Save population codes for each ROI
-        for roi_name, roi_data in population_codes.items():
-            roi_group = storage.create_group(roi_name)
-            roi_group.create_dataset("onset", data=roi_data, dtype=np.float32)
-            logger.info(f"Saved {roi_name} population codes: {roi_data.shape}")
-        
-        logger.info(f"Saved population codes with {len(population_codes)} ROIs to HDF5")
 
 
 if __name__ == "__main__":
