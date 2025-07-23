@@ -43,7 +43,7 @@ def main():
     
     # Core parameters (adjust as needed)
     subject_id = 2
-    sessions = np.arange(1, 2)  # Process session 1 (extend as needed)
+    sessions = np.arange(1, 2, dtype=int)  # Process session 1 (extend as needed)
     event_type = "saccade"  # or "fixation"
     tmin, tmax = -0.500, 0.800  # Epoch time window in seconds
     
@@ -55,7 +55,7 @@ def main():
     filter_params = {
         "l_freq": 0.2, 
         "h_freq": 200, 
-        "causal": True
+        "causal_filter": True
     }
     
     # ROI configuration
@@ -95,7 +95,7 @@ def main():
         # Process each session
         for session_num in sessions:
             logger.info(f"\n=== Processing Subject {subject_id}, Session {session_num} ===")
-            
+            print(type(session_num))
             # Step 1: Initialize AVS Composer
             logger.info("Step 1: Initializing AVS Composer...")
             
@@ -107,7 +107,7 @@ def main():
                 verbose=True,
                 preprocessed=True,
                 recompute_prepro=False,
-                max_block=10,  # Adjust as needed
+                max_block=2,  # Adjust as needed
                 min_block=1,
                 interpolate_bad_channels=True,
                 use_precomputed_ica=use_precomputed_ica,
@@ -133,7 +133,7 @@ def main():
             composer.concatenate_raws_per_session()
             if resample_to_hz:
                 composer.resample_meg_data(target_sfreq=resample_to_hz)
-            composer.filter_meg_data(**filter_params)
+            composer.filter_meg_data()
             
             logger.info(f"MEG data loaded: {len(composer.raws_concatenated.times)} samples, "
                        f"{composer.raws_concatenated.info['nchan']} channels")
@@ -161,9 +161,6 @@ def main():
                 recording="scene",
                 get_metadata=True,
                 baseline=None,
-                reject_by_annotation=False,  # Disable automatic rejection for population codes
-                ransac_interpolation=False,
-                autoreject=False
             )
             
             epochs = composer.et_epochs

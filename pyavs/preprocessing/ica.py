@@ -798,7 +798,7 @@ def apply_ica_to_raws(raws_dict: Dict[Any, mne.io.Raw],
             
             return cleaned_raws
             
-        except KeyError as e:#(FileNotFoundError, ValueError) as e:
+        except (FileNotFoundError, ValueError) as e:
             if verbose:
                 logger.error(f"Error loading precomputed ICA: {e}")
             

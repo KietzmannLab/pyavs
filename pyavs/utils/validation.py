@@ -7,7 +7,7 @@ This module provides functions for validating data integrity and input parameter
 import os
 import pandas as pd
 from typing import List, Union, Optional, Dict, Any
-
+import numpy as np
 
 def validate_subject_id(subject_id: int) -> int:
     """
@@ -23,8 +23,12 @@ def validate_subject_id(subject_id: int) -> int:
     ValueError
         If subject ID is invalid
     """
-    if not isinstance(subject_id, int):
+    if not isinstance(subject_id, (int, np.integer)):
         raise ValueError(f"Subject ID must be an integer, got {type(subject_id)}")
+    
+    # Convert to Python int if it's a numpy integer
+    if isinstance(subject_id, np.integer):
+        subject_id = int(subject_id)
     
     if subject_id < 1:
         raise ValueError(f"Subject ID must be positive, got {subject_id}")
@@ -46,9 +50,13 @@ def validate_session(session: int) -> int:
     ValueError
         If session number is invalid
     """
-    if not isinstance(session, int):
+      # Check if it's any kind of integer (including numpy integers)
+    if not isinstance(session, (int, np.integer)):
         raise ValueError(f"Session must be an integer, got {type(session)}")
     
+    # Convert to Python int if it's a numpy integer
+    if isinstance(session, np.integer):
+        session = int(session)
     if session < 1:
         raise ValueError(f"Session must be positive, got {session}")
 
