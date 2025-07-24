@@ -86,6 +86,7 @@ def compute_cross_session_data_covariance(
     
     # Generate parameter signature for this specific analysis configuration
     param_signature = generate_parameter_signature(
+        data_path=data_path,
         event_type=event_type,
         sampling_rate=resample_freq,
         filter_params=filter_params,

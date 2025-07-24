@@ -370,5 +370,5 @@ def create_bids_meg_filename(subject_id: int, session: int, run: Optional[int] =
 
 def generate_parameter_signature(**params) -> str:
     """Generate parameter signature for consistent naming."""
-    manager = get_derivatives_manager()
+    manager = get_derivatives_manager(params.get('data_path'))
     return manager.generate_parameter_signature(**params)
