@@ -155,7 +155,7 @@ class AVSComposer:
         
         # Use BIDS derivatives directory for preprocessed data  
         self.derivatives_path = os.path.join(self.data_path, 'derivatives', 'pyavs')
-        self.prepro_path = os.path.join(self.derivatives_path, f'sub-{self.subject:02d}', f'ses-{self.session_num}', 'meg')
+        self.prepro_path = os.path.join(self.derivatives_path, f'sub-{self.subject:02d}', f'ses-{self.session_num:02d}', 'meg')
         
         # Ensure derivatives directory exists
         os.makedirs(self.prepro_path, exist_ok=True)
@@ -225,14 +225,14 @@ class AVSComposer:
             empty_room_recording = True
             if self.preprocessed:
                 # BIDS-compliant filename for empty room in derivatives with task-noise_meg
-                meg_filename = f"sub-{self.subject:02d}_ses-{self.session_num}_task-noise_recording-{block}_raw-sss.fif"
+                meg_filename = f"sub-{self.subject:02d}_ses-{self.session_num:02d}_task-noise_recording-{block}_raw-sss.fif"
                 raw_fname = os.path.join(self.prepro_path, meg_filename)
             else:
                 raw_fname = os.path.join(self.session_dir, self.sub_sess_id + block + ".fif")
         else:
             if self.preprocessed:
                 # BIDS-compliant filename for regular blocks in derivatives
-                meg_filename = f"sub-{self.subject:02d}_ses-{self.session_num}_task-avs_run-{block:02d}_raw-sss.fif"
+                meg_filename = f"sub-{self.subject:02d}_ses-{self.session_num:02d}_task-avs_run-{block:02d}_raw-sss.fif"
                 raw_fname = os.path.join(self.prepro_path, meg_filename)
             else:
                 raw_fname = os.path.join(self.session_dir, self.sub_sess_id + str(block).zfill(2) + ".fif")
@@ -292,7 +292,7 @@ class AVSComposer:
                         try:
                             from .meg import preprocess_meg_block
                             # Prepare empty room recording properly if needed
-                            ref_filename = f"sub-{self.subject:02d}_ses-{self.session_num}_task-avs_run-01_raw-sss.fif"
+                            ref_filename = f"sub-{self.subject:02d}_ses-{self.session_num:02d}_task-avs_run-01_raw-sss.fif"
                             raw_reference_fname = os.path.join(self.prepro_path, ref_filename)
                             logger.debug(f"Looking for reference file: {raw_reference_fname}")
                             
@@ -329,7 +329,7 @@ class AVSComposer:
                             logger.info(f"Successfully preprocessed empty room recording '{block}'")
                             
                             # Save the preprocessed empty room data with BIDS-compliant task-noise naming
-                            meg_filename = f"sub-{self.subject:02d}_ses-{self.session_num}_task-noise_recording-{block}_raw-sss.fif"
+                            meg_filename = f"sub-{self.subject:02d}_ses-{self.session_num:02d}_task-noise_recording-{block}_raw-sss.fif"
                             output_path = os.path.join(self.prepro_path, meg_filename)
                             raw.save(output_path, overwrite=True)
                             logger.info(f"Saved preprocessed empty room recording to: {output_path}")
