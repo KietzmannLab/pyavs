@@ -224,8 +224,8 @@ class AVSComposer:
         if block in self.empty_room_recording_names:  # d: danach # b: vorher
             empty_room_recording = True
             if self.preprocessed:
-                # BIDS-compliant filename for empty room in derivatives
-                meg_filename = f"sub-{self.subject:02d}_ses-{self.session_num}_task-avs_recording-{block}_raw-sss.fif"
+                # BIDS-compliant filename for empty room in derivatives with task-noise_meg
+                meg_filename = f"sub-{self.subject:02d}_ses-{self.session_num}_task-noise_recording-{block}_raw-sss.fif"
                 raw_fname = os.path.join(self.prepro_path, meg_filename)
             else:
                 raw_fname = os.path.join(self.session_dir, self.sub_sess_id + block + ".fif")
@@ -272,8 +272,9 @@ class AVSComposer:
                         else:
                             # For empty room recordings, load raw data
                             raw_fname = os.path.join(self.session_dir, self.sub_sess_id + block + ".fif")
+                            logger.info(f"Loading empty room recording '{block}' from: {raw_fname}")
                             if not os.path.isfile(raw_fname):
-                                logger.warning(f'Empty room recording file not found: {raw_fname}')
+                                logger.error(f'Empty room recording file not found: {raw_fname}')
                                 return block, None
                             
                             raw_for_recompute = mne.io.read_raw_fif(
@@ -286,16 +287,20 @@ class AVSComposer:
                         return block, None
                     
                     if empty_room_recording:
-                        # For empty room recordings, apply minimal preprocessing
+                        # For empty room recordings, apply preprocessing with proper preparation
+                        logger.info(f"Processing empty room recording '{block}' for subject {self.subject}, session {self.session_num}")
                         try:
                             from .meg import preprocess_meg_block
                             # Prepare empty room recording properly if needed
                             ref_filename = f"sub-{self.subject:02d}_ses-{self.session_num}_task-avs_run-01_raw-sss.fif"
                             raw_reference_fname = os.path.join(self.prepro_path, ref_filename)
+                            logger.debug(f"Looking for reference file: {raw_reference_fname}")
                             
                             if os.path.isfile(raw_reference_fname):
+                                logger.info(f"Using reference file for empty room preparation: {ref_filename}")
                                 raw_reference = mne.io.read_raw_fif(raw_reference_fname, preload=preload, verbose=self.verbose)
                                 from .meg import prepare_empty_room_recording
+                                logger.info(f"Preparing empty room recording '{block}' using reference data")
                                 raw_for_recompute = prepare_empty_room_recording(
                                     raw_empty_room=raw_for_recompute,
                                     raw_reference=raw_reference,
@@ -304,8 +309,12 @@ class AVSComposer:
                                     meas_date='keep',
                                     verbose=self.verbose
                                 )
+                            else:
+                                logger.warning(f"No reference file found for empty room preparation: {raw_reference_fname}")
+                                logger.info(f"Processing empty room recording '{block}' without reference preparation")
                             
                             # Apply preprocessing to empty room data
+                            logger.info(f"Applying preprocessing to empty room recording '{block}'")
                             raw = preprocess_meg_block(
                                 raw_for_recompute,
                                 subject_id=self.subject,
@@ -317,8 +326,16 @@ class AVSComposer:
                                 causal_filter=self.causal_filter,
                                 verbose=self.verbose
                             )
+                            logger.info(f"Successfully preprocessed empty room recording '{block}'")
+                            
+                            # Save the preprocessed empty room data with BIDS-compliant task-noise naming
+                            meg_filename = f"sub-{self.subject:02d}_ses-{self.session_num}_task-noise_recording-{block}_raw-sss.fif"
+                            output_path = os.path.join(self.prepro_path, meg_filename)
+                            raw.save(output_path, overwrite=True)
+                            logger.info(f"Saved preprocessed empty room recording to: {output_path}")
                         except Exception as e:
-                            logger.error(f"Error processing empty room recording: {e}")
+                            logger.error(f"Error processing empty room recording '{block}': {str(e)}")
+                            logger.debug(f"Empty room processing error details:", exc_info=True)
                             return block, None
                 else:
                     logger.warning(f'No raw data found for block {block} and compute_missing_prepro is set to False')
