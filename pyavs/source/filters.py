@@ -257,6 +257,7 @@ def compute_per_session_lcmv_filters(
     
     # Generate parameter signature for consistent storage with population codes
     param_signature = generate_parameter_signature(
+        data_path=data_path,
         event_type=event_type,
         sampling_rate=resample_freq,
         filter_params=filter_params,

@@ -113,7 +113,6 @@ def main():
             event_type=config.analysis.event_type,
             cross_session_epochs=cross_session_epochs,
             overwrite=args.overwrite,
-            **filter_kwargs
         )
         
         logger.info(f"Successfully computed filters for {len(filters)} sessions")

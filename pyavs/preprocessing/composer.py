@@ -155,7 +155,7 @@ class AVSComposer:
         
         # Use BIDS derivatives directory for preprocessed data  
         self.derivatives_path = os.path.join(self.data_path, 'derivatives', 'pyavs')
-        self.prepro_path = os.path.join(self.derivatives_path, f'sub-{self.subject:02d}', f'ses-{self.session_num:02d}', 'meg')
+        self.prepro_path = os.path.join(self.derivatives_path,'preprocessed' , f'sub-{self.subject:02d}', f'ses-{self.session_num:02d}', 'meg')
         
         # Ensure derivatives directory exists
         os.makedirs(self.prepro_path, exist_ok=True)
@@ -765,7 +765,6 @@ class AVSComposer:
             block_trigger_offset=1000,
             stim_channel='STI101',
             verbose=True,
-            event_types=[et_event_type],
             recording=recording
         )
         
