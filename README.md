@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 
-A streamlined Python package for loading and preprocessing MEG + eye-tracking data from the Active Visual Semantics (AVS) BIDS dataset. This package provides a modern, organized interface to the AVS machine room scripts with enhanced functionality for neuroscience research.
+A streamlined Python package for loading and preprocessing MEG + eye-tracking data from the Active Visual Semantics (AVS) BIDS dataset. This package provides a modern, organized interface with enhanced functionality for neuroscience research.
 
 ## 🧠 Features
 

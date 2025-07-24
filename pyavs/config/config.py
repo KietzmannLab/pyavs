@@ -2,8 +2,7 @@
 Unified configuration for pyAVS workflows.
 
 This module provides a single, comprehensive configuration class that combines
-all analysis, processing, source reconstruction, path, and data parameters
-based on the machine room parameter analysis.
+all analysis, processing, source reconstruction, path, and data parameters.
 """
 
 import os
@@ -17,9 +16,8 @@ class PyAVSConfig:
     """
     Unified configuration for all pyAVS workflows.
     
-    This class consolidates all configuration parameters based on analysis of
-    the machine room scripts, providing a single source of truth for all
-    processing parameters.
+    This class consolidates all configuration parameters, providing a single 
+    source of truth for all processing parameters.
     """
     
     # === CORE ANALYSIS PARAMETERS ===

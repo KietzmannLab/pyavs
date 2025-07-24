@@ -2,7 +2,7 @@
 """
 Compute cross-session LCMV beamformer filters for MEG source reconstruction.
 
-This script implements the strategy from the AVS machine room where:
+This script implements the strategy where:
 1. Cross-session data covariance is computed from subsampled epochs across all sessions
 2. Per-session noise covariance matrices are loaded from empty room recordings
 3. LCMV beamformer filters are computed per session and stored with event-type specificity

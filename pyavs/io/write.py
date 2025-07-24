@@ -75,8 +75,7 @@ def save_data_h5(data: Union[np.ndarray, mne.Epochs, mne.io.Raw, Dict[str, np.nd
     Unified function to save any type of data in HDF5 format.
     
     This function handles all data types (epochs, raws, source data, population codes)
-    and saves them in a consistent HDF5 format compatible with the original
-    avs-machine-room pipeline.
+    and saves them in a consistent HDF5 format.
     
     Parameters
     ----------
@@ -321,7 +320,7 @@ def save_population_codes_h5(population_codes: Dict[str, np.ndarray],
                             data_type: str = 'population_codes',
                             **kwargs) -> str:
     """
-    Save population codes to HDF5 file following the original avs-machine-room format.
+    Save population codes to HDF5 file in standardized format.
     
     This is the core saving function that all other save functions ultimately use.
     It maintains compatibility with the original analysis pipelines.
@@ -371,8 +370,7 @@ def save_population_codes_h5(population_codes: Dict[str, np.ndarray],
         
     Notes
     -----
-    This function creates an HDF5 file with the exact structure used in the
-    original avs-machine-room scripts for maximum compatibility.
+    This function creates standardized HDF5 files for neuroscience data analysis.
     """
     validate_subject_id(subject_id)
     validate_session(session)

@@ -5,7 +5,7 @@ This module provides unified configuration for all pyAVS workflows including
 MEG preprocessing, source reconstruction, and population code computation.
 
 The configuration system uses a single PyAVSConfig class that combines all
-parameters based on analysis of the machine room scripts.
+parameters for comprehensive workflow management.
 """
 
 from .config import PyAVSConfig

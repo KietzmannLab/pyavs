@@ -2,7 +2,7 @@
 LCMV beamformer filter computation and management for pyAVS.
 
 This module implements the per-session LCMV filter computation strategy
-used in the original AVS machine room codebase, with event-type specific
+with event-type specific
 storage and cross-session data covariance computation.
 """
 
@@ -73,7 +73,7 @@ def compute_cross_session_data_covariance(
     """
     Compute cross-session data covariance by concatenating subsampled epochs.
     
-    This follows the machine room strategy of using 350 random epochs per session
+    This uses 350 random epochs per session
     from all 10 sessions to compute a robust data covariance matrix.
     
     Parameters
@@ -239,7 +239,7 @@ def compute_per_session_lcmv_filters(
     """
     Compute per-session LCMV beamformer filters.
     
-    This implements the machine room strategy where:
+    This implements the strategy where:
     1. Noise covariance is computed per-session from empty room recordings
     2. Data covariance is computed from cross-session epochs
     3. Filters are computed per-session and saved

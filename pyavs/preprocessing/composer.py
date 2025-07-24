@@ -4,7 +4,6 @@ AVS Composer for MEG-ET data fusion in pyAVS package.
 This script is used to load the MEG and ET data. It fuses them in the sense that it can
 be used to generate ET event based MEG epochs and their related metadata.
 
-Adapted from AVS-machine-room/avs_machine_room/prepro/meg/avs_composer.py
 Author(s): P. Sulewski (psulewski@uos.de)
 """
 
@@ -46,9 +45,9 @@ class AVSComposer:
         self,
         subject: int,
         session_num: int,
-        data_dir: Optional[str] = None,
-        output_dir: Optional[str] = None,
-        et_dir: Optional[str] = None,
+        data_path: Optional[str] = None,
+        output_path: Optional[str] = None,
+        et_path: Optional[str] = None,
         diagnostics: Optional[dict] = None,
         preprocessed: bool = True,
         recompute_prepro: bool = False,
@@ -61,7 +60,7 @@ class AVSComposer:
         interpolate_bad_channels: bool = True,
         apply_ica: bool = False,
         use_precomputed_ica: bool = False,
-        ica_solutions_dir: Optional[str] = None,
+        ica_solutions_path: Optional[str] = None,
         ica_exclusions_file: Optional[str] = None,
         l_freq: float = 0.2,
         h_freq: float = 100.0,
@@ -79,12 +78,12 @@ class AVSComposer:
             The subject identifier.
         session_num : int
             The session number.
-        data_dir : str, optional
+        data_path : str, optional
             The directory where MEG and ET data can be found. If None, uses configured data path.
-        output_dir : str, optional
-            The directory where the output will be saved. If None, uses data_dir.
-        et_dir : str, optional
-            The directory where the eyetracking data is stored. If None, uses data_dir.
+        output_path : str, optional
+            The directory where the output will be saved. If None, uses data_path.
+        et_path : str, optional
+            The directory where the eyetracking data is stored. If None, uses data_path.
         diagnostics : dict, optional
             A dictionary containing diagnostic information.
         preprocessed : bool, optional
@@ -109,7 +108,7 @@ class AVSComposer:
             Whether to apply ICA for artifact removal during preprocessing. Defaults to False.
         use_precomputed_ica : bool, optional
             Whether to use precomputed ICA solution instead of computing new one. Defaults to False.
-        ica_solutions_dir : str, optional
+        ica_solutions_path : str, optional
             Path to directory containing precomputed ICA solutions. Defaults to None.
         ica_exclusions_file : str, optional
             Path to JSON file containing ICA component exclusions. Defaults to None.
@@ -132,15 +131,15 @@ class AVSComposer:
         self.session = chr(ord('a') + session_num - 1)  # Convert to session letter (1->a, 2->b, etc.)
         
         # Set up data directories
-        if data_dir is None:
-            data_dir = get_data_path()
-            if data_dir is None:
-                raise ValueError("No data path configured. Use set_data_path() or provide data_dir parameter")
+        if data_path is None:
+            data_path = get_data_path()
+            if data_path is None:
+                raise ValueError("No data path configured. Use set_data_path() or provide data_path parameter")
         
-        self.data_dir = data_dir
+        self.data_path = data_path
         self.server = server
-        self.et_dir = et_dir if et_dir is not None else data_dir
-        self.output_dir = output_dir if output_dir is not None else data_dir
+        self.et_path = et_path if et_path is not None else data_path
+        self.output_path = output_path if output_path is not None else data_path
         
         # Set up block parameters
         self.max_block = max_block
@@ -152,16 +151,23 @@ class AVSComposer:
         self.stim_channel = stim_channel
         self.verbose = verbose
         self.sub_sess_id = 'as' + str(self.subject).zfill(2) + self.session
-        self.session_dir = os.path.join(self.data_dir, 'rawdir', self.sub_sess_id)
-        self.prepro_dir = os.path.join(self.data_dir, 'rawdir', self.sub_sess_id, 'prepro')
-        self.subject_dir = os.path.join(self.data_dir, 'rawdir', 'as' + str(self.subject).zfill(2))
+        self.session_dir = os.path.join(self.data_path, 'rawdir', self.sub_sess_id)
+        
+        # Use BIDS derivatives directory for preprocessed data  
+        self.derivatives_path = os.path.join(self.data_path, 'derivatives', 'pyavs')
+        self.prepro_path = os.path.join(self.derivatives_path, f'sub-{self.subject:02d}', f'ses-{self.session_num}', 'meg')
+        
+        # Ensure derivatives directory exists
+        os.makedirs(self.prepro_path, exist_ok=True)
+        
+        self.subject_dir = os.path.join(self.data_path, 'rawdir', 'as' + str(self.subject).zfill(2))
         self.write_output = write_output
         self.preprocessed = preprocessed
         self.recompute_prepro = recompute_prepro
         self.interpolate_bad_channels = interpolate_bad_channels
         self.apply_ica = apply_ica
         self.use_precomputed_ica = use_precomputed_ica
-        self.ica_solutions_dir = ica_solutions_dir
+        self.ica_solutions_path = ica_solutions_path
         self.ica_exclusions_file = ica_exclusions_file
         self.l_freq = l_freq
         self.h_freq = h_freq
@@ -212,26 +218,26 @@ class AVSComposer:
         if self.verbose:
             logger.info(f'Loading data for subject {self.subject}, session {self.session}')
         
-        if self.preprocessed:
-            fif_suffix = "_raw-sss.fif"
-            dir_stem = self.prepro_dir
-        else:
-            fif_suffix = ".fif"
-            dir_stem = self.session_dir
-        
         empty_room_recording = False
 
-        # Check if block is from empty room recording
+        # Check if block is from empty room recording  
         if block in self.empty_room_recording_names:  # d: danach # b: vorher
-            raw_fname = os.path.join(self.prepro_dir, self.sub_sess_id + block + fif_suffix)
-            # Check if the file exists
-            if not os.path.isfile(raw_fname) and not compute_missing_prepro:
-                logger.warning(f'Empty room recording file not found: {raw_fname}')
-                return block, None
             empty_room_recording = True
+            if self.preprocessed:
+                # BIDS-compliant filename for empty room in derivatives
+                meg_filename = f"sub-{self.subject:02d}_ses-{self.session_num}_task-avs_recording-{block}_raw-sss.fif"
+                raw_fname = os.path.join(self.prepro_path, meg_filename)
+            else:
+                raw_fname = os.path.join(self.session_dir, self.sub_sess_id + block + ".fif")
         else:
-            raw_fname = os.path.join(dir_stem, self.sub_sess_id + str(block).zfill(2) + fif_suffix)
-            logger.debug(f"Checking for preprocessed data in: {raw_fname}")
+            if self.preprocessed:
+                # BIDS-compliant filename for regular blocks in derivatives
+                meg_filename = f"sub-{self.subject:02d}_ses-{self.session_num}_task-avs_run-{block:02d}_raw-sss.fif"
+                raw_fname = os.path.join(self.prepro_path, meg_filename)
+            else:
+                raw_fname = os.path.join(self.session_dir, self.sub_sess_id + str(block).zfill(2) + ".fif")
+        
+        logger.debug(f"Checking for data in: {raw_fname}")
 
         if os.path.exists(raw_fname) and not self.recompute_prepro:
             logger.info(f"Found preprocessed data in: {raw_fname}")
@@ -249,72 +255,71 @@ class AVSComposer:
                 logger.warning(f'No preprocessed raw data found for block {block}: {raw_fname}')
                 if compute_missing_prepro or self.recompute_prepro:
                     logger.info(f'Computing preprocessed data for block {block}')
-                    if empty_room_recording:
-                        raw_fname = os.path.join(self.session_dir, self.sub_sess_id + block + ".fif")
-                        # Check whether the file exists
-                        if not os.path.isfile(raw_fname):
-                            logger.warning(f'Empty room recording file not found: {raw_fname}')
-                            return block, None
-                    else:
-                        raw_fname = os.path.join(self.session_dir, self.sub_sess_id + str(block).zfill(2) + ".fif")
-
-                    try:
-                        raw_for_recompute = mne.io.read_raw_fif(
-                            raw_fname,
-                            preload=preload,
-                            verbose=self.verbose
-                        )
-                    except Exception as e:
-                        logger.error(f"Error loading raw file for recompute {raw_fname}: {e}")
-                        return block, None
                     
-                    if empty_room_recording:
-                        # We need to prepare the empty room recording for the maxwell filter
-                        # For that we need an additional raw file that is not an empty room recording as a reference
-                        # We use the first block of the session
-                        raw_reference_fname = os.path.join(self.prepro_dir, self.sub_sess_id + str(1).zfill(2) + "_raw-sss.fif")
-                        if not os.path.isfile(raw_reference_fname):
-                            logger.warning(f'Preprocessed reference raw file not found. Trying without prepro: {raw_reference_fname}')
-                            raw_reference_fname = os.path.join(self.session_dir, self.sub_sess_id + str(1).zfill(2) + ".fif")
-                            if not os.path.isfile(raw_reference_fname):
-                                logger.warning(f'Reference raw file not found: {raw_reference_fname}')
+                    # Use the standardized MEG dataloader for preprocessing
+                    try:
+                        if not empty_room_recording:
+                            # For regular blocks, use the standardized preprocessing
+                            raw_for_recompute = load_and_preprocess_meg_run(
+                                self.subject, 
+                                self.session_num, 
+                                block,
+                                data_path=self.data_path,
+                                force_recompute=True,
+                                save_preprocessed=True
+                            )
+                            return block, raw_for_recompute
+                        else:
+                            # For empty room recordings, load raw data
+                            raw_fname = os.path.join(self.session_dir, self.sub_sess_id + block + ".fif")
+                            if not os.path.isfile(raw_fname):
+                                logger.warning(f'Empty room recording file not found: {raw_fname}')
                                 return block, None
-                        
-                        try:
-                            raw_reference = mne.io.read_raw_fif(
-                                raw_reference_fname,
+                            
+                            raw_for_recompute = mne.io.read_raw_fif(
+                                raw_fname,
                                 preload=preload,
                                 verbose=self.verbose
                             )
-                            from .meg import prepare_empty_room_recording
-                            raw_for_recompute = prepare_empty_room_recording(
-                                raw_empty_room=raw_for_recompute,
-                                raw_reference=raw_reference,
-                                bads='from_raw',
-                                annotations='from_raw',
-                                meas_date='keep',
+                    except Exception as e:
+                        logger.error(f"Error loading/preprocessing data for block {block}: {e}")
+                        return block, None
+                    
+                    if empty_room_recording:
+                        # For empty room recordings, apply minimal preprocessing
+                        try:
+                            from .meg import preprocess_meg_block
+                            # Prepare empty room recording properly if needed
+                            ref_filename = f"sub-{self.subject:02d}_ses-{self.session_num}_task-avs_run-01_raw-sss.fif"
+                            raw_reference_fname = os.path.join(self.prepro_path, ref_filename)
+                            
+                            if os.path.isfile(raw_reference_fname):
+                                raw_reference = mne.io.read_raw_fif(raw_reference_fname, preload=preload, verbose=self.verbose)
+                                from .meg import prepare_empty_room_recording
+                                raw_for_recompute = prepare_empty_room_recording(
+                                    raw_empty_room=raw_for_recompute,
+                                    raw_reference=raw_reference,
+                                    bads='from_raw',
+                                    annotations='from_raw',
+                                    meas_date='keep',
+                                    verbose=self.verbose
+                                )
+                            
+                            # Apply preprocessing to empty room data
+                            raw = preprocess_meg_block(
+                                raw_for_recompute,
+                                subject_id=self.subject,
+                                session=self.session_num,
+                                block=block,
+                                l_freq=self.l_freq,
+                                h_freq=self.h_freq,
+                                resample_freq=self.resample_freq,
+                                causal_filter=self.causal_filter,
                                 verbose=self.verbose
                             )
                         except Exception as e:
-                            logger.error(f"Error preparing empty room recording: {e}")
+                            logger.error(f"Error processing empty room recording: {e}")
                             return block, None
-
-                    # Apply preprocessing using pyAVS preprocessing function
-                    try:
-                        raw = preprocess_meg_block(
-                            raw_for_recompute,
-                            subject_id=self.subject,
-                            session=self.session_num,
-                            block=block,
-                            l_freq=self.l_freq,
-                            h_freq=self.h_freq,
-                            resample_freq=self.resample_freq,
-                            causal_filter=self.causal_filter,
-                            verbose=self.verbose
-                        )
-                    except Exception as e:
-                        logger.error(f"Error preprocessing block {block}: {e}")
-                        return block, None
                 else:
                     logger.warning(f'No raw data found for block {block} and compute_missing_prepro is set to False')
                     return block, None
@@ -706,7 +711,7 @@ class AVSComposer:
         self.explog, self.et_events = load_and_enrich_eye_events(
             [self.subject],
             [self.session_num],
-            data_path=self.et_dir,
+            data_path=self.et_path,
             preprocessed=preprocessed,
             fix_multi_saccades=True
         )
@@ -751,7 +756,7 @@ class AVSComposer:
             # Now we will save the annotated raws to the derivatives/annotated directory
             if self.verbose:
                 logger.info('Saving annotated raws')
-            save_annotated_raw(self.raws_annotated, self.subject, self.session_num, self.data_dir)
+            save_annotated_raw(self.raws_annotated, self.subject, self.session_num, data_path=self.data_path)
 
         # Print warning that informs about the number of missing trials
         if len(missing_trials) > 0:
@@ -828,14 +833,14 @@ class AVSComposer:
             logger.info(f'Making event epochs for event type: {event_type}')
         
         # We will make the epochs
-        if event_type == 'fixation':  # An epoch focussing on the fixation period
-            event_id = events_annot[1]['fixation']
-        elif event_type == 'saccade':  # An epoch focussing on the saccade period
-            event_id = events_annot[1]['saccade']
-        elif event_type == 'blink':  # An epoch focussing on the blink period
-            event_id = events_annot[1]['blink']
-        elif event_type == 'scene':  # An epoch focussing on the 4s scene period
-            event_id = events_annot[1]['scene']
+        available_events = events_annot[1]
+        
+        if event_type not in available_events:
+            available_event_types = list(available_events.keys())
+            raise ValueError(f"Event type '{event_type}' not found in annotations. "
+                           f"Available event types: {available_event_types}")
+        
+        event_id = available_events[event_type]
 
         events_to_use = events_annot[0][events_annot[0][:, 2] == event_id]
         
@@ -1051,7 +1056,7 @@ class AVSComposer:
             subject_id=self.subject,
             session=self.session_num,
             use_precomputed=use_precomputed,
-            ica_solutions_dir=self.ica_solutions_dir,
+            ica_solutions_dir=self.ica_solutions_path,
             ica_exclusions_file=self.ica_exclusions_file,
             compute_new_ica=compute_new_ica,
             find_artifacts=find_artifacts,

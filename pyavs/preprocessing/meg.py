@@ -702,7 +702,7 @@ def apply_precomputed_ica(raw: mne.io.Raw,
     Apply precomputed ICA solution to MEG data.
     
     This function loads a precomputed ICA solution and applies it to the MEG data,
-    following the original AVS-machine-room methodology.
+    following standard MEG preprocessing methodology.
     
     Parameters
     ----------
