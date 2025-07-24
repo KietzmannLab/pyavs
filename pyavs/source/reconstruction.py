@@ -778,6 +778,95 @@ def find_population_codes_files(subject_id: int,
     return matching_files
 
 
+def compute_empty_room_covariance(data_path: str,
+                                 subject_id: int,
+                                 sessions: List[int],
+                                 verbose: bool = True) -> Tuple[mne.Covariance, str]:
+    """
+    Compute noise covariance from empty room recordings.
+    
+    Parameters
+    ----------
+    data_path : str
+        Path to data directory
+    subject_id : int
+        Subject ID
+    sessions : list of int
+        Session numbers to process
+    verbose : bool, optional
+        Whether to print progress information (default: True)
+        
+    Returns
+    -------
+    mne.Covariance
+        Computed noise covariance matrix
+    str
+        Path to saved covariance file
+    """
+    validate_subject_id(subject_id)
+    
+    if verbose:
+        logger.info(f"Computing empty room covariance for subject {subject_id}")
+    
+    # Find empty room files
+    empty_room_files = []
+    for session in sessions:
+        validate_session(session)
+        
+        # Construct empty room file path
+        session_dir = os.path.join(data_path, f'sub-{subject_id:02d}', f'ses-{session:02d}', 'meg')
+        
+        if os.path.exists(session_dir):
+            for file in os.listdir(session_dir):
+                if 'emptyroom' in file and file.endswith('.fif'):
+                    empty_room_files.append(os.path.join(session_dir, file))
+    
+    if not empty_room_files:
+        raise FileNotFoundError(f"No empty room files found for subject {subject_id}")
+    
+    if verbose:
+        logger.info(f"Found {len(empty_room_files)} empty room files")
+    
+    # Load and concatenate empty room data
+    raw_list = []
+    for file_path in empty_room_files:
+        if verbose:
+            logger.info(f"Loading: {os.path.basename(file_path)}")
+        
+        raw = mne.io.read_raw_fif(file_path, preload=True, verbose=False)
+        raw_list.append(raw)
+    
+    # Concatenate if multiple files
+    if len(raw_list) > 1:
+        raw_empty = mne.concatenate_raws(raw_list)
+    else:
+        raw_empty = raw_list[0]
+    
+    # Compute covariance
+    if verbose:
+        logger.info("Computing noise covariance matrix...")
+    
+    noise_cov = mne.compute_raw_covariance(
+        raw_empty, method='empirical', verbose=verbose
+    )
+    
+    # Save covariance
+    noise_cov_dir = os.path.join(data_path, 'derivatives', 'pyavs', 
+                                f'sub-{subject_id:02d}', 'source_reconstruction', 
+                                'noise_covariance')
+    os.makedirs(noise_cov_dir, exist_ok=True)
+    
+    noise_cov_file = os.path.join(noise_cov_dir, 
+                                 f'sub-{subject_id:02d}_task-avs_desc-emptyroom_cov.fif')
+    
+    mne.write_cov(noise_cov_file, noise_cov, verbose=verbose)
+    
+    if verbose:
+        logger.info(f"Saved noise covariance: {noise_cov_file}")
+    
+    return noise_cov, noise_cov_file
+
+
 def list_available_parameter_sets(data_path: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     List all available parameter sets in the population codes storage.
