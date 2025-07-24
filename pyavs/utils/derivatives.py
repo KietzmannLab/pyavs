@@ -360,9 +360,10 @@ def get_bids_population_codes_path(parameter_signature: str, subject_id: int,
 
 
 def create_bids_meg_filename(subject_id: int, session: int, run: Optional[int] = None,
-                            recording: Optional[str] = None, suffix: str = 'raw-sss') -> str:
+                            recording: Optional[str] = None, suffix: str = 'raw-sss',
+                            data_path: Optional[str] = None) -> str:
     """Create BIDS-compliant MEG filename."""
-    manager = get_derivatives_manager()
+    manager = get_derivatives_manager(data_path)
     return manager.create_bids_filename(
         subject_id, session, run=run, recording=recording, suffix=suffix
     )

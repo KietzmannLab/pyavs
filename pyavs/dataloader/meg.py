@@ -115,7 +115,7 @@ def load_meg_preprocessed(subject_id: int, session: int, run: int,
     from ..utils.derivatives import get_bids_preprocessed_path, create_bids_meg_filename
     
     preprocessed_path = get_bids_preprocessed_path(subject_id, session, data_path)
-    meg_filename = create_bids_meg_filename(subject_id, session, run=run, suffix='raw-sss')
+    meg_filename = create_bids_meg_filename(subject_id, session, run=run, suffix='raw-sss', data_path=data_path)
     meg_path = preprocessed_path / meg_filename
     
     if not os.path.exists(meg_path):
@@ -374,7 +374,7 @@ def save_preprocessed_meg(raw: mne.io.Raw, subject_id: int, session: int, run: i
     from ..utils.derivatives import get_bids_preprocessed_path, create_bids_meg_filename
     
     preprocessed_path = get_bids_preprocessed_path(subject_id, session, data_path)
-    meg_filename = create_bids_meg_filename(subject_id, session, run=run, suffix='raw-sss')
+    meg_filename = create_bids_meg_filename(subject_id, session, run=run, suffix='raw-sss', data_path=data_path)
     meg_path = preprocessed_path / meg_filename
     
     # Save
