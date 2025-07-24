@@ -326,7 +326,7 @@ def compute_per_session_lcmv_filters(
     filters = {}
     
     for session in sessions:
-        filter_file = subject_filter_dir / f'lcmv_filters_sess{session:02d}.h5'
+        filter_file = subject_filter_dir / f'lcmv_filters_sess{session:02d}-lcmv.h5'
         
         if os.path.exists(filter_file) and not overwrite:
             logger.info(f"Loading existing filter: {filter_file}")
@@ -445,7 +445,7 @@ def load_or_compute_lcmv_filters(
     missing_sessions = []
     
     for session in sessions:
-        filter_file = subject_filter_dir / f'lcmv_filters_sess{session:02d}.h5'
+        filter_file = subject_filter_dir / f'lcmv_filters_sess{session:02d}-lcmv.h5'
         
         if os.path.exists(filter_file):
             try:

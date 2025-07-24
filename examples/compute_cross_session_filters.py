@@ -118,7 +118,7 @@ def main():
         logger.info(f"Successfully computed filters for {len(filters)} sessions")
         
         # Summary - using parameter signature path
-        from pyavs.source.filters import _generate_parameter_signature
+        from pyavs.source.reconstruction import _generate_parameter_signature
         
         param_signature = _generate_parameter_signature(**config.get_parameter_signature_dict())
         
