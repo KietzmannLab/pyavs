@@ -99,7 +99,6 @@ def main():
             sessions=config.analysis.sessions,
             event_type=config.analysis.event_type,
             overwrite=args.overwrite,
-            **filter_kwargs
         )
         
         logger.info(f"Cross-session epochs shape: {cross_session_epochs.get_data().shape}")

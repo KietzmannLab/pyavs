@@ -280,7 +280,7 @@ class PyAVSConfig:
         }
     
     def get_filter_kwargs(self) -> Dict[str, Any]:
-        """Get kwargs for filter computation functions."""
+        """Get kwargs for beamformer filter computation functions."""
         return {
             'data_path': self.data_path,
             'tmin': self.tmin,

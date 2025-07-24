@@ -158,9 +158,9 @@ def compute_cross_session_data_covariance(
         
         # Create composer instance
         composer = AVSComposer(
-            data_path=data_path,
-            subject_id=subject_id,
-            session=session,
+            data_dir=data_path,
+            subject=subject_id,
+            session_num=session,
             min_block=min_block,
             max_block=max_block,
             verbose=False
@@ -180,7 +180,7 @@ def compute_cross_session_data_covariance(
         composer.make_et_event_epochs(
             tmin=tmin, 
             tmax=tmax, 
-            event_types=[event_type],
+            event_type=event_type,
         )
         
         # Randomly sample epochs
@@ -328,7 +328,6 @@ def compute_per_session_lcmv_filters(
             tmax=tmax,
             filter_params=filter_params,
             resample_freq=resample_freq,
-            apply_fixation_mask=apply_fixation_mask,
             rois=rois,
             blocks=blocks,
             hemi=hemi,
