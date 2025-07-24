@@ -690,7 +690,7 @@ class AVSComposer:
 
     def get_et_annotations(
         self,
-        et_event_type: str = "fixation",
+        event_type: str = "fixation",
         recording = "scene",
         exclude_last_fixation: bool = True,
         get_object_labels: bool = False,
