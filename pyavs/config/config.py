@@ -24,7 +24,7 @@ class PyAVSConfig:
     
     # Subject and session configuration
     subject_id: int = 2
-    sessions: List[int] = [1,2]
+    sessions: List[int] = field(default_factory=lambda: [1])
     
     # Event configuration
     event_type: str = "saccade"  # "saccade", "fixation", "button", "stimulus"

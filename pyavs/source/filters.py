@@ -318,7 +318,7 @@ def compute_per_session_lcmv_filters(
     logger.info("Computing data covariance from cross-session epochs")
     data_cov = mne.compute_covariance(
         cross_session_epochs, 
-        method='auto', 
+        method='empirical',
         n_jobs=-1,
         rank=rank
     )
