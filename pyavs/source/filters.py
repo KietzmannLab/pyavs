@@ -158,7 +158,7 @@ def compute_cross_session_data_covariance(
         
         # Create composer instance
         composer = AVSComposer(
-            data_dir=data_path,
+            data_path=data_path,
             subject=subject_id,
             session_num=session,
             min_block=min_block,
@@ -174,7 +174,7 @@ def compute_cross_session_data_covariance(
             composer.resample_meg_data(target_sfreq=resample_freq)
         
         composer.filter_meg_data(**filter_params)
-        composer.get_et_annotations()
+        composer.get_et_annotations(event_type=event_type)
         
         # Create epochs for this event type
         composer.make_et_event_epochs(

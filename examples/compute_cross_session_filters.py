@@ -42,7 +42,7 @@ def main():
     parser.add_argument('--subject-id', type=int,
                        help='Subject ID to process (overrides config)')
     parser.add_argument('--event-type', type=str,
-                       choices=['saccade', 'fixation', 'button', 'stimulus'],
+                       choices=['saccade', 'fixation', 'blink', 'scene'],
                        help='Event type for filter computation (overrides config)')
     parser.add_argument('--sessions', nargs='+', type=int,
                        help='Sessions to include (overrides config)')
