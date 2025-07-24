@@ -808,18 +808,29 @@ def compute_empty_room_covariance(data_path: str,
     if verbose:
         logger.info(f"Computing empty room covariance for subject {subject_id}")
     
-    # Find empty room files
+    # Find empty room files from preprocessed derivatives directory
     empty_room_files = []
+    empty_room_recording_names = ['d', 'b']  # From composer.py
+    
     for session in sessions:
         validate_session(session)
         
-        # Construct empty room file path
-        session_dir = os.path.join(data_path, f'sub-{subject_id:02d}', f'ses-{session:02d}', 'meg')
+        # Construct preprocessed empty room file paths
+        prepro_dir = os.path.join(data_path, 'derivatives', 'pyavs', 'preprocessed', 
+                                 f'sub-{subject_id:02d}', f'ses-{session:02d}', 'meg')
         
-        if os.path.exists(session_dir):
-            for file in os.listdir(session_dir):
-                if 'emptyroom' in file and file.endswith('.fif'):
-                    empty_room_files.append(os.path.join(session_dir, file))
+        if os.path.exists(prepro_dir):
+            for block in empty_room_recording_names:
+                empty_room_file = f"sub-{subject_id:02d}_ses-{session:02d}_task-noise_recording-{block}_raw-sss.fif"
+                empty_room_path = os.path.join(prepro_dir, empty_room_file)
+                
+                if os.path.exists(empty_room_path):
+                    empty_room_files.append(empty_room_path)
+                    if verbose:
+                        logger.info(f"Found empty room file: {empty_room_file}")
+                else:
+                    if verbose:
+                        logger.warning(f"Empty room file not found: {empty_room_path}")
     
     if not empty_room_files:
         raise FileNotFoundError(f"No empty room files found for subject {subject_id}")
