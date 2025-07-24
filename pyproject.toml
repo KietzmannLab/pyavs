@@ -63,7 +63,6 @@ full = [
     "scikit-learn>=1.0.0",
     "seaborn>=0.11.0",
     "jupyter>=1.0.0",
-    "autoreject>=0.3.0",
 ]
 
 [project.urls]

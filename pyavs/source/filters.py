@@ -181,8 +181,6 @@ def compute_cross_session_data_covariance(
             tmin=tmin, 
             tmax=tmax, 
             event_types=[event_type],
-            ransac_interpolation=False,
-            autoreject=False
         )
         
         # Randomly sample epochs

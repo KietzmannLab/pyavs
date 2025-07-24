@@ -78,8 +78,6 @@ class PyAVSConfig:
     
     # Preprocessing options (machine room defaults)
     interpolate_bad_channels: bool = True
-    apply_ransac: bool = False  # Machine room: ransac_interpolation = False
-    apply_autoreject: bool = False  # Machine room: autoreject = False
     
     # === EPOCH SELECTION AND PROCESSING ===
     
@@ -280,9 +278,7 @@ class PyAVSConfig:
             'forward_spacing': self.forward_spacing,
             'mindist': self.mindist,
             'bem_conductivity': self.bem_conductivity,
-            'interpolate_bad_channels': self.interpolate_bad_channels,
-            'apply_ransac': self.apply_ransac,
-            'apply_autoreject': self.apply_autoreject
+            'interpolate_bad_channels': self.interpolate_bad_channels
         }
     
     def get_filter_kwargs(self) -> Dict[str, Any]:

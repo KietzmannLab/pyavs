@@ -65,7 +65,6 @@ Optional Dependencies
 
 For full functionality:
 
-- **autoreject >= 0.3.0**: Advanced artifact rejection
 - **scikit-learn >= 1.0.0**: Machine learning algorithms
 - **seaborn >= 0.11.0**: Statistical visualization
 - **jupyter >= 1.0.0**: Interactive notebooks

@@ -67,7 +67,6 @@ setup(
             'sphinx-rtd-theme>=1.0',
         ],
         'full': [
-            'autoreject>=0.3.0',
             'sklearn>=1.0.0',
             'seaborn>=0.11.0',
             'jupyter>=1.0.0',

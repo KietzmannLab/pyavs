@@ -29,8 +29,6 @@
     "ica_solutions_dir": null,
     "ica_exclusion_dir": null,
     "interpolate_bad_channels": true,
-    "apply_ransac": false,
-    "apply_autoreject": false,
     "partition_random_epochs": 1.0,
     "n_epochs_per_session": 350,
     "compression": "gzip"
