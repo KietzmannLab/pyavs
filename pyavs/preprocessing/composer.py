@@ -310,8 +310,9 @@ class AVSComposer:
                                     verbose=self.verbose
                                 )
                             else:
-                                logger.warning(f"No reference file found for empty room preparation: {raw_reference_fname}")
-                                logger.info(f"Processing empty room recording '{block}' without reference preparation")
+                                logger.error(f"No reference file found for empty room preparation: {raw_reference_fname}")
+                                raise FileNotFoundError(f"Reference file required for empty room preparation not found: {raw_reference_fname}. "
+                                                       f"Please ensure that run-01 is processed and saved before processing empty room recordings.")
                             
                             # Apply preprocessing to empty room data
                             logger.info(f"Applying preprocessing to empty room recording '{block}'")
