@@ -382,8 +382,10 @@ def save_population_codes_h5(population_codes: Dict[str, np.ndarray],
     
     # Create appropriate directory based on data type
     if data_type == 'population_codes':
-        # Create intelligent directory structure for population codes
-        param_signature = _generate_parameter_signature(
+        # Use unified derivatives structure for population codes
+        from ..utils.derivatives import get_bids_population_codes_path, generate_parameter_signature
+        
+        param_signature = generate_parameter_signature(
             event_type=event_type,
             sampling_rate=sampling_rate,
             filter_params=filter_params,
@@ -392,9 +394,8 @@ def save_population_codes_h5(population_codes: Dict[str, np.ndarray],
             blocks=blocks
         )
         
-        param_dir = os.path.join(data_path, 'derivatives', 'pyavs', 'population_codes', param_signature)
-        subject_group = f"sub{((subject_id - 1) // 5) * 5 + 1:02d}-{min(((subject_id - 1) // 5 + 1) * 5, 99):02d}"
-        output_dir = os.path.join(param_dir, subject_group)
+        output_dir = get_bids_population_codes_path(param_signature, subject_id, session, data_path)
+        param_dir = output_dir.parent.parent  # Go up to parameter signature level
         
         # Create directories
         os.makedirs(param_dir, exist_ok=True)
@@ -555,37 +556,6 @@ def _raw_to_h5_format(raw: mne.io.Raw) -> Dict[str, np.ndarray]:
     return {'raw_data': data_expanded}
 
 
-def _generate_parameter_signature(**params) -> str:
-    """Generate a unique signature string based on processing parameters."""
-    clean_params = {}
-    
-    for key, value in params.items():
-        if value is None:
-            continue
-        elif isinstance(value, (list, tuple, np.ndarray)):
-            if isinstance(value, np.ndarray):
-                value = value.tolist()
-            if isinstance(value, list) and len(value) > 0 and isinstance(value[0], str):
-                value = sorted(value)
-            clean_params[key] = tuple(value)
-        elif isinstance(value, dict):
-            clean_params[key] = tuple(sorted(value.items()))
-        else:
-            clean_params[key] = value
-    
-    # Create deterministic string representation
-    param_string = json.dumps(clean_params, sort_keys=True, separators=(',', ':'))
-    
-    # Generate hash
-    param_hash = hashlib.sha256(param_string.encode()).hexdigest()
-    
-    # Create readable signature
-    event_type = clean_params.get('event_type', 'unknown')
-    sampling_rate = clean_params.get('sampling_rate', 'unknown')
-    
-    signature = f"{event_type}_{sampling_rate}hz_{param_hash[:16]}"
-    
-    return signature
 
 
 def _save_parameter_metadata(metadata_file: str, metadata: Dict[str, Any]) -> None:

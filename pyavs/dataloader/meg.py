@@ -111,12 +111,12 @@ def load_meg_preprocessed(subject_id: int, session: int, run: int,
         if data_path is None:
             raise ValueError("No data path configured. Use set_data_path() or provide data_path parameter")
     
-    # Try derivatives structure first
-    derivatives_dir = os.path.join(data_path, 'derivatives', 'pyavs')
-    subject_dir = f"sub-{subject_id:02d}"
-    session_dir = f"ses-{session:02d}"
-    meg_filename = f"sub-{subject_id:02d}_ses-{session:02d}_task-avs_run-{run:02d}_raw-sss.fif"
-    meg_path = os.path.join(derivatives_dir, subject_dir, session_dir, 'meg', meg_filename)
+    # Use unified derivatives structure
+    from ..utils.derivatives import get_bids_preprocessed_path, create_bids_meg_filename
+    
+    preprocessed_path = get_bids_preprocessed_path(subject_id, session, data_path)
+    meg_filename = create_bids_meg_filename(subject_id, session, run=run, suffix='raw-sss')
+    meg_path = preprocessed_path / meg_filename
     
     if not os.path.exists(meg_path):
         # Try legacy structure
@@ -124,7 +124,7 @@ def load_meg_preprocessed(subject_id: int, session: int, run: int,
         prepro_dir = os.path.join(data_path, sub_sess_id, 'prepro')
         meg_path = os.path.join(prepro_dir, f"{sub_sess_id}{run:02d}_raw-sss.fif")
     
-    if not os.path.exists(meg_path):
+    if not meg_path.exists():
         raise FileNotFoundError(f"Preprocessed MEG file not found: {meg_path}")
     
     if verbose:
@@ -370,17 +370,12 @@ def save_preprocessed_meg(raw: mne.io.Raw, subject_id: int, session: int, run: i
         if data_path is None:
             raise ValueError("No data path configured. Use set_data_path() or provide data_path parameter")
     
-    # Create derivatives directory structure
-    derivatives_dir = os.path.join(data_path, 'derivatives', 'pyavs')
-    subject_dir = f"sub-{subject_id:02d}"
-    session_dir = f"ses-{session:02d}"
-    meg_dir = os.path.join(derivatives_dir, subject_dir, session_dir, 'meg')
+    # Use unified derivatives structure
+    from ..utils.derivatives import get_bids_preprocessed_path, create_bids_meg_filename
     
-    os.makedirs(meg_dir, exist_ok=True)
-    
-    # Create filename
-    meg_filename = f"sub-{subject_id:02d}_ses-{session:02d}_task-avs_run-{run:02d}_raw-sss.fif"
-    meg_path = os.path.join(meg_dir, meg_filename)
+    preprocessed_path = get_bids_preprocessed_path(subject_id, session, data_path)
+    meg_filename = create_bids_meg_filename(subject_id, session, run=run, suffix='raw-sss')
+    meg_path = preprocessed_path / meg_filename
     
     # Save
     raw.save(meg_path, overwrite=overwrite)

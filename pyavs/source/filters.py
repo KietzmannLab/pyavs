@@ -18,39 +18,9 @@ from pathlib import Path
 
 from ..utils.paths import get_derivatives_path, get_subject_session_id
 from ..utils.logging import get_logger
+from ..utils.derivatives import get_derivatives_manager, generate_parameter_signature
 
 
-def _generate_parameter_signature(**params) -> str:
-    """Generate a unique signature string based on processing parameters."""
-    clean_params = {}
-    
-    for key, value in params.items():
-        if value is None:
-            continue
-        elif isinstance(value, (list, tuple, np.ndarray)):
-            if isinstance(value, np.ndarray):
-                value = value.tolist()
-            if isinstance(value, list) and len(value) > 0 and isinstance(value[0], str):
-                value = sorted(value)
-            clean_params[key] = tuple(value)
-        elif isinstance(value, dict):
-            clean_params[key] = tuple(sorted(value.items()))
-        else:
-            clean_params[key] = value
-    
-    # Create deterministic string representation
-    param_string = json.dumps(clean_params, sort_keys=True, separators=(',', ':'))
-    
-    # Generate hash
-    param_hash = hashlib.sha256(param_string.encode()).hexdigest()
-    
-    # Create readable signature
-    event_type = clean_params.get('event_type', 'unknown')
-    sampling_rate = clean_params.get('sampling_rate', 'unknown')
-    
-    signature = f"{event_type}_{sampling_rate}hz_{param_hash[:16]}"
-    
-    return signature
 
 
 def compute_cross_session_data_covariance(
@@ -111,8 +81,11 @@ def compute_cross_session_data_covariance(
     if filter_params is None:
         filter_params = {"l_freq": 0.2, "h_freq": 200, "picks": None, "causal": True}
     
+    # Use unified derivatives manager for BIDS-compliant paths
+    manager = get_derivatives_manager(data_path)
+    
     # Generate parameter signature for this specific analysis configuration
-    param_signature = _generate_parameter_signature(
+    param_signature = generate_parameter_signature(
         event_type=event_type,
         sampling_rate=resample_freq,
         filter_params=filter_params,
@@ -124,14 +97,15 @@ def compute_cross_session_data_covariance(
         n_epochs_per_session=n_epochs_per_session
     )
     
-    # Set up paths with parameter signature
-    param_dir = os.path.join(data_path, 'derivatives', 'pyavs', 'population_codes', param_signature)
-    subject_group = f"sub{((subject_id - 1) // 5) * 5 + 1:02d}-{min(((subject_id - 1) // 5 + 1) * 5, 99):02d}"
-    filter_dir = os.path.join(param_dir, subject_group, 'beamformer_filters')
-    os.makedirs(filter_dir, exist_ok=True)
+    # Use BIDS-compliant filters path
+    filter_dir = manager.get_filters_path(param_signature)
+    
+    # Create session-specific subdirectory
+    session_filter_dir = filter_dir / f'sub-{subject_id:02d}'
+    session_filter_dir.mkdir(parents=True, exist_ok=True)
     
     # Filename for cross-session epochs with parameter signature
-    epochs_file = os.path.join(filter_dir, f'cross_session_epochs_{n_epochs_per_session}per.fif')
+    epochs_file = session_filter_dir / f'cross_session_epochs_{n_epochs_per_session}per.fif'
     
     if os.path.exists(epochs_file) and not overwrite:
         logger.info(f"Loading existing cross-session epochs: {epochs_file}")
@@ -277,8 +251,11 @@ def compute_per_session_lcmv_filters(
     if filter_params is None:
         filter_params = {"l_freq": 0.2, "h_freq": 200, "picks": None, "causal": True}
     
+    # Use unified derivatives manager for BIDS-compliant paths
+    manager = get_derivatives_manager(data_path)
+    
     # Generate parameter signature for consistent storage with population codes
-    param_signature = _generate_parameter_signature(
+    param_signature = generate_parameter_signature(
         event_type=event_type,
         sampling_rate=resample_freq,
         filter_params=filter_params,
@@ -290,16 +267,16 @@ def compute_per_session_lcmv_filters(
         n_epochs_per_session=n_epochs_per_session
     )
     
-    # Set up paths with parameter signature (same as population codes)
-    param_dir = os.path.join(data_path, 'derivatives', 'pyavs', 'population_codes', param_signature)
-    subject_group = f"sub{((subject_id - 1) // 5) * 5 + 1:02d}-{min(((subject_id - 1) // 5 + 1) * 5, 99):02d}"
-    filter_dir = os.path.join(param_dir, subject_group, 'beamformer_filters')
+    # Use BIDS-compliant filters path
+    filter_dir = manager.get_filters_path(param_signature)
+    
+    # Create subject-specific subdirectory
+    subject_filter_dir = filter_dir / f'sub-{subject_id:02d}'
+    subject_filter_dir.mkdir(parents=True, exist_ok=True)
     
     # Also get noise covariance path
     derivatives_dir = get_derivatives_path(data_path, subject_id)
     cov_dir = os.path.join(derivatives_dir, 'source_reconstruction', 'noise_covariance')
-    
-    os.makedirs(filter_dir, exist_ok=True)
     
     # Load forward model
     forward_file = os.path.join(derivatives_dir, 'source_reconstruction', f'sub-{subject_id:02d}_task-avs_fwd.fif')
@@ -347,7 +324,7 @@ def compute_per_session_lcmv_filters(
     filters = {}
     
     for session in sessions:
-        filter_file = os.path.join(filter_dir, f'lcmv_filters_sess{session:02d}.h5')
+        filter_file = subject_filter_dir / f'lcmv_filters_sess{session:02d}.h5'
         
         if os.path.exists(filter_file) and not overwrite:
             logger.info(f"Loading existing filter: {filter_file}")
@@ -438,8 +415,11 @@ def load_or_compute_lcmv_filters(
     if filter_params is None:
         filter_params = {"l_freq": 0.2, "h_freq": 200, "picks": None, "causal": True}
     
+    # Use unified derivatives manager for BIDS-compliant paths
+    manager = get_derivatives_manager(data_path)
+    
     # Generate parameter signature for consistent storage with population codes
-    param_signature = _generate_parameter_signature(
+    param_signature = generate_parameter_signature(
         event_type=event_type,
         sampling_rate=resample_freq,
         filter_params=filter_params,
@@ -451,17 +431,19 @@ def load_or_compute_lcmv_filters(
         n_epochs_per_session=n_epochs_per_session
     )
     
-    # Set up paths with parameter signature (same as population codes)
-    param_dir = os.path.join(data_path, 'derivatives', 'pyavs', 'population_codes', param_signature)
-    subject_group = f"sub{((subject_id - 1) // 5) * 5 + 1:02d}-{min(((subject_id - 1) // 5 + 1) * 5, 99):02d}"
-    filter_dir = os.path.join(param_dir, subject_group, 'beamformer_filters')
+    # Use BIDS-compliant filters path
+    filter_dir = manager.get_filters_path(param_signature)
+    
+    # Create subject-specific subdirectory
+    subject_filter_dir = filter_dir / f'sub-{subject_id:02d}'
+    subject_filter_dir.mkdir(parents=True, exist_ok=True)
     
     # Check which filters exist
     existing_filters = {}
     missing_sessions = []
     
     for session in sessions:
-        filter_file = os.path.join(filter_dir, f'lcmv_filters_sess{session:02d}.h5')
+        filter_file = subject_filter_dir / f'lcmv_filters_sess{session:02d}.h5'
         
         if os.path.exists(filter_file):
             try:
