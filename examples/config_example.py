@@ -86,10 +86,10 @@ def main():
     
     # 7. Parameter signature for consistent storage
     print("\n7. Parameter signature for storage:")
-    from pyavs.source.reconstruction import _generate_parameter_signature
+    from pyavs.utils.derivatives import generate_parameter_signature
     
     sig_dict = config.get_parameter_signature_dict()
-    param_signature = _generate_parameter_signature(**sig_dict)
+    param_signature = generate_parameter_signature(**sig_dict)
     print(f"   Parameter signature: {param_signature}")
     
     print("\n=== Configuration system example completed! ===")

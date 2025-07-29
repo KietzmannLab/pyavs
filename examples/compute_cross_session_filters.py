@@ -118,9 +118,9 @@ def main():
         logger.info(f"Successfully computed filters for {len(filters)} sessions")
         
         # Summary - using parameter signature path
-        from pyavs.source.reconstruction import _generate_parameter_signature
+        from pyavs.utils.derivatives import generate_parameter_signature
         
-        param_signature = _generate_parameter_signature(**config.get_parameter_signature_dict())
+        param_signature = generate_parameter_signature(**config.get_parameter_signature_dict())
         
         param_dir = os.path.join(config.paths.data_path, 'derivatives', 'pyavs', 'population_codes', param_signature)
         subject_group = f"sub{((config.analysis.subject_id - 1) // 5) * 5 + 1:02d}-{min(((config.analysis.subject_id - 1) // 5 + 1) * 5, 99):02d}"

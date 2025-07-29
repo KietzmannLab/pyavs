@@ -289,9 +289,8 @@ class DerivativesManager:
         
         # Create readable signature
         event_type = clean_params.get('event_type', 'unknown')
-        sampling_rate = clean_params.get('sampling_rate', 'unknown')
         
-        signature = f"{event_type}_{sampling_rate}hz_{param_hash[:16]}"
+        signature = f"{event_type}_{param_hash[:16]}"
         
         return signature
     

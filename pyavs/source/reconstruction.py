@@ -617,11 +617,10 @@ def _generate_parameter_signature(**params) -> str:
     # Generate hash
     param_hash = hashlib.sha256(param_string.encode()).hexdigest()
     
-    # Create readable signature: event_type_sampling_rate_hash
+    # Create readable signature: event_type_hash
     event_type = clean_params.get('event_type', 'unknown')
-    sampling_rate = clean_params.get('sampling_rate', 'unknown')
     
-    signature = f"{event_type}_{sampling_rate}hz_{param_hash[:16]}"
+    signature = f"{event_type}_{param_hash[:16]}"
     
     return signature
 
