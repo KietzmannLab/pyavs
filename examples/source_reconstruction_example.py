@@ -65,8 +65,8 @@ def main():
         # Load MEG data
         composer.load_meg_data()
         
-        # Apply preprocessing
-        composer.filter_meg_data()
+        # Apply preprocessing (filtering is not applied during basic preprocessing)
+        composer.filter_meg_data()  # Apply filters based on analysis needs
         composer.resample_meg_data()
         
         # Load eye tracking events and create epochs

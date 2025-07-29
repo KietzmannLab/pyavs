@@ -488,9 +488,8 @@ class AVSComposer:
             
         Notes
         -----
-        WARNING: If recompute_prepro=True was used during initialization, the data may already be filtered 
-        by preprocess_meg_block. This method should only be used for additional filtering or when 
-        recompute_prepro=False.
+        This method applies filtering to the loaded MEG data. Since preprocess_meg_block no longer 
+        applies filtering by default, this method is the primary way to filter data in the workflow.
         """
         from .meg import filter_meg
         
@@ -550,9 +549,7 @@ class AVSComposer:
             if self.verbose and (existing_lowpass is not None or existing_highpass is not None):
                 logger.info(f'   Existing filters - Lowpass: {existing_lowpass} Hz, Highpass: {existing_highpass} Hz')
                 
-            # Additional warning if recompute_prepro was used
-            if self.recompute_prepro and self.verbose:
-                logger.warning('   Data may already be filtered by preprocess_meg_block during initialization')
+            # Note: preprocess_meg_block no longer applies filtering by default
         
         # Check if raws have already been concatenated
         if concatenated is None:
@@ -600,9 +597,8 @@ class AVSComposer:
             
         Notes
         -----
-        WARNING: If recompute_prepro=True was used during initialization, the data may already be resampled 
-        by preprocess_meg_block. This method should only be used for additional resampling or when 
-        recompute_prepro=False.
+        This method resamples the loaded MEG data. Note that preprocess_meg_block applies resampling 
+        by default, so check the current sampling rate before applying additional resampling.
         """
         from .meg import resample_meg
         
@@ -630,9 +626,7 @@ class AVSComposer:
             logger.info(f'   Current sampling frequency: {current_sfreq} Hz')
             logger.info(f'   Target sampling frequency: {target_sfreq} Hz')
             
-            # Additional warning if recompute_prepro was used
-            if self.recompute_prepro:
-                logger.warning('   Data may already be resampled by preprocess_meg_block during initialization')
+            # Note: preprocess_meg_block applies resampling by default
         
         # Check if raws have already been concatenated
         concatenated = hasattr(self, 'raws_concatenated')

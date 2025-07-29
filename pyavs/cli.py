@@ -373,7 +373,7 @@ def setup_command(args):
             'freesurfer_dir': args.freesurfer_dir,
             'default_preprocessing': {
                 'apply_maxwell_filter': True,
-                'apply_bandpass_filter': True,
+                'apply_bandpass_filter': False,
                 'filter_params': {'l_freq': 0.2, 'h_freq': 200.0},
                 'apply_ica': False
             }

@@ -523,7 +523,7 @@ def preprocess_meg_block(raw: mne.io.Raw,
                         session: int,
                         block: int,
                         apply_maxwell: bool = True,
-                        apply_filtering: bool = True,
+                        apply_filtering: bool = False,
                         apply_resampling: bool = True,
                         interpolate_bads: bool = True,
                         l_freq: float = 0.2,
@@ -550,7 +550,7 @@ def preprocess_meg_block(raw: mne.io.Raw,
     apply_maxwell : bool, optional
         Whether to apply Maxwell filtering (default: True)
     apply_filtering : bool, optional
-        Whether to apply bandpass filtering (default: True)
+        Whether to apply bandpass filtering (default: False)
     apply_resampling : bool, optional
         Whether to resample data (default: True)
     interpolate_bads : bool, optional
@@ -577,6 +577,13 @@ def preprocess_meg_block(raw: mne.io.Raw,
     -------
     mne.io.Raw
         Preprocessed raw data
+        
+    Notes
+    -----
+    By default, this function applies Maxwell filtering, bad channel interpolation, 
+    and resampling, but NOT bandpass filtering. Filtering should be applied later 
+    using the AVS composer filter_meg_data() method to allow for flexible 
+    analysis-specific filter parameters.
     """
     if verbose:
         logger.info(f"Preprocessing MEG data for subject {subject_id}, session {session}, block {block}")
