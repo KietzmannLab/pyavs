@@ -22,7 +22,7 @@ def main():
     logger.info("=== pyAVS AVS Composer Example ===")
     
     # Configuration
-    subject_id = 2
+    subject_id = 4
     session = 1
     data_path = "/share/klab/datasets/avs/"  # Update this path as needed
     
@@ -41,19 +41,19 @@ def main():
     composer = pyavs.AVSComposer(
         subject=subject_id,
         session_num=session,
-        data_dir=data_path,
-        output_dir=data_path,
-        et_dir=data_path,
+        data_path=data_path,
+        output_path=data_path,
+        et_path=data_path,
         preprocessed=True,
         recompute_prepro=False,
-        max_block=10,  # Process only first 3 blocks for demonstration
+        max_block=10,  
         min_block=1,
         verbose=True,
         interpolate_bad_channels=True,
         use_precomputed_ica=True,  # Enable ICA artifact removal with precomputed solutions
         apply_ica=False,  # Set to True to compute ICA on-the-fly instead
         l_freq=0.2,  # Low-pass frequency for filtering
-        h_freq=40.0,  # High-pass frequency for filtering
+        h_freq=200,  # High-pass frequency for filtering
         causal_filter=True,  # Use causal filtering for temporal order preservation
         resample_freq=500.0  # Target sampling frequency
     )
@@ -121,7 +121,7 @@ def main():
     logger.info("\n7. Processing eye tracking data...")
     
     # Process each event type separately (new pyAVS approach)
-    event_types = ["fixation", "saccade"]
+    event_types = ["fixation", "blink"]
     epochs_results = {}
     
     for event_type in event_types:
@@ -129,7 +129,7 @@ def main():
         
         # Get annotations for this event type
         composer.get_et_annotations(
-            et_event_type=event_type,
+            event_type=event_type,
             recording="scene",
             exclude_last_fixation=True,
             add_cross_event_info=True,
@@ -227,28 +227,8 @@ def main():
     logger.info("- Modular preprocessing pipeline with separated ICA processing")
 
 
-def minimal_composer_example():
-    """Minimal AVS Composer example."""
-    
-    logger = get_logger('examples.avs_composer.minimal')
-    logger.info("\n=== Minimal AVS Composer Example ===")
-    
-    # Essential workflow in just a few lines
-    pyavs.set_data_path("/share/klab/datasets/avs/")
-    
-    # Initialize and run composer
-    composer = pyavs.AVSComposer(subject=1, session_num=1, max_block=2)
-    composer.load_meg_data()
-    composer.concatenate_raws_per_session()
-    composer.get_et_annotations(et_event_type="saccade")
-    composer.make_et_event_epochs(tmin=-0.1, tmax=0.3, event_type="saccade")
-    
-    logger.info(f"Processed {len(composer.et_epochs)} saccade epochs")
-
 
 if __name__ == "__main__":
     # Run full example
     main()
     
-    # Run minimal example
-    #minimal_composer_example()

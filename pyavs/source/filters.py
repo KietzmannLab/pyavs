@@ -38,7 +38,7 @@ def compute_cross_session_data_covariance(
     hemi: str = 'both',
     block_selection: str = 'all',
     random_seed: int = 42,
-    overwrite: bool = False
+    overwrite: bool = True
 ) -> mne.Epochs:
     """
     Compute cross-session data covariance by concatenating subsampled epochs.
@@ -205,7 +205,7 @@ def compute_per_session_lcmv_filters(
     hemi: str = 'both',
     n_epochs_per_session: int = 350,
     cross_session_epochs: Optional[mne.Epochs] = None,
-    pick_ori: str = "normal",
+    pick_ori: str = "max-power",
     reg: float = 0.05,
     weight_norm: Optional[str] = None,
     rank: str = 'info',
@@ -326,7 +326,7 @@ def compute_per_session_lcmv_filters(
     filters = {}
     
     for session in sessions:
-        filter_file = subject_filter_dir / f'lcmv_filters_sess{session:02d}-lcmv.h5'
+        filter_file = subject_filter_dir / f'lcmv_filters_ses-{session:02d}-lcmv.h5'
         
         if os.path.exists(filter_file) and not overwrite:
             logger.info(f"Loading existing filter: {filter_file}")

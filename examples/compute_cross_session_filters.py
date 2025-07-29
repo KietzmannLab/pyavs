@@ -140,7 +140,7 @@ def main():
         # Verification
         logger.info("Verifying saved filters...")
         for session in config.analysis.sessions:
-            filter_file = os.path.join(filter_dir, f'lcmv_filters_sess{session:02d}.h5')
+            filter_file = os.path.join(filter_dir, f'lcmv_filters_ses-{session:02d}-lcmv.h5')
             if os.path.exists(filter_file):
                 file_size = os.path.getsize(filter_file) / (1024*1024)  # MB
                 logger.info(f"  Session {session}: {file_size:.1f} MB")
