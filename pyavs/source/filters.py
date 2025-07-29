@@ -148,7 +148,7 @@ def compute_cross_session_data_covariance(
         if resample_freq:
             composer.resample_meg_data(target_sfreq=resample_freq)
         
-        composer.filter_meg_data(**filter_params)
+        composer.filter_meg_data(ignore_existing_filter=True, **filter_params)
         composer.get_et_annotations(event_type=event_type)
         
         # Create epochs for this event type

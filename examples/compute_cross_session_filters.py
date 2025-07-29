@@ -90,8 +90,6 @@ def main():
         # Step 1: Compute cross-session data covariance
         logger.info("Step 1: Computing cross-session data covariance...")
         
-        # Get filter parameters from config
-        filter_kwargs = config.get_filter_kwargs()
         
         cross_session_epochs = compute_cross_session_data_covariance(
             data_path=config.paths.data_path,
