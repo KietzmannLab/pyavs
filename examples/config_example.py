@@ -34,8 +34,8 @@ def main():
     config.analysis.sessions = [1, 2, 3]
     config.analysis.event_type = "fixation"
     config.processing.resample_freq = 1000
-    config.processing.filter_params['l_freq'] = 1.0
-    config.processing.filter_params['h_freq'] = 100
+    config.processing.filter_params['l_freq'] = 0.2
+    config.processing.filter_params['h_freq'] = 200.0
     
     print(f"   Subject ID: {config.analysis.subject_id}")
     print(f"   Sessions: {config.analysis.sessions}")

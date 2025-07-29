@@ -108,7 +108,7 @@ def main():
                 session=session,
                 event_type='saccade',
                 sampling_rate=500,
-                filter_params={'l_freq': 1.0, 'h_freq': 40.0}
+                filter_params={'l_freq': 0.2, 'h_freq': 200.0}
             )
             print(f"   ✓ Population codes saved: {os.path.basename(h5_path)}")
         

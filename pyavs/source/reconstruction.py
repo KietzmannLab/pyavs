@@ -695,7 +695,7 @@ def find_population_codes_files(subject_id: int,
     
     # Find 500Hz population codes with specific filter parameters
     files = find_population_codes_files(1, 1, sampling_rate=500, 
-                                      filter_params={'l_freq': 1.0, 'h_freq': 40.0})
+                                      filter_params={'l_freq': 0.2, 'h_freq': 200.0})
     """
     if data_path is None:
         data_path = get_data_path()

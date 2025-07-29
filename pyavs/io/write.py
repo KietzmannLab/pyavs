@@ -459,7 +459,7 @@ def save_population_codes_h5(population_codes: Dict[str, np.ndarray],
             n_epochs = first_roi_data.shape[0] if first_roi_data.ndim > 0 else 1
             random_epochs = np.arange(n_epochs)
     if filter_params is None:
-        filter_params = {'l_freq': 1.0, 'h_freq': 40.0}
+        filter_params = {'l_freq': 0.2, 'h_freq': 200.0}
     
     logger.info(f"Saving data to: {h5_path}")
     logger.info(f"Data type: {data_type}, Event type: {event_type}, ROIs: {len(rois)}")
@@ -479,7 +479,7 @@ def save_population_codes_h5(population_codes: Dict[str, np.ndarray],
         storage.attrs["rois"] = rois
         storage.attrs["hemi"] = hemi
         storage.attrs["hz"] = sampling_rate
-        storage.attrs["filter"] = [filter_params.get("l_freq", 1.0), filter_params.get("h_freq", 40.0)]
+        storage.attrs["filter"] = [filter_params.get("l_freq", 0.2), filter_params.get("h_freq", 200.0)]
         
         # Additional attributes for fixation events
         if event_type == "fixation":

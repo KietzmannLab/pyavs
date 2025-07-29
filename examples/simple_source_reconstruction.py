@@ -177,7 +177,7 @@ def main():
             rois=list(population_codes.keys()),
             sampling_rate=int(epochs.info['sfreq']),
             blocks=[1, 2, 3],
-            filter_params={'l_freq': 1.0, 'h_freq': 40.0},
+            filter_params={'l_freq': 0.2, 'h_freq': 200.0},
             data_path=output_dir
         )
         print(f"✓ Population codes saved: {pop_codes_file}")

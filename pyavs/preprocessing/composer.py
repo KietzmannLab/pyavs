@@ -63,7 +63,7 @@ class AVSComposer:
         ica_solutions_path: Optional[str] = None,
         ica_exclusions_file: Optional[str] = None,
         l_freq: float = 0.2,
-        h_freq: float = 100.0,
+        h_freq: float = 200.0,
         resample_freq: float = 500.0,
         causal_filter: bool = False,
         n_jobs: int = 1,

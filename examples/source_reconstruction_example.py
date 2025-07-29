@@ -57,8 +57,8 @@ def main():
             verbose=True,
             preprocessed=True,  # Use preprocessed data if available
             max_block=3,        # Process first 3 blocks
-            l_freq=1.0,         # High-pass filter
-            h_freq=40.0,        # Low-pass filter
+            l_freq=0.2,         # High-pass filter
+            h_freq=200.0,       # Low-pass filter
             resample_freq=500.0 # Downsample to 500 Hz
         )
         
@@ -191,7 +191,7 @@ def main():
             rois=list(population_codes.keys()),
             times=epochs.times,
             blocks=[1, 2, 3],
-            filter_params={'l_freq': 1.0, 'h_freq': 40.0},
+            filter_params={'l_freq': 0.2, 'h_freq': 200.0},
             apply_fixation_mask=False,
             data_path=data_path
         )

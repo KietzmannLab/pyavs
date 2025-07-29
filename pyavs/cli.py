@@ -374,7 +374,7 @@ def setup_command(args):
             'default_preprocessing': {
                 'apply_maxwell_filter': True,
                 'apply_bandpass_filter': True,
-                'filter_params': {'l_freq': 1.0, 'h_freq': 40.0},
+                'filter_params': {'l_freq': 0.2, 'h_freq': 200.0},
                 'apply_ica': False
             }
         }
