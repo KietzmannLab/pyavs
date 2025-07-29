@@ -40,6 +40,7 @@ def save_annotated_raw_data(subject_id: int,
                            min_block: int = 1,
                            max_block: int = None,
                            overwrite: bool = False,
+                           ignore_existing_filter: bool = False,
                            verbose: bool = True):
     """
     Save annotated raw MEG data for a subject and session.
@@ -64,6 +65,8 @@ def save_annotated_raw_data(subject_id: int,
         Maximum block number (default: determined from session)
     overwrite : bool, optional
         Whether to overwrite existing files (default: False)
+    ignore_existing_filter : bool, optional
+        If True, ignore existing filters and apply new ones anyway (default: False)
     verbose : bool, optional
         Whether to print detailed progress (default: True)
         
@@ -150,7 +153,7 @@ def save_annotated_raw_data(subject_id: int,
         # Apply filtering
         if verbose:
             logger.info("Applying filters...")
-        composer.filter_meg_data(**filter_params)
+        composer.filter_meg_data(**filter_params, ignore_existing_filter=ignore_existing_filter)
         
         # Add eye-tracking annotations for each event type
         for event_type in event_types:
@@ -276,6 +279,8 @@ Examples:
     # Options
     parser.add_argument('--overwrite', action='store_true',
                        help='Overwrite existing files')
+    parser.add_argument('--ignore_existing_filter', action='store_true',
+                       help='Ignore existing filters and apply new ones anyway')
     parser.add_argument('--quiet', action='store_true',
                        help='Reduce output verbosity')
     
@@ -342,6 +347,7 @@ Examples:
             min_block=args.min_block,
             max_block=args.max_block,
             overwrite=args.overwrite,
+            ignore_existing_filter=args.ignore_existing_filter,
             verbose=not args.quiet
         )
         

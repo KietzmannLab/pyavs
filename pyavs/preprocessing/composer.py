@@ -464,7 +464,8 @@ class AVSComposer:
         h_freq: Optional[float] = None,
         picks=None,
         causal: Optional[bool] = None,
-        concatenated: Optional[bool] = False
+        concatenated: Optional[bool] = False,
+        ignore_existing_filter: bool = False
     ):
         """
         Applies lowpass and/or highpass filters to the MEG data using pyAVS filter_meg function.
@@ -481,6 +482,9 @@ class AVSComposer:
             Whether to use a causal filter. If None, uses instance variable.
         concatenated : bool or None, optional
             Whether to use the concatenated data for filtering. If None, it uses the concatenated data if available, otherwise it uses the data per block.
+        ignore_existing_filter : bool, optional
+            If True, ignore existing filters and apply new ones anyway. If False (default), 
+            raises an error if data is already filtered with different parameters.
             
         Notes
         -----
@@ -509,15 +513,45 @@ class AVSComposer:
         else:
             raw_to_check = None
             
-        if raw_to_check and self.verbose:
-            # Check for existing filters in MNE info
-            if raw_to_check.info.get('lowpass') is not None:
-                logger.info(f'   Data already has lowpass filter at {raw_to_check.info["lowpass"]} Hz')
-            if raw_to_check.info.get('highpass') is not None:
-                logger.info(f'   Data already has highpass filter at {raw_to_check.info["highpass"]} Hz')
+        if raw_to_check:
+            existing_lowpass = raw_to_check.info.get('lowpass')
+            existing_highpass = raw_to_check.info.get('highpass')
             
+            # Check for filter conflicts
+            filter_conflicts = []
+            
+            if existing_lowpass is not None and h_freq is not None:
+                if abs(existing_lowpass - h_freq) > 1e-6:  # Allow for small numerical differences
+                    filter_conflicts.append(f"Lowpass: existing {existing_lowpass} Hz vs requested {h_freq} Hz")
+                elif self.verbose:
+                    logger.info(f'   Data already has matching lowpass filter at {existing_lowpass} Hz')
+                    
+            if existing_highpass is not None and l_freq is not None:
+                if abs(existing_highpass - l_freq) > 1e-6:  # Allow for small numerical differences
+                    filter_conflicts.append(f"Highpass: existing {existing_highpass} Hz vs requested {l_freq} Hz")
+                elif self.verbose:
+                    logger.info(f'   Data already has matching highpass filter at {existing_highpass} Hz')
+            
+            # Handle filter conflicts
+            if filter_conflicts and not ignore_existing_filter:
+                conflict_msg = "Data is already filtered with different parameters:\n" + "\n".join(f"  - {conflict}" for conflict in filter_conflicts)
+                conflict_msg += "\n\nUse ignore_existing_filter=True to override existing filters."
+                raise ValueError(conflict_msg)
+            elif filter_conflicts and ignore_existing_filter:
+                if self.verbose:
+                    logger.warning("Ignoring existing filter settings and applying new filters:")
+                    for conflict in filter_conflicts:
+                        logger.warning(f"   {conflict}")
+            elif not filter_conflicts and (existing_lowpass is not None or existing_highpass is not None):
+                if self.verbose:
+                    logger.info("Requested filter parameters match existing filters - no additional filtering needed")
+                return  # No need to filter again with same parameters
+                    
+            if self.verbose and (existing_lowpass is not None or existing_highpass is not None):
+                logger.info(f'   Existing filters - Lowpass: {existing_lowpass} Hz, Highpass: {existing_highpass} Hz')
+                
             # Additional warning if recompute_prepro was used
-            if self.recompute_prepro:
+            if self.recompute_prepro and self.verbose:
                 logger.warning('   Data may already be filtered by preprocess_meg_block during initialization')
         
         # Check if raws have already been concatenated
