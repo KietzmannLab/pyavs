@@ -84,7 +84,7 @@ def save_annotated_raw_data(subject_id: int,
         filter_params = {'l_freq': 0.2, 'h_freq': 200, 'picks': None, 'causal': True}
     
     if event_types is None:
-        event_types = ['saccade', 'fixation']
+        event_types = ['saccade', 'fixation', 'blink']
     
     if max_block is None:
         # Determine max block based on session
@@ -153,7 +153,7 @@ def save_annotated_raw_data(subject_id: int,
         # Apply filtering
         if verbose:
             logger.info("Applying filters...")
-        composer.filter_meg_data(**filter_params, ignore_existing_filter=ignore_existing_filter)
+        composer.filter_meg_data(**filter_params, ignore_existing_filter=True)
         
         # Add eye-tracking annotations for each event type
         for event_type in event_types:

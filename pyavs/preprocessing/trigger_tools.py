@@ -331,7 +331,7 @@ def get_meg_timestamp(meg_events: np.ndarray, trial: int, block: int,
 def add_fix_event_trigger(raw: mne.io.Raw, blocks: List[int], et_events: pd.DataFrame, 
                          session: int, block_trigger_offset: int = 1000, 
                          stim_channel: str = 'STI101', verbose: bool = True,
-                         event_types: List[str] = ['fixation', 'saccade'],
+                         event_types: List[str] = ['fixation', 'saccade', 'blink'],
                          recording: str = 'scene') -> Tuple[mne.io.Raw, List[Tuple[int, int]]]:
     """
     Adds eye movement based event triggers (fixation, saccade) to the raw neuro data.

@@ -265,8 +265,8 @@ def get_all_subject_sessions(data_path: str,
         for session in sessions:
             # Check if subject directory exists
             subject_dir = Path(data_path) / 'rawdir' / f'as{subject_id:02d}'
-            session_dir = subject_dir / f'{subject_id:02d}{chr(96+session)}'  # 01a, 01b, etc.
-            
+            session_dir = Path(f'{subject_dir}{chr(96+session)}')  # 01a, 01b, etc.
+            print(f"Checking: {subject_dir}, {session_dir}")
             if session_dir.exists():
                 combinations.append((subject_id, session))
             else:
