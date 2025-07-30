@@ -114,139 +114,128 @@ def save_annotated_raw_data(subject_id: int,
         verbose=verbose
     )
     
-    try:
-        # Load MEG data
-        if verbose:
-            logger.info("Loading MEG data...")
-        composer.load_meg_data()
-        
-        # Concatenate raw data per session
-        if verbose:
-            logger.info("Concatenating raw data...")
-        composer.concatenate_raws_per_session()
-        
-        # Apply resampling if specified
-        if resample_freq and resample_freq != composer.raw_concatenated.info['sfreq']:
-            if verbose:
-                logger.info(f"Resampling to {resample_freq} Hz...")
-            composer.resample_meg_data(target_sfreq=resample_freq)
-        
-        # Apply filtering
-        if verbose:
-            logger.info("Applying filters...")
-        composer.filter_meg_data(**filter_params, ignore_existing_filter=True)
-        
-        # First, save the concatenated raw data (without annotations)
-        if verbose:
-            logger.info("Saving concatenated raw data...")
-        
-        # Create base raw filename
-        base_raw_filename = f'sub-{subject_id:02d}_ses-{session:02d}_task-avs_raw-concatenated.fif'
-        base_raw_path = output_dir / base_raw_filename
-        
-        # Add processing information to the base raw
-        base_raw = composer.raws_concatenated.copy()
-        base_raw.info['description'] = f'pyAVS concatenated raw data - Subject {subject_id}, Session {session}'
-        
-        # Add custom info about processing
-        base_processing_info = {
-            'pyavs_version': 'development',
-            'subject_id': subject_id,
-            'session': session,
-            'resample_freq': resample_freq,
-            'filter_params': filter_params,
-            'blocks_processed': f'{min_block}-{max_block}',
-            'n_channels': len(base_raw.ch_names),
-            'n_bad_channels': len(base_raw.info['bads'])
-        }
-        
-        base_raw.info['proc_history'] = [base_processing_info]
-        base_raw.save(base_raw_path, overwrite=overwrite, verbose=verbose)
-        
-        saved_files = [str(base_raw_path)]
-        
-        # Now create and save annotation files for each recording type
-        recording_types = ['scene', 'microphone', 'caption']
-        annotation_files = []
-        
-        for recording_type in recording_types:
-            if verbose:
-                logger.info(f"Processing {recording_type} recordings with all event types...")
-            
-            # Collect all annotations for this recording type
-            combined_annotations = None
-            
-            # Add annotations for all event types for this recording type
-            for event_type in event_types:
-                if verbose:
-                    logger.info(f"  Adding {event_type} annotations...")
-                
-                # Get annotations for this specific event type and recording type
-                composer.get_et_annotations(event_type=event_type, recording=recording_type)
-                
-                # Collect the annotations from this event type
-                if hasattr(composer, 'raws_annotated') and len(composer.raws_annotated.annotations) > 0:
-                    new_annotations = composer.raws_annotated.annotations
-                    
-                    if combined_annotations is None:
-                        combined_annotations = new_annotations
-                    else:
-                        combined_annotations = combined_annotations + new_annotations
-            
-            # Save the annotations as a separate MNE Annotations .fif file
-            if combined_annotations is not None and len(combined_annotations) > 0:
-                annotation_filename = f'sub-{subject_id:02d}_ses-{session:02d}_task-avs_annotations-{recording_type}.fif'
-                annotation_path = output_dir / annotation_filename
-                
-                # Save using MNE's native Annotations save method
-                combined_annotations.save(str(annotation_path), overwrite=overwrite)
-                annotation_files.append(str(annotation_path))
-                
-                if verbose:
-                    logger.info(f"Saved {len(combined_annotations)} annotations for {recording_type} to: {annotation_path}")
-            else:
-                if verbose:
-                    logger.warning(f"No annotations found for {recording_type}")
-        
-        saved_files.extend(annotation_files)
-        
-        # Print summary
-        if verbose:
-            logger.info("="*60)
-            logger.info("ANNOTATED RAW DATA SUMMARY")
-            logger.info("="*60)
-            logger.info(f"Subject: {subject_id}")
-            logger.info(f"Session: {session}")
-            logger.info(f"Files created: {len(saved_files)} (1 raw + {len(annotation_files)} annotation files)")
-            logger.info(f"Recording types: {recording_types}")
-            logger.info(f"Event types: {event_types}")
-            
-            total_size = sum(Path(f).stat().st_size for f in saved_files) / (1024*1024)
-            logger.info(f"Total file size: {total_size:.1f} MB")
-            
-            # Show files created
-            logger.info("Raw data file:")
-            logger.info(f"  {Path(saved_files[0]).name}: {Path(saved_files[0]).stat().st_size / (1024*1024):.1f} MB")
-            
-            if annotation_files:
-                logger.info("Annotation files:")
-                for file_path in annotation_files:
-                    file_size = Path(file_path).stat().st_size / (1024)  # KB for .fif annotation files
-                    logger.info(f"  {Path(file_path).name}: {file_size:.1f} KB")
-            
-            logger.info("="*60)
-        
-        return saved_files
-        
-    except Exception as e:
-        logger.error(f"Error processing data: {e}")
-        raise
+    # Load MEG data
+    if verbose:
+        logger.info("Loading MEG data...")
+    composer.load_meg_data()
     
-    finally:
-        # Clean up
-        if hasattr(composer, 'raw_concatenated'):
-            del composer.raw_concatenated
-        del composer
+    # Concatenate raw data per session
+    if verbose:
+        logger.info("Concatenating raw data...")
+    composer.concatenate_raws_per_session()
+    
+    # Apply resampling if specified
+    if resample_freq and resample_freq != composer.raws_concatenated.info['sfreq']:
+        if verbose:
+            logger.info(f"Resampling to {resample_freq} Hz...")
+        composer.resample_meg_data(target_sfreq=resample_freq)
+    
+    # Apply filtering
+    if verbose:
+        logger.info("Applying filters...")
+    composer.filter_meg_data(**filter_params, ignore_existing_filter=True)
+    
+    # First, save the concatenated raw data (without annotations)
+    if verbose:
+        logger.info("Saving concatenated raw data...")
+    
+    # Create base raw filename
+    base_raw_filename = f'sub-{subject_id:02d}_ses-{session:02d}_task-avs_raw-concatenated.fif'
+    base_raw_path = output_dir / base_raw_filename
+    
+    # Add processing information to the base raw
+    base_raw = composer.raws_concatenated.copy()
+    base_raw.info['description'] = f'pyAVS concatenated raw data - Subject {subject_id}, Session {session}'
+    
+    # Add custom info about processing
+    base_processing_info = {
+        'pyavs_version': 'development',
+        'subject_id': subject_id,
+        'session': session,
+        'resample_freq': resample_freq,
+        'filter_params': filter_params,
+        'blocks_processed': f'{min_block}-{max_block}',
+        'n_channels': len(base_raw.ch_names),
+        'n_bad_channels': len(base_raw.info['bads'])
+    }
+    
+    base_raw.info['proc_history'] = [base_processing_info]
+    base_raw.save(base_raw_path, overwrite=overwrite, verbose=verbose)
+    
+    saved_files = [str(base_raw_path)]
+    
+    # Now create and save annotation files for each recording type
+    recording_types = ['scene', 'microphone', 'caption']
+    annotation_files = []
+    
+    for recording_type in recording_types:
+        if verbose:
+            logger.info(f"Processing {recording_type} recordings with all event types...")
+        
+        # Collect all annotations for this recording type
+        combined_annotations = None
+        
+        # Add annotations for all event types for this recording type
+        for event_type in event_types:
+            if verbose:
+                logger.info(f"  Adding {event_type} annotations...")
+            
+            # Get annotations for this specific event type and recording type
+            composer.get_et_annotations(event_type=event_type, recording=recording_type)
+            
+            # Collect the annotations from this event type
+            if hasattr(composer, 'raws_annotated') and len(composer.raws_annotated.annotations) > 0:
+                new_annotations = composer.raws_annotated.annotations
+                
+                if combined_annotations is None:
+                    combined_annotations = new_annotations
+                else:
+                    combined_annotations = combined_annotations + new_annotations
+        
+        # Save the annotations as a separate MNE Annotations .fif file
+        if combined_annotations is not None and len(combined_annotations) > 0:
+            annotation_filename = f'sub-{subject_id:02d}_ses-{session:02d}_task-avs_annotations-{recording_type}.fif'
+            annotation_path = output_dir / annotation_filename
+            
+            # Save using MNE's native Annotations save method
+            combined_annotations.save(str(annotation_path), overwrite=overwrite)
+            annotation_files.append(str(annotation_path))
+            
+            if verbose:
+                logger.info(f"Saved {len(combined_annotations)} annotations for {recording_type} to: {annotation_path}")
+        else:
+            if verbose:
+                logger.warning(f"No annotations found for {recording_type}")
+    
+    saved_files.extend(annotation_files)
+    
+    # Print summary
+    if verbose:
+        logger.info("="*60)
+        logger.info("ANNOTATED RAW DATA SUMMARY")
+        logger.info("="*60)
+        logger.info(f"Subject: {subject_id}")
+        logger.info(f"Session: {session}")
+        logger.info(f"Files created: {len(saved_files)} (1 raw + {len(annotation_files)} annotation files)")
+        logger.info(f"Recording types: {recording_types}")
+        logger.info(f"Event types: {event_types}")
+        
+        total_size = sum(Path(f).stat().st_size for f in saved_files) / (1024*1024)
+        logger.info(f"Total file size: {total_size:.1f} MB")
+        
+        # Show files created
+        logger.info("Raw data file:")
+        logger.info(f"  {Path(saved_files[0]).name}: {Path(saved_files[0]).stat().st_size / (1024*1024):.1f} MB")
+        
+        if annotation_files:
+            logger.info("Annotation files:")
+            for file_path in annotation_files:
+                file_size = Path(file_path).stat().st_size / (1024)  # KB for .fif annotation files
+                logger.info(f"  {Path(file_path).name}: {file_size:.1f} KB")
+        
+        logger.info("="*60)
+        
+    return saved_files
 
 
 def main():
@@ -311,78 +300,73 @@ Examples:
     
     args = parser.parse_args()
     
-    try:
-        # Load configuration if provided
-        if args.config:
-            logger.info(f"Loading configuration from: {args.config}")
-            config = load_config(args.config)
-            
-            # Override with command line arguments
-            if args.subject:
-                config.analysis.subject_id = args.subject
-            if args.session:
-                config.analysis.sessions = [args.session]
-            if args.data_path:
-                config.paths.data_path = args.data_path
-            
-            # Use config values
-            subject_id = config.analysis.subject_id
-            session = config.analysis.sessions[0] if config.analysis.sessions else 1
+    # Load configuration if provided
+    if args.config:
+        logger.info(f"Loading configuration from: {args.config}")
+        config = load_config(args.config)
+        
+        # Override with command line arguments
+        if args.subject:
+            config.analysis.subject_id = args.subject
+        if args.session:
+            config.analysis.sessions = [args.session]
+        if args.data_path:
+            config.paths.data_path = args.data_path
+        
+        # Use config values
+        subject_id = config.analysis.subject_id
+        session = config.analysis.sessions[0] if config.analysis.sessions else 1
+        data_path = config.paths.data_path
+        resample_freq = args.resample_freq or config.processing.resample_freq
+        filter_params = {
+            'l_freq': args.l_freq or config.processing.filter_params.get('l_freq', 0.2),
+            'h_freq': args.h_freq or config.processing.filter_params.get('h_freq', 200),
+            'picks': None,
+            'causal': True
+        }
+        
+    else:
+        # Use command line arguments or defaults
+        if not args.subject or not args.session:
+            parser.error("--subject and --session are required when not using --config")
+        
+        # Get default configuration for data_path if not provided
+        if not args.data_path:
+            config = get_config()
             data_path = config.paths.data_path
-            resample_freq = args.resample_freq or config.processing.resample_freq
-            filter_params = {
-                'l_freq': args.l_freq or config.processing.filter_params.get('l_freq', 0.2),
-                'h_freq': args.h_freq or config.processing.filter_params.get('h_freq', 200),
-                'picks': None,
-                'causal': True
-            }
-            
+            if not data_path:
+                parser.error("--data_path is required or must be set in configuration")
         else:
-            # Use command line arguments or defaults
-            if not args.subject or not args.session:
-                parser.error("--subject and --session are required when not using --config")
-            
-            # Get default configuration for data_path if not provided
-            if not args.data_path:
-                config = get_config()
-                data_path = config.paths.data_path
-                if not data_path:
-                    parser.error("--data_path is required or must be set in configuration")
-            else:
-                data_path = args.data_path
-            
-            subject_id = args.subject
-            session = args.session
-            resample_freq = args.resample_freq
-            filter_params = {
-                'l_freq': args.l_freq,
-                'h_freq': args.h_freq,
-                'picks': None,
-                'causal': True
-            }
+            data_path = args.data_path
         
-        # Save annotated raw data
-        output_paths = save_annotated_raw_data(
-            subject_id=subject_id,
-            session=session,
-            data_path=data_path,
-            resample_freq=resample_freq,
-            filter_params=filter_params,
-            event_types=args.event_types,
-            min_block=args.min_block,
-            max_block=args.max_block,
-            overwrite=args.overwrite,
-            ignore_existing_filter=args.ignore_existing_filter,
-            verbose=not args.quiet
-        )
-        
-        print(f"\nSuccess! Annotated raw data saved to {len(output_paths)} files:")
-        for path in output_paths:
-            print(f"  {path}")
-        
-    except Exception as e:
-        logger.error(f"Script failed: {e}")
-        sys.exit(1)
+        subject_id = args.subject
+        session = args.session
+        resample_freq = args.resample_freq
+        filter_params = {
+            'l_freq': args.l_freq,
+            'h_freq': args.h_freq,
+            'picks': None,
+            'causal': True
+        }
+    
+    # Save annotated raw data
+    output_paths = save_annotated_raw_data(
+        subject_id=subject_id,
+        session=session,
+        data_path=data_path,
+        resample_freq=resample_freq,
+        filter_params=filter_params,
+        event_types=args.event_types,
+        min_block=args.min_block,
+        max_block=args.max_block,
+        overwrite=args.overwrite,
+        ignore_existing_filter=args.ignore_existing_filter,
+        verbose=not args.quiet
+    )
+    
+    print(f"\nSuccess! Annotated raw data saved to {len(output_paths)} files:")
+    for path in output_paths:
+        print(f"  {path}")
 
 
 if __name__ == '__main__':
