@@ -159,7 +159,9 @@ def save_annotated_raw_data(subject_id: int,
         'n_bad_channels': len(base_raw.info['bads'])
     }
     
-    base_raw.info['proc_history'] = [base_processing_info]
+    # Make this a string sep with newlines
+    base_processing_info_str = "\n".join(f"{k}: {v}" for k, v in base_processing_info.items())
+    base_raw.info['description'] += f"\nProcessing info:\n{base_processing_info_str}"
     base_raw.save(base_raw_path, overwrite=overwrite, verbose=verbose)
     
     saved_files = [str(base_raw_path)]
@@ -167,6 +169,7 @@ def save_annotated_raw_data(subject_id: int,
     # Now create and save annotation files for each recording type
     recording_types = ['scene', 'microphone', 'caption']
     annotation_files = []
+    event_counts = {}  # Track event counts per recording type
     
     for recording_type in recording_types:
         if verbose:
@@ -174,6 +177,7 @@ def save_annotated_raw_data(subject_id: int,
         
         # Collect all annotations for this recording type
         combined_annotations = None
+        recording_event_counts = {}  # Track counts per event type for this recording
         
         # Add annotations for all event types for this recording type
         for event_type in event_types:
@@ -187,10 +191,24 @@ def save_annotated_raw_data(subject_id: int,
             if hasattr(composer, 'raws_annotated') and len(composer.raws_annotated.annotations) > 0:
                 new_annotations = composer.raws_annotated.annotations
                 
+                # Count events for this event type
+                event_type_count = len(new_annotations)
+                recording_event_counts[event_type] = event_type_count
+                
+                if verbose:
+                    logger.info(f"    Found {event_type_count} {event_type} events")
+                
                 if combined_annotations is None:
                     combined_annotations = new_annotations
                 else:
                     combined_annotations = combined_annotations + new_annotations
+            else:
+                recording_event_counts[event_type] = 0
+                if verbose:
+                    logger.info(f"    Found 0 {event_type} events")
+        
+        # Store event counts for this recording type
+        event_counts[recording_type] = recording_event_counts
         
         # Save the annotations as a separate MNE Annotations .fif file
         if combined_annotations is not None and len(combined_annotations) > 0:
@@ -201,8 +219,9 @@ def save_annotated_raw_data(subject_id: int,
             combined_annotations.save(str(annotation_path), overwrite=overwrite)
             annotation_files.append(str(annotation_path))
             
+            total_events = len(combined_annotations)
             if verbose:
-                logger.info(f"Saved {len(combined_annotations)} annotations for {recording_type} to: {annotation_path}")
+                logger.info(f"Saved {total_events} total annotations for {recording_type} to: {annotation_path}")
         else:
             if verbose:
                 logger.warning(f"No annotations found for {recording_type}")
@@ -220,10 +239,30 @@ def save_annotated_raw_data(subject_id: int,
         logger.info(f"Recording types: {recording_types}")
         logger.info(f"Event types: {event_types}")
         
+        # Show event counts per recording type
+        logger.info("\nEvent counts per recording type:")
+        total_events_all = 0
+        for recording_type in recording_types:
+            if recording_type in event_counts:
+                counts = event_counts[recording_type]
+                total_for_recording = sum(counts.values())
+                total_events_all += total_for_recording
+                
+                logger.info(f"  {recording_type.capitalize()}:")
+                for event_type in event_types:
+                    count = counts.get(event_type, 0)
+                    logger.info(f"    {event_type}: {count}")
+                logger.info(f"    Total: {total_for_recording}")
+            else:
+                logger.info(f"  {recording_type.capitalize()}: No events found")
+        
+        logger.info(f"\nGrand total events: {total_events_all}")
+        
         total_size = sum(Path(f).stat().st_size for f in saved_files) / (1024*1024)
         logger.info(f"Total file size: {total_size:.1f} MB")
         
         # Show files created
+        logger.info("\nFiles created:")
         logger.info("Raw data file:")
         logger.info(f"  {Path(saved_files[0]).name}: {Path(saved_files[0]).stat().st_size / (1024*1024):.1f} MB")
         
