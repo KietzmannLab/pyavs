@@ -72,8 +72,8 @@ def save_annotated_raw_data(subject_id: int,
         
     Returns
     -------
-    str
-        Path to saved annotated raw data file
+    list of str
+        Paths to saved annotated raw data files (one per recording type and event type combination)
     """
     # Validate inputs
     validate_subject_id(subject_id)
@@ -101,24 +101,9 @@ def save_annotated_raw_data(subject_id: int,
     # Set up derivatives manager for BIDS-compliant paths
     manager = get_derivatives_manager(data_path)
     
-    # Create output directory
-    output_dir = manager.get_preprocessed_path(subject_id, session)
-    
-    # Create output filename
-    output_filename = manager.create_bids_filename(
-        subject_id=subject_id,
-        session=session,
-        task='avs',
-        suffix='raw-annotated',
-        extension='.fif'
-    )
-    output_path = output_dir / output_filename
-    
-    # Check if file already exists
-    if output_path.exists() and not overwrite:
-        logger.info(f"File already exists: {output_path}")
-        logger.info("Use --overwrite to recreate the file")
-        return str(output_path)
+    # Create output directory for annotated raws under pyavs derivatives
+    output_dir = manager.get_derivatives_path() / 'pyavs' / 'annotated_raws' / f'sub-{subject_id:02d}' / f'ses-{session:02d}'
+    output_dir.mkdir(parents=True, exist_ok=True)
     
     # Initialize composer
     if verbose:
@@ -155,40 +140,91 @@ def save_annotated_raw_data(subject_id: int,
             logger.info("Applying filters...")
         composer.filter_meg_data(**filter_params, ignore_existing_filter=True)
         
-        # Add eye-tracking annotations for each event type and recording type
-        recording_types = ['scene', 'microphone', 'caption']
-        for event_type in event_types:
-            for recording_type in recording_types:
-                if verbose:
-                    logger.info(f"Adding {event_type} annotations for {recording_type} recordings...")
-                composer.get_et_annotations(event_type=event_type, recording=recording_type)
+        # First, save the concatenated raw data (without annotations)
+        if verbose:
+            logger.info("Saving concatenated raw data...")
         
-        # Get the annotated raw data
-        annotated_raw = composer.raw_concatenated.copy()
+        # Create base raw filename
+        base_raw_filename = manager.create_bids_filename(
+            subject_id=subject_id,
+            session=session,
+            task='avs',
+            suffix='raw-concatenated',
+            extension='.fif'
+        )
+        base_raw_path = output_dir / base_raw_filename
         
-        # Add processing information to info
-        annotated_raw.info['description'] = f'pyAVS annotated raw data - Subject {subject_id}, Session {session}'
+        # Add processing information to the base raw
+        base_raw = composer.raws_concatenated.copy()
+        base_raw.info['description'] = f'pyAVS concatenated raw data - Subject {subject_id}, Session {session}'
         
         # Add custom info about processing
-        processing_info = {
+        base_processing_info = {
             'pyavs_version': 'development',
             'subject_id': subject_id,
             'session': session,
             'resample_freq': resample_freq,
             'filter_params': filter_params,
-            'event_types': event_types,
             'blocks_processed': f'{min_block}-{max_block}',
-            'n_annotations': len(annotated_raw.annotations)
+            'n_channels': len(base_raw.ch_names),
+            'n_bad_channels': len(base_raw.info['bads'])
         }
         
-        # Store processing info in the MNE info dict
-        annotated_raw.info['proc_history'] = [processing_info]
+        base_raw.info['proc_history'] = [base_processing_info]
+        base_raw.save(base_raw_path, overwrite=overwrite, verbose=verbose)
         
-        # Save the annotated raw data
-        if verbose:
-            logger.info(f"Saving annotated raw data to: {output_path}")
+        saved_files = [str(base_raw_path)]
         
-        annotated_raw.save(output_path, overwrite=overwrite, verbose=verbose)
+        # Now create and save annotation files for each recording type
+        recording_types = ['scene', 'microphone', 'caption']
+        annotation_files = []
+        
+        for recording_type in recording_types:
+            if verbose:
+                logger.info(f"Processing {recording_type} recordings with all event types...")
+            
+            # Collect all annotations for this recording type
+            combined_annotations = None
+            
+            # Add annotations for all event types for this recording type
+            for event_type in event_types:
+                if verbose:
+                    logger.info(f"  Adding {event_type} annotations...")
+                
+                # Get annotations for this specific event type and recording type
+                composer.get_et_annotations(event_type=event_type, recording=recording_type)
+                
+                # Collect the annotations from this event type
+                if hasattr(composer, 'raws_annotated') and len(composer.raws_annotated.annotations) > 0:
+                    new_annotations = composer.raws_annotated.annotations
+                    
+                    if combined_annotations is None:
+                        combined_annotations = new_annotations
+                    else:
+                        combined_annotations = combined_annotations + new_annotations
+            
+            # Save the annotations as a separate MNE Annotations .fif file
+            if combined_annotations is not None and len(combined_annotations) > 0:
+                annotation_filename = manager.create_bids_filename(
+                    subject_id=subject_id,
+                    session=session,
+                    task='avs',
+                    suffix=f'annotations-{recording_type}',
+                    extension='.fif'
+                )
+                annotation_path = output_dir / annotation_filename
+                
+                # Save using MNE's native Annotations save method
+                combined_annotations.save(str(annotation_path), overwrite=overwrite)
+                annotation_files.append(str(annotation_path))
+                
+                if verbose:
+                    logger.info(f"Saved {len(combined_annotations)} annotations for {recording_type} to: {annotation_path}")
+            else:
+                if verbose:
+                    logger.warning(f"No annotations found for {recording_type}")
+        
+        saved_files.extend(annotation_files)
         
         # Print summary
         if verbose:
@@ -197,23 +233,26 @@ def save_annotated_raw_data(subject_id: int,
             logger.info("="*60)
             logger.info(f"Subject: {subject_id}")
             logger.info(f"Session: {session}")
-            logger.info(f"Sampling frequency: {annotated_raw.info['sfreq']:.1f} Hz")
-            logger.info(f"Duration: {annotated_raw.times[-1]:.1f} seconds")
-            logger.info(f"Channels: {len(annotated_raw.ch_names)} ({len(annotated_raw.info['bads'])} bad)")
-            logger.info(f"Annotations: {len(annotated_raw.annotations)}")
+            logger.info(f"Files created: {len(saved_files)} (1 raw + {len(annotation_files)} annotation files)")
+            logger.info(f"Recording types: {recording_types}")
+            logger.info(f"Event types: {event_types}")
             
-            # Show annotation breakdown
-            if len(annotated_raw.annotations) > 0:
-                from collections import Counter
-                annotation_counts = Counter(annotated_raw.annotations.description)
-                for desc, count in annotation_counts.most_common():
-                    logger.info(f"  {desc}: {count}")
+            total_size = sum(Path(f).stat().st_size for f in saved_files) / (1024*1024)
+            logger.info(f"Total file size: {total_size:.1f} MB")
             
-            logger.info(f"File size: {output_path.stat().st_size / (1024*1024):.1f} MB")
-            logger.info(f"Saved to: {output_path}")
+            # Show files created
+            logger.info("Raw data file:")
+            logger.info(f"  {Path(saved_files[0]).name}: {Path(saved_files[0]).stat().st_size / (1024*1024):.1f} MB")
+            
+            if annotation_files:
+                logger.info("Annotation files:")
+                for file_path in annotation_files:
+                    file_size = Path(file_path).stat().st_size / (1024)  # KB for .fif annotation files
+                    logger.info(f"  {Path(file_path).name}: {file_size:.1f} KB")
+            
             logger.info("="*60)
         
-        return str(output_path)
+        return saved_files
         
     except Exception as e:
         logger.error(f"Error processing data: {e}")
@@ -339,7 +378,7 @@ Examples:
             }
         
         # Save annotated raw data
-        output_path = save_annotated_raw_data(
+        output_paths = save_annotated_raw_data(
             subject_id=subject_id,
             session=session,
             data_path=data_path,
@@ -353,7 +392,9 @@ Examples:
             verbose=not args.quiet
         )
         
-        print(f"\nSuccess! Annotated raw data saved to:\n{output_path}")
+        print(f"\nSuccess! Annotated raw data saved to {len(output_paths)} files:")
+        for path in output_paths:
+            print(f"  {path}")
         
     except Exception as e:
         logger.error(f"Script failed: {e}")

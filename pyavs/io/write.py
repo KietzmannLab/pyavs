@@ -186,7 +186,7 @@ def save_data_h5(data: Union[np.ndarray, mne.Epochs, mne.io.Raw, Dict[str, np.nd
 
 def save_annotated_raw(raw: mne.io.Raw, subject_id: int, session: int,
                        data_path: Optional[str] = None, suffix: str = 'annotated',
-                       **kwargs) -> str:
+                       recording_type: Optional[str] = None, **kwargs) -> str:
     """
     Save annotated Raw data in HDF5 format.
     
@@ -202,6 +202,8 @@ def save_annotated_raw(raw: mne.io.Raw, subject_id: int, session: int,
         Path to data directory
     suffix : str, optional
         File suffix (default: 'annotated')
+    recording_type : str, optional
+        Recording type to include in filename ('scene', 'microphone', 'caption')
     **kwargs
         Additional parameters for save_data_h5
         
@@ -210,12 +212,17 @@ def save_annotated_raw(raw: mne.io.Raw, subject_id: int, session: int,
     str
         Path to saved file
     """
+    # Create event_type with recording_type if provided
+    event_type = suffix
+    if recording_type:
+        event_type = f"{suffix}_{recording_type}"
+    
     return save_data_h5(
         data=raw,
         subject_id=subject_id,
         session=session,
         data_type='annotated',
-        event_type=suffix,
+        event_type=event_type,
         data_path=data_path,
         **kwargs
     )
