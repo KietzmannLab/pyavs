@@ -155,11 +155,13 @@ def save_annotated_raw_data(subject_id: int,
             logger.info("Applying filters...")
         composer.filter_meg_data(**filter_params, ignore_existing_filter=True)
         
-        # Add eye-tracking annotations for each event type
+        # Add eye-tracking annotations for each event type and recording type
+        recording_types = ['scene', 'microphone', 'caption']
         for event_type in event_types:
-            if verbose:
-                logger.info(f"Adding {event_type} annotations...")
-            composer.get_et_annotations(event_type=event_type)
+            for recording_type in recording_types:
+                if verbose:
+                    logger.info(f"Adding {event_type} annotations for {recording_type} recordings...")
+                composer.get_et_annotations(event_type=event_type, recording=recording_type)
         
         # Get the annotated raw data
         annotated_raw = composer.raw_concatenated.copy()
