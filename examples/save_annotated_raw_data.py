@@ -25,7 +25,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from pyavs.config import get_config, load_config
 from pyavs.preprocessing.composer import AVSComposer
 from pyavs.utils.logging import get_logger
-from pyavs.utils.derivatives import get_derivatives_manager
 from pyavs.utils.validation import validate_subject_id, validate_session
 
 logger = get_logger(__name__)
@@ -98,11 +97,8 @@ def save_annotated_raw_data(subject_id: int,
         logger.info(f"Filter parameters: {filter_params}")
         logger.info(f"Event types: {event_types}")
     
-    # Set up derivatives manager for BIDS-compliant paths
-    manager = get_derivatives_manager(data_path)
-    
     # Create output directory for annotated raws under pyavs derivatives
-    output_dir = manager.get_derivatives_path() / 'pyavs' / 'annotated_raws' / f'sub-{subject_id:02d}' / f'ses-{session:02d}'
+    output_dir = Path(data_path) / 'derivatives' / 'pyavs' / 'annotated_raws' / f'sub-{subject_id:02d}' / f'ses-{session:02d}'
     output_dir.mkdir(parents=True, exist_ok=True)
     
     # Initialize composer
@@ -145,13 +141,7 @@ def save_annotated_raw_data(subject_id: int,
             logger.info("Saving concatenated raw data...")
         
         # Create base raw filename
-        base_raw_filename = manager.create_bids_filename(
-            subject_id=subject_id,
-            session=session,
-            task='avs',
-            suffix='raw-concatenated',
-            extension='.fif'
-        )
+        base_raw_filename = f'sub-{subject_id:02d}_ses-{session:02d}_task-avs_raw-concatenated.fif'
         base_raw_path = output_dir / base_raw_filename
         
         # Add processing information to the base raw
@@ -205,13 +195,7 @@ def save_annotated_raw_data(subject_id: int,
             
             # Save the annotations as a separate MNE Annotations .fif file
             if combined_annotations is not None and len(combined_annotations) > 0:
-                annotation_filename = manager.create_bids_filename(
-                    subject_id=subject_id,
-                    session=session,
-                    task='avs',
-                    suffix=f'annotations-{recording_type}',
-                    extension='.fif'
-                )
+                annotation_filename = f'sub-{subject_id:02d}_ses-{session:02d}_task-avs_annotations-{recording_type}.fif'
                 annotation_path = output_dir / annotation_filename
                 
                 # Save using MNE's native Annotations save method
