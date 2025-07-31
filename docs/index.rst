@@ -46,8 +46,8 @@ Installation
 
    pip install pyavs
 
-Basic Usage
-~~~~~~~~~~~
+Basic Usage with AVSComposer (Recommended)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -56,34 +56,58 @@ Basic Usage
    # Set up data path
    pyavs.set_data_path('/path/to/avs/dataset')
 
-   # Load and preprocess MEG + eye tracking data
+   # Initialize AVS Composer - the main tool for MEG-ET data fusion
+   composer = pyavs.AVSComposer(
+       subject=1,
+       session_num=1,
+       preprocessed=True,           # Use preprocessed MEG data
+       use_precomputed_ica=True,    # Apply ICA artifact removal
+       verbose=True
+   )
+
+   # Complete MEG-ET processing pipeline
+   composer.load_meg_data()                    # Load MEG blocks
+   composer.apply_ica_to_blocks()              # Remove artifacts
+   composer.concatenate_raws_per_session()     # Combine blocks
+   composer.find_events_in_raw()               # Find MEG triggers
+
+   # Process eye tracking events and create epochs
+   composer.get_et_annotations(event_type="fixation", recording="scene")
+   composer.make_et_event_epochs(
+       tmin=-0.2, tmax=0.8, 
+       event_type="fixation",
+       get_metadata=True
+   )
+
+   print(f"Created {len(composer.et_epochs)} fixation epochs")
+   print(f"Metadata columns: {list(composer.et_epochs.metadata.columns)[:5]}")
+
+Alternative Functional API
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For custom workflows requiring fine-grained control:
+
+.. code-block:: python
+
+   # Load and preprocess data
    subject_data = pyavs.load_and_preprocess(
-       subject_id=1, 
-       session=1,
-       include_meg=True,
-       include_eye=True,
-       apply_ica=True
+       subject_id=1, session=1,
+       include_meg=True, include_eye=True
    )
 
    # Create epochs from eye tracking events
    epochs, events = pyavs.get_epochs(
-       subject_data, 
-       event_type='fixation',
-       sensor_type='meg',
-       tmin=-0.2, 
-       tmax=0.5
+       subject_data, 'fixation', 'meg',
+       tmin=-0.2, tmax=0.5
    )
 
-   # Perform source reconstruction
+   # Source reconstruction
    forward_model = pyavs.load_forward_model(subject_id=1, session=1)
    source_data = pyavs.apply_source_reconstruction(
-       epochs, 
-       forward_model, 
-       method='beamformer'
+       epochs, forward_model, method='beamformer'
    )
 
    print(f"Created {len(epochs)} epochs")
-   print(f"Source data shape: {source_data.shape}")
 
 Documentation Contents
 ----------------------
