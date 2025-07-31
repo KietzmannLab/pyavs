@@ -23,9 +23,9 @@ def main():
     
     # Configuration
     subject_id = 4
-    session = 1
+    session = 2
     data_path = "/share/klab/datasets/avs/"  # Update this path as needed
-    
+    recording = "scene"  # Use "caption" for captioned data, "scene" for scene data
     # Set up pyAVS data path
     try:
         pyavs.set_data_path(data_path)
@@ -46,7 +46,7 @@ def main():
         et_path=data_path,
         preprocessed=True,
         recompute_prepro=False,
-        max_block=10,  
+        max_block=None,  
         min_block=1,
         verbose=True,
         interpolate_bad_channels=True,
@@ -54,7 +54,7 @@ def main():
         apply_ica=False,  # Set to True to compute ICA on-the-fly instead
         l_freq=0.2,  # Low-pass frequency for filtering
         h_freq=200,  # High-pass frequency for filtering
-        causal_filter=True,  # Use causal filtering for temporal order preservation
+        causal_filter=False,  # Use causal filtering for temporal order preservation
         resample_freq=500.0  # Target sampling frequency
     )
     logger.info(f"   AVS Composer initialized for subject {subject_id}, session {session}")
@@ -79,7 +79,7 @@ def main():
         logger.info(f"   Applied {composer.l_freq}-{composer.h_freq} Hz band-pass filter ({'causal' if composer.causal_filter else 'non-causal'})")
     else:
         try:
-            composer.filter_meg_data()  # Uses instance variables as defaults
+            composer.filter_meg_data(ignore_existing_filter=True)  # Uses instance variables as defaults
             logger.info(f"   Applied {composer.l_freq}-{composer.h_freq} Hz band-pass filter ({'causal' if composer.causal_filter else 'non-causal'})")
         except Exception as e:
             logger.error(f"   Error filtering MEG data: {e}")
@@ -121,7 +121,7 @@ def main():
     logger.info("\n7. Processing eye tracking data...")
     
     # Process each event type separately (new pyAVS approach)
-    event_types = ["fixation", "blink"]
+    event_types = ["fixation", "blink", "saccade", "scene"]
     epochs_results = {}
     
     for event_type in event_types:
@@ -130,7 +130,7 @@ def main():
         # Get annotations for this event type
         composer.get_et_annotations(
             event_type=event_type,
-            recording="scene",
+            recording=recording,
             exclude_last_fixation=True,
             add_cross_event_info=True,
             preprocessed=True
@@ -141,11 +141,15 @@ def main():
         
         # Create epochs for this event type
         logger.info(f"      Creating {event_type} epochs...")
+        if event_type == "scene":
+            tmax = 0.5
+        else:
+            tmax = 0.5# Longer time window for scene events
         composer.make_et_event_epochs(
             tmin=-0.2,
-            tmax=0.8,
+            tmax=tmax,
             event_type=event_type,
-            recording="scene",
+            recording=recording,
             get_metadata=True,
             baseline=None
         )
@@ -168,7 +172,8 @@ def main():
         import matplotlib.pyplot as plt
         
         # Create figure with subplots for each event type
-        fig, axes = plt.subplots(1, len(epochs_results), figsize=(12, 4))
+        fig, axes = plt.subplots(len(epochs_results),1, figsize=(10, 3 * len(epochs_results)))
+        axes = axes.flatten() if len(epochs_results) > 1 else [axes]  # Ensure axes is always iterable
         if len(epochs_results) == 1:
             axes = [axes]
         
@@ -190,7 +195,7 @@ def main():
                 logger.warning(f"   No magnetometer data found for {event_type}")
         
         plt.tight_layout()
-        plt.savefig(f'avs_composer_median_erf_subject_{subject_id}_session_{session}.png', 
+        plt.savefig(f'avs_composer_median_erf_subject_{subject_id}_session_{session}_recording_{recording}.png', 
                    dpi=150, bbox_inches='tight')
         plt.close()
         
@@ -198,6 +203,18 @@ def main():
         
     except Exception as e:
         logger.error(f"   Error creating ERF plots: {e}")
+        
+        
+    # report the time in trial of the event types
+    logger.info("\n   Reporting time in trial for each event type...")
+    for event_type, epochs in epochs_results.items():
+        if hasattr(epochs, 'metadata') and 'time_in_trial' in epochs.metadata.columns:
+            #TypeError: complex() first argument must be a string or a number, not 'list'
+            time_in_trial = np.nanmean(epochs.metadata['time_in_trial'].values)
+            print(time_in_trial)
+            logger.info(f"   Average time in trial for {event_type}: {time_in_trial:.2f} seconds")
+        else:
+            logger.warning(f"   No 'time_in_trial' metadata found for {event_type} epochs")
     
     # Get data summary
     logger.info("\n9. Data summary...")

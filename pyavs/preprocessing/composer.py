@@ -886,11 +886,13 @@ class AVSComposer:
                            f"Available event types: {available_event_types}")
         
         event_id = available_events[event_type]
-
+        if self.verbose:
+            logger.info(f'Event ID for {event_type}: {event_id}')
         events_to_use = events_annot[0][events_annot[0][:, 2] == event_id]
         
         preload = get_metadata  # For metadata the epochs have to be preloaded
-        
+        if self.verbose:
+            logger.info(f'Found {len(events_to_use)} events of type {event_type} in the raw data')
         if get_metadata:
             metadata = pd.DataFrame(index=np.arange(len(events_to_use)))  # We will prepare an empty dataframe
             # that we will later fill with metadata from the events dataframe
@@ -934,14 +936,15 @@ class AVSComposer:
             raise ValueError("You need to run get_et_annotations first")
         if not hasattr(self, "et_epochs"):
             raise ValueError("You need to run make_et_event_epochs first")
-
+       
         # Check 1) now we will check whether the events dataframe and the epochs object have the same amount of events
         et_event_type = self.et_event_type
         # Preload the epochs object so that we can compute its length
         events_df_for_metadata = self.et_events[self.et_events["type"] == et_event_type]
-      
+       
         events_df_for_metadata = events_df_for_metadata[events_df_for_metadata["block"].isin(self.blocks_this_session)]
-        
+    
+            
         if metadata_colnames is None:
             # Then we will use all columnnames available.
             metadata_colnames = events_df_for_metadata.columns
@@ -964,6 +967,10 @@ class AVSComposer:
                 logger.debug(f"Events dataframe duration values: {events_df_for_metadata['duration'].values}")
                 logger.debug(f"Events dataframe duration column: {events_df_for_metadata['duration']}")
                 logger.debug(f"Epochs annotations duration: {self.et_epochs.annotations.duration}")
+                
+                # find all columns that are not all nan
+                non_nan_columns = events_df_for_metadata.columns[events_df_for_metadata.notna().any()].tolist()
+                print(f"Non-NaN columns in events dataframe: {non_nan_columns}")
                 raise ValueError("The event durations in the events dataframe and the epochs object are not the same. This should not happen. Please check your data.")
             else:
                 if self.verbose:

@@ -210,6 +210,15 @@ def _process_messages(events: pd.DataFrame, messages: pd.DataFrame, explog: pd.D
                 if not preprocessed:
                     durations = end_times - start_times
                     events.loc[mask, 'duration'] = durations[mask]
+                
+                # add duration to blink events
+                blink_mask = (events.type == 'blink') & mask
+                if blink_mask.any():
+                    events.loc[blink_mask, 'duration'] = (
+                        events.loc[blink_mask, 'end_time'] - events.loc[blink_mask, 'start_time']
+                    )
+                    
+                
     
     return events
 
