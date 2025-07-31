@@ -4,6 +4,11 @@ Example demonstrating the use of AVS Composer for MEG-ET data fusion.
 This example shows how to use the AVSComposer class to replicate the functionality
 of the original AVS-machine-room composer workflow in the pyAVS package.
 
+NEW FEATURE: ET Event Offset Timing
+- Set onset_offset=True to use event end timing (time_in_trial + duration) 
+  instead of event onset for MEG epoch creation
+- This is a fringe feature for specialized analyses requiring offset timing
+
 Author: P. Sulewski (psulewski@uos.de)
 """
 
@@ -25,6 +30,10 @@ def main():
     subject_id = 4
     session = 2
     data_path = "/share/klab/datasets/avs/"  # Update this path as needed
+    
+    # NEW: ET event offset parameter for fringe feature
+    # When True, uses time_in_trial + duration as epoch timing instead of event onset
+    onset_offset = False  # Set to True to use event offset timing instead of onset
     recording = "scene"  # Use "caption" for captioned data, "scene" for scene data
     # Set up pyAVS data path
     try:
@@ -136,11 +145,61 @@ def main():
             preprocessed=True
         )
         logger.info(f"   Loaded {len(composer.et_events)} {event_type} events")
+        
+        # NEW: Apply ET event offset timing if enabled (fringe feature)
+        if onset_offset:
+            logger.info(f"   Applying ET event offset timing (time_in_trial + duration)")
+            
+            # Check if we have the required columns
+            if 'time_in_trial' in composer.et_events.columns and 'duration' in composer.et_events.columns:
+                # Create modified timing based on event end (onset + duration)
+                original_times = composer.et_events['time_in_trial'].copy()
+                durations = composer.et_events['duration'].copy()
+                offset_times = original_times + durations
+                
+                # Update the events timing
+                composer.et_events['time_in_trial'] = offset_times
+                
+                logger.info(f"   Updated {len(composer.et_events)} events to use offset timing")
+                logger.info(f"   Example: original={original_times.iloc[0]:.3f}s + duration={durations.iloc[0]:.3f}s = offset={offset_times.iloc[0]:.3f}s")
+                
+                # Need to recreate annotations with new timing by calling add_fix_event_trigger again
+                # This is a bit hacky but necessary for this fringe feature
+                try:
+                    from pyavs.preprocessing.trigger_tools import add_fix_event_trigger
+                    
+                    logger.info(f"   Recreating MEG annotations with offset timing...")
+                    composer.raws_annotated, missing_trials = add_fix_event_trigger(
+                        composer.raws_concatenated,
+                        blocks=composer.blocks_this_session,
+                        et_events=composer.et_events,
+                        session=composer.session_num,
+                        block_trigger_offset=1000,
+                        stim_channel='STI101',
+                        verbose=True,
+                        recording="scene"
+                    )
+                    
+                    if len(missing_trials) > 0:
+                        logger.warning(f"   {len(missing_trials)} trials could not be annotated with offset timing")
+                        
+                    logger.info(f"   Recreated annotations: {len(composer.raws_annotated.annotations)}")
+                    
+                except Exception as e:
+                    logger.error(f"   Error recreating annotations with offset timing: {e}")
+                    logger.info(f"   Continuing with original annotations...")
+                    
+            else:
+                logger.warning(f"   Cannot apply offset timing: missing required columns")
+                logger.info(f"   Required: 'time_in_trial', 'duration'")
+                logger.info(f"   Available: {list(composer.et_events.columns)}")
+        
         logger.info(f"   Added {event_type} annotations to MEG data")
-        logger.info(f"   Annotations: {len(composer.raws_annotated.annotations)}")
+        logger.info(f"   Total annotations: {len(composer.raws_annotated.annotations)}")
         
         # Create epochs for this event type
-        logger.info(f"      Creating {event_type} epochs...")
+        timing_mode = "event offset" if onset_offset else "event onset"
+        logger.info(f"      Creating {event_type} epochs using {timing_mode} timing...")
         if event_type == "scene":
             tmax = 0.5
         else:
@@ -239,6 +298,8 @@ def main():
     logger.info("- Eye tracking data integration with single event type processing")
     logger.info("- Trigger-based MEG-ET alignment")
     logger.info("- Epoch creation with metadata for multiple event types")
+    if onset_offset:
+        logger.info("- ET event offset timing: using time_in_trial + duration for epoch timing")
     logger.info("- Simple median ERF visualization for different ET event types")
     logger.info("- Replication of AVS-machine-room composer functionality in pyAVS")
     logger.info("- Modular preprocessing pipeline with separated ICA processing")
