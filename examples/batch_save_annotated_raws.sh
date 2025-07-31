@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --partition=klab-cpu
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=32G
+#SBATCH --cpus-per-task=15
+#SBATCH --mem=100G
 #SBATCH --time=02:00:00
 #SBATCH --job-name=save_annotated_raws
 #SBATCH --output=save_raws_sub%a_%j.out
@@ -39,7 +39,7 @@ for SESSION in {1..10}; do
         --h_freq 200 \
         --event_types saccade fixation blink \
         --overwrite \
-        --verbose
+
     
     # Check exit status
     if [ $? -eq 0 ]; then
