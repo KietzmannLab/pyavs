@@ -29,6 +29,12 @@ from .composer import (
     AVSComposer
 )
 
+from .samples import (
+    attach_scene_ids_to_samples,
+    load_samples_with_scenes,
+    validate_samples_scene_assignment
+)
+
 __all__ = [
     'preprocess_eye_events',
     'remove_artifacts',
@@ -41,5 +47,8 @@ __all__ = [
     'repair_meg_trigger_events_legacy',
     'get_meg_timestamp',
     'add_fix_event_trigger',
-    'AVSComposer'
+    'AVSComposer',
+    'attach_scene_ids_to_samples',
+    'load_samples_with_scenes',
+    'validate_samples_scene_assignment'
 ]

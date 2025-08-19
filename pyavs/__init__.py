@@ -46,6 +46,7 @@ from .preprocessing.ica import compute_ica, find_eye_components, apply_ica, prep
 from .preprocessing.alignment import MEGETComposer, create_et_event_epochs, get_meg_trigger_mapping, repair_meg_trigger_events
 from .preprocessing.composer import AVSComposer
 from .preprocessing.trigger_tools import get_meg_trigger_dict, get_avs_blocks, get_meg_timestamp, add_fix_event_trigger
+from .preprocessing.samples import attach_scene_ids_to_samples, load_samples_with_scenes, validate_samples_scene_assignment
 from .source.forward import create_forward_model, create_bem_model, setup_coregistration, load_forward_model
 from .source.reconstruction import apply_source_reconstruction, compute_beamformer_filters, compute_population_codes, extract_roi_data
 from .io import save_source_data, save_annotated_raw, save_population_codes_h5, find_population_codes_files, list_available_parameter_sets, load_source_data
