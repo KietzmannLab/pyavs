@@ -160,13 +160,7 @@ pyavs batch --subjects 1 2 3 --sessions 1 2 --workflow composer --parallel
 
 ## Data Structure
 
-pyAVS works with BIDS-formatted AVS dataset containing:
-
-- **MEG data**: Raw .fif files per block/run
-- **Eye tracking events**: Preprocessed CSV files with fixations, saccades, and blinks
-- **Experiment logs**: Trial information, scene IDs, and experimental conditions
-- **Scene images**: MSCOCO scene images used as stimuli
-- **Object masks**: Segmentation masks for objects in scenes
+pyAVS works with BIDS-formatted AVS dataset containing MEG data, eye tracking events, experiment logs, scene images, and object masks.
 
 ## Key Functions
 
@@ -216,35 +210,55 @@ pyAVS works with BIDS-formatted AVS dataset containing:
 ```
 pyavs/
 ├── __init__.py              # Main API functions
+├── cli.py                   # Command line interface
+├── config/                  # Configuration management
+│   ├── config.py           # Configuration classes
+│   └── manager.py          # Configuration manager
 ├── dataloader/              # Data loading modules
 │   ├── loaders.py          # Basic data loading functions
-│   └── eye.py              # Eye tracking specific functions
+│   ├── eye.py              # Eye tracking specific functions
+│   └── meg.py              # MEG data loading
 ├── preprocessing/           # Data preprocessing
-│   └── eye.py              # Eye tracking preprocessing
+│   ├── alignment.py        # MEG-ET temporal alignment
+│   ├── composer.py         # AVSComposer high-level interface
+│   ├── eye.py              # Eye tracking preprocessing
+│   ├── ica.py              # Independent component analysis
+│   ├── meg.py              # MEG preprocessing
+│   ├── samples.py          # Eye tracking samples processing
+│   └── trigger_tools.py    # Trigger and timing utilities
+├── source/                  # Source reconstruction
+│   ├── forward.py          # Forward modeling
+│   ├── reconstruction.py   # Source localization methods
+│   ├── spaces.py           # Source spaces and ROIs
+│   └── filters.py          # Spatial filters
 ├── scenes/                  # Scene-related utilities
 │   ├── objects.py          # Object detection and mapping
 │   └── crops.py            # Image cropping utilities
 ├── utils/                   # Utility functions
-│   ├── config.py           # Configuration management
+│   ├── config.py           # Configuration utilities
+│   ├── logging.py          # Logging system
 │   ├── paths.py            # Path utilities and naming conventions
 │   └── validation.py       # Data validation functions
+├── visualization/           # Visualization tools
+│   ├── events_on_scene.py  # Eye tracking visualization
+│   └── meg.py              # MEG visualization
+├── io/                      # Input/output operations
+│   ├── read.py             # Data reading functions
+│   └── write.py            # Data writing functions
 └── examples/                # Usage examples
+    ├── avs_composer_example.py
+    ├── samples_scene_assignment_example.py
+    ├── source_reconstruction_example.py
     └── basic_eye_tracking_workflow.py
 ```
 
 ## Configuration
 
-pyAVS supports multiple server environments:
-
 ```python
-# Auto-detection
-pyavs.setup_data_directory()
+# Set data path
+pyavs.set_data_path('/path/to/avs/data')
 
-# Manual configuration
-pyavs.set_data_path('/share/klab/datasets/avs/')  # UOS
-pyavs.set_data_path('/data/p_02644/act_vis_sem/') # MPI
-
-# Environment variable
+# Or use environment variable
 export PYAVS_DATA_PATH=/path/to/avs/data
 ```
 
@@ -284,14 +298,7 @@ python pyavs/examples/samples_scene_assignment_example.py
 python pyavs/examples/basic_eye_tracking_workflow.py
 ```
 
-### Interactive Documentation
-
-For detailed tutorials and API documentation, see the [ReadTheDocs documentation](https://pyavs.readthedocs.io/) which includes:
-
-- Complete workflow tutorials with the AVSComposer
-- Source reconstruction examples with beamformers and ROI analysis  
-- MEG + eye tracking integration tutorials
-- API reference for all functions and classes
+For complete documentation, see [ReadTheDocs](https://pyavs.readthedocs.io/).
 
 ## BIDS Integration
 
@@ -303,60 +310,14 @@ pyAVS handles the translation between BIDS terminology and AVS conventions:
 | `ses-XX` | `session` | Recording session |
 | `sub-XX` | `subject` | Participant ID |
 
-## Development Status
-
-### Completed
-- Eye tracking data loading and preprocessing
-- Fixation sequence analysis
-- Object mapping with MSCOCO integration
-- Scene cropping and visualization
-- Data validation and quality assessment
-- BIDS path handling
-- Configuration management
-- MEG data loading and preprocessing
-- MEG-ET temporal alignment
-- Source reconstruction
-- Population code analysis
-
-### In Development
-- Advanced artifact rejection
-- Statistical analysis tools
-- Interactive visualization
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
 
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-## Citation
-
-If you use pyAVS in your research, please cite:
-
-```bibtex
-@software{pyavs,
-  title={pyAVS: Python Package for Active Visual Semantics Dataset},
-  author={Sulewski, P. and Meinert, C.},
-  year={2024},
-  url={https://github.com/your-org/pyavs}
-}
-```
 
 ## Support
 
 - [Documentation](https://pyavs.readthedocs.io/)
 - [Bug Reports](https://github.com/your-org/pyavs/issues)
 - [Discussions](https://github.com/your-org/pyavs/discussions)
-
-## Acknowledgments
-
-- Active Visual Semantics dataset contributors
-- MNE-Python project for neuroimaging tools
-- MSCOCO dataset for object annotations
-- BIDS community for data standardization
