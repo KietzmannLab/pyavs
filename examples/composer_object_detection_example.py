@@ -69,15 +69,18 @@ def plot_scene_fixations(events_df, scene_id: int, mscoco_dir: str):
     colors = plt.cm.Set3(range(len(objects)))
     color_map = dict(zip(objects, colors))
     
+    # Set image extent to center coordinate system
+    ax.imshow(scene_image, extent=[-img_width/2, img_width/2, -img_height/2, img_height/2])
+    
     for i, (_, fix) in enumerate(scene_fixations.iterrows()):
-        x = fix['mean_gx'] + img_width / 2
-        y = abs(fix['mean_gy'] - img_height / 2)
+        # Coordinates are already screen-centered, use directly
+        x = fix['mean_gx']
+        y = fix['mean_gy'] 
         
-        if 0 <= x < img_width and 0 <= y < img_height:
-            ax.scatter(x, y, c=[color_map[fix['object_label']]], s=80, 
-                      edgecolor='white', linewidth=2)
-            ax.text(x+5, y-5, str(i+1), fontsize=8, color='white', fontweight='bold',
-                   bbox=dict(boxstyle='round', facecolor='black', alpha=0.7))
+        ax.scatter(x, y, c=[color_map[fix['object_label']]], s=80, 
+                  edgecolor='white', linewidth=2)
+        ax.text(x+15, y+15, str(i+1), fontsize=8, color='white', fontweight='bold',
+               bbox=dict(boxstyle='round', facecolor='black', alpha=0.7))
     
     # Simple legend
     for obj, color in color_map.items():

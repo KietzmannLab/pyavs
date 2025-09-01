@@ -99,33 +99,30 @@ def plot_scene_with_fixations(scene_id: int, fixations_df: pd.DataFrame,
     
     # Create figure
     fig, ax = plt.subplots(figsize=(12, 8))
-    ax.imshow(scene_image)
     
     # Get unique objects and assign colors
     objects = scene_fixations['object_label'].unique()
     colors = plt.cm.Set3(np.linspace(0, 1, len(objects)))
     color_map = dict(zip(objects, colors))
     
+    # Set image extent to center coordinate system
+    ax.imshow(scene_image, extent=[-img_width/2, img_width/2, -img_height/2, img_height/2])
+    
     # Plot fixations
     for i, (_, fix) in enumerate(scene_fixations.iterrows()):
-        # Convert screen-centered coordinates to image coordinates
-        # Adjust this based on your coordinate system
-        x_img = fix['mean_gx'] + img_width / 2
-        y_img = abs(fix['mean_gy'] - img_height / 2)  
-        
-        # Skip if coordinates are outside image
-        if x_img < 0 or x_img >= img_width or y_img < 0 or y_img >= img_height:
-            continue
+        # Coordinates are already screen-centered, use directly
+        x = fix['mean_gx']
+        y = fix['mean_gy'] 
             
         obj_label = fix['object_label']
         color = color_map.get(obj_label, 'red')
         
         # Plot fixation point
-        ax.scatter(x_img, y_img, c=[color], s=80, alpha=0.8,
+        ax.scatter(x, y, c=[color], s=80, alpha=0.8,
                   edgecolor='white', linewidth=1.5)
         
         # Add fixation number
-        ax.text(x_img + 5, y_img - 5, str(i+1), fontsize=8, 
+        ax.text(x + 15, y + 15, str(i+1), fontsize=8, 
                color='white', fontweight='bold',
                bbox=dict(boxstyle='round,pad=0.2', facecolor='black', alpha=0.7))
     
