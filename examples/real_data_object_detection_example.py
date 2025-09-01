@@ -162,7 +162,7 @@ def plot_fixations_on_scene(scene_id: int, fixations_df: pd.DataFrame,
         print(f"Showing first {max_fixations} fixations for scene {scene_id}")
     
     # Find and load the scene image
-    scene_id_str = str(scene_id).zfill(12)
+    scene_id_str = str(scene_id).zfill(12)+"_MEG_SIZE"
     image_file = None
     
     for dataset in ['train2017', 'val2017']:
@@ -173,7 +173,10 @@ def plot_fixations_on_scene(scene_id: int, fixations_df: pd.DataFrame,
     
     if image_file is None:
         print(f"Scene image not found for ID {scene_id}")
-        return
+        #print the top 10 files in the directory
+        print("Available files in directory:")
+        available_files = os.listdir(os.path.join(mscoco_image_dir, 'train2017'))
+       
     
     # Load and display image
     scene_image = Image.open(image_file)
@@ -227,6 +230,7 @@ def plot_fixations_on_scene(scene_id: int, fixations_df: pd.DataFrame,
     # Save plot
     os.makedirs(output_dir, exist_ok=True)
     output_file = os.path.join(output_dir, f"scene_{scene_id}_fixations.png")
+    print(f"Saving plot to {output_file}")
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
     print(f"Saved fixation plot: {output_file}")
     
@@ -344,12 +348,12 @@ def main():
     Main function demonstrating real data object detection workflow.
     """
     print("=== Real Data Object Detection Example ===\n")
-    
+    from pyavs import config
     # Configuration
     SUBJECT_ID = 1
     SESSION_ID = 1
-    DATA_PATH = "/path/to/your/avs/data"  # Update this path
-    INPUT_DIR = "/path/to/your/mscoco/data"  # Update this path
+    DATA_PATH = "/share/klab/datasets/avs/"
+    INPUT_DIR = "/share/klab/datasets/avs/input"  # Path to MSCOCO data
     
     # Check if paths exist
     if not os.path.exists(DATA_PATH):
@@ -376,14 +380,15 @@ def main():
         
         # Plot summary statistics
         plot_object_fixation_summary(fixations_with_objects)
+        random_scenes = np.random.choice(
+            fixations_with_objects['sceneID'].dropna().unique(), size=3, replace=False
+        )
+        # randomly select 3 scenes
         
-        # Plot individual scenes (up to 3 scenes with most fixations)
-        scene_fixation_counts = fixations_with_objects['sceneID'].value_counts()
-        top_scenes = scene_fixation_counts.head(3).index
         
         mscoco_image_dir = os.path.join(INPUT_DIR, "mscoco_scenes")
         
-        for scene_id in top_scenes:
+        for scene_id in random_scenes:
             print(f"\nPlotting fixations for scene {scene_id}")
             plot_fixations_on_scene(
                 scene_id, 
