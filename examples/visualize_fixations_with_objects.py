@@ -85,18 +85,12 @@ def plot_scene_with_fixations(scene_id: int, fixations_df: pd.DataFrame,
         print(f"No fixations found for scene {scene_id}")
         return
     
-    # Find scene image
-    scene_id_str = str(scene_id).zfill(12)
-    image_path = None
+    # Find scene image - all images in same folder with _MEG_SIZE suffix  
+    scene_id_str = str(scene_id).zfill(12) + "_MEG_SIZE"
+    image_path = os.path.join(mscoco_dir, f"{scene_id_str}.jpg")
     
-    for dataset in ['train2017', 'val2017']:
-        candidate = os.path.join(mscoco_dir, dataset, f"{scene_id_str}.jpg")
-        if os.path.exists(candidate):
-            image_path = candidate
-            break
-    
-    if not image_path:
-        print(f"Scene image not found for {scene_id}")
+    if not os.path.exists(image_path):
+        print(f"Scene image not found: {image_path}")
         return
     
     # Load and display image
@@ -275,7 +269,7 @@ def main():
         
         # Plot top scenes
         scene_counts = fixations_df['sceneID'].value_counts()
-        mscoco_dir = os.path.join(INPUT_DIR, "mscoco_scenes")
+        mscoco_dir = "/share/klab/datasets/avs/AVS-UTILS/avs_scenes"
         
         for i, scene_id in enumerate(scene_counts.head(3).index):
             print(f"\nPlotting scene {scene_id}")

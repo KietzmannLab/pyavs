@@ -49,17 +49,12 @@ def plot_scene_fixations(events_df, scene_id: int, mscoco_dir: str):
         print(f"No fixations for scene {scene_id}")
         return
     
-    # Load scene image
-    scene_id_str = str(scene_id).zfill(12)
-    image_path = None
-    for dataset in ['train2017', 'val2017']:
-        candidate = os.path.join(mscoco_dir, dataset, f"{scene_id_str}.jpg")
-        if os.path.exists(candidate):
-            image_path = candidate
-            break
+    # Load scene image - all images are in same folder with _MEG_SIZE suffix
+    scene_id_str = str(scene_id).zfill(12) + "_MEG_SIZE"
+    image_path = os.path.join(mscoco_dir, f"{scene_id_str}.jpg")
     
-    if not image_path:
-        print(f"Scene image not found: {scene_id}")
+    if not os.path.exists(image_path):
+        print(f"Scene image not found: {image_path}")
         return
     
     # Plot
@@ -119,7 +114,7 @@ def main():
         fixations = events_with_objects[events_with_objects['type'] == 'fixation']
         top_scene = fixations['sceneID'].value_counts().index[0]
         
-        mscoco_dir = os.path.join(INPUT_DIR, "mscoco_scenes")
+        mscoco_dir = "/share/klab/datasets/avs/AVS-UTILS/avs_scenes"
         plot_scene_fixations(events_with_objects, top_scene, mscoco_dir)
         
         print("Done!")
