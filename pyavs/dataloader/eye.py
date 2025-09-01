@@ -133,7 +133,7 @@ def _process_messages(events: pd.DataFrame, messages: pd.DataFrame, explog: pd.D
     for i in messages.index:
         if not is_list_like(messages.loc[i, sanity_var]):
             if not pd.isna(messages.loc[i, sanity_var]):
-                
+                recording_type = int(messages.TYPE[i][1])
                 # Get scene onset/offset times
                 scene_onset = literal_eval(messages.SCENEID_time[i])
                 
@@ -141,8 +141,8 @@ def _process_messages(events: pd.DataFrame, messages: pd.DataFrame, explog: pd.D
                 if is_list_like(scene_onset):
                     scene_onset = np.min(scene_onset)
                 
-                scene_offset = messages.ENDTRIALID_time[i]
-                
+                scene_offset = messages.ENDTRIALID_time[i] # depending on the recording type, this might be the end of the scene, mic or caption
+              
                 # Extract trial ID
                 trialid = messages.loc[i, 'trialid '].split(' ')
                 trialid_int = int(trialid[1])
@@ -198,13 +198,15 @@ def _process_messages(events: pd.DataFrame, messages: pd.DataFrame, explog: pd.D
                     )
                 
                 # Add recording type
-                recording_type = int(messages.TYPE[i][1])
+                
                 if recording_type == 1:
                     events.loc[mask, 'recording'] = 'caption'
                 elif recording_type == 0:
                     events.loc[mask, 'recording'] = 'scene'
                 elif recording_type == 3:
                     events.loc[mask, 'recording'] = 'microphone'
+                    
+          
                 
                 # Add duration for non-preprocessed data
                 if not preprocessed:
