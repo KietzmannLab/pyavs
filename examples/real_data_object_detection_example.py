@@ -18,21 +18,18 @@ import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import matplotlib.patches as patches
 from PIL import Image
-import seaborn as sns
-from pathlib import Path
 
 # pyAVS imports
-from pyavs.scenes.objects import get_fixated_objects, CocoObjectMasker, FixationObjectChecker
-from pyavs.dataloader.eye import load_eye_tracking_data
-from pyavs.utils.config import get_input_paths
+from pyavs.scenes.objects import get_fixated_objects
+from pyavs.dataloader.eye import load_and_enrich_eye_events
+from pyavs.preprocessing.composer import AVSComposer
 
 
 def load_subject_eye_data(subject_id: int, session_id: int, 
-                         data_path: str, preprocessed: bool = True) -> pd.DataFrame:
+                         data_path: str) -> pd.DataFrame:
     """
-    Load eye tracking data for a specific subject and session.
+    Load eye tracking data for a specific subject and session using pyAVS composer.
     
     Parameters
     ----------
@@ -42,41 +39,53 @@ def load_subject_eye_data(subject_id: int, session_id: int,
         Session identifier  
     data_path : str
         Path to data directory
-    preprocessed : bool, optional
-        Whether to load preprocessed data (default: True)
         
     Returns
     -------
     pd.DataFrame
-        Eye tracking events dataframe
+        Eye tracking events dataframe with scene information
     """
-    if preprocessed:
+    print(f"Loading eye tracking data for subject {subject_id}, session {session_id}")
+    
+    # Use the pyAVS dataloader function
+    try:
+        # Load enriched eye events (includes scene mapping)
+        _, events_df = load_and_enrich_eye_events(
+            subjects=[subject_id],
+            sessions=[session_id], 
+            data_path=data_path,
+            preprocessed=True,
+            verbose=True
+        )
+        
+        # Filter to fixations only for this example
+        fixations = events_df[events_df['type'] == 'fixation'].copy()
+        
+        print(f"Loaded {len(fixations)} fixations")
+        print(f"Unique scenes: {len(fixations['sceneID'].dropna().unique())}")
+        
+        return fixations
+        
+    except Exception as e:
+        print(f"Error loading data with composer: {e}")
+        print("Trying direct CSV loading as fallback...")
+        
+        # Fallback to direct CSV loading
         events_file = os.path.join(
             data_path, 
             f"as{subject_id:02d}_{session_id:02d}", 
             "preprocessed", 
             f"as_s{subject_id}_el_events.csv"
         )
-    else:
-        events_file = os.path.join(
-            data_path, 
-            f"as{subject_id:02d}_{session_id:02d}",
-            f"as{subject_id}_{session_id}_0_events.csv"
-        )
-    
-    if not os.path.exists(events_file):
-        raise FileNotFoundError(f"Eye tracking data not found: {events_file}")
-    
-    print(f"Loading eye tracking data from: {events_file}")
-    events_df = pd.read_csv(events_file)
-    
-    # Filter to fixations only for this example
-    fixations = events_df[events_df['type'] == 'fixation'].copy()
-    
-    print(f"Loaded {len(fixations)} fixations")
-    print(f"Unique scenes: {len(fixations['sceneID'].dropna().unique())}")
-    
-    return fixations
+        
+        if not os.path.exists(events_file):
+            raise FileNotFoundError(f"Eye tracking data not found: {events_file}")
+        
+        print(f"Loading from: {events_file}")
+        events_df = pd.read_csv(events_file)
+        fixations = events_df[events_df['type'] == 'fixation'].copy()
+        
+        return fixations
 
 
 def add_object_labels_to_data(fixations_df: pd.DataFrame, 
@@ -170,7 +179,7 @@ def plot_fixations_on_scene(scene_id: int, fixations_df: pd.DataFrame,
     scene_image = Image.open(image_file)
     
     # Create plot
-    fig, ax = plt.subplots(1, 1, figsize=(12, 8))
+    _, ax = plt.subplots(1, 1, figsize=(12, 8))
     ax.imshow(scene_image)
     
     # Get unique object labels and assign colors
@@ -245,7 +254,7 @@ def plot_object_fixation_summary(fixations_df: pd.DataFrame,
         print("No object fixations to plot")
         return
     
-    fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+    _, axes = plt.subplots(2, 2, figsize=(15, 12))
     
     # 1. Most fixated objects
     object_counts = object_fixations['object_label'].value_counts().head(15)
