@@ -8,7 +8,9 @@ and object mask integration.
 from .objects import (
     get_fixated_objects,
     load_object_masks,
-    map_fixations_to_objects
+    map_fixations_to_objects,
+    CocoObjectMasker,
+    FixationObjectChecker
 )
 
 from .crops import (
@@ -20,6 +22,8 @@ __all__ = [
     'get_fixated_objects',
     'load_object_masks',
     'map_fixations_to_objects',
+    'CocoObjectMasker',
+    'FixationObjectChecker',
     'create_fixation_crops', 
     'extract_scene_regions'
 ]
