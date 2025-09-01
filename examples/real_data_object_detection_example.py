@@ -162,20 +162,13 @@ def plot_fixations_on_scene(scene_id: int, fixations_df: pd.DataFrame,
         print(f"Showing first {max_fixations} fixations for scene {scene_id}")
     
     # Find and load the scene image
-    scene_id_str = str(scene_id).zfill(12)+"_MEG_SIZE"
-    image_file = None
+    scene_id_str = str(int(scene_id)).zfill(12)+"_MEG_size"
     
-    for dataset in ['train2017', 'val2017']:
-        candidate_path = os.path.join(mscoco_image_dir, dataset, f"{scene_id_str}.jpg")
-        if os.path.exists(candidate_path):
-            image_file = candidate_path
-            break
-    
-    if image_file is None:
-        print(f"Scene image not found for ID {scene_id}")
-        #print the top 10 files in the directory
-        print("Available files in directory:")
-        available_files = os.listdir(os.path.join(mscoco_image_dir, 'train2017'))
+
+    candidate_path = os.path.join(mscoco_image_dir, f"{scene_id_str}.jpg")
+    print(f"Looking for scene image at: {candidate_path}")
+    if os.path.exists(candidate_path):
+        image_file = candidate_path
        
     
     # Load and display image
@@ -366,60 +359,51 @@ def main():
         print("Please update INPUT_DIR in the script to point to your MSCOCO data directory")
         return
     
-    try:
-        # Step 1: Load eye tracking data
-        print(f"Step 1: Loading eye tracking data for subject {SUBJECT_ID}, session {SESSION_ID}")
-        fixations_df = load_subject_eye_data(SUBJECT_ID, SESSION_ID, DATA_PATH)
-        
-        # Step 2: Add object labels
-        print(f"\nStep 2: Adding object labels to {len(fixations_df)} fixations")
-        fixations_with_objects = add_object_labels_to_data(fixations_df, INPUT_DIR, verbose=True)
-        
-        # Step 3: Create visualizations
-        print(f"\nStep 3: Creating visualizations")
-        
-        # Plot summary statistics
-        plot_object_fixation_summary(fixations_with_objects)
-        random_scenes = np.random.choice(
-            fixations_with_objects['sceneID'].dropna().unique(), size=3, replace=False
+  
+    # Step 1: Load eye tracking data
+    print(f"Step 1: Loading eye tracking data for subject {SUBJECT_ID}, session {SESSION_ID}")
+    fixations_df = load_subject_eye_data(SUBJECT_ID, SESSION_ID, DATA_PATH)
+    
+    # Step 2: Add object labels
+    print(f"\nStep 2: Adding object labels to {len(fixations_df)} fixations")
+    fixations_with_objects = add_object_labels_to_data(fixations_df, INPUT_DIR, verbose=True)
+    
+    # Step 3: Create visualizations
+    print(f"\nStep 3: Creating visualizations")
+    
+    # Plot summary statistics
+    plot_object_fixation_summary(fixations_with_objects)
+    random_scenes = np.random.choice(
+        fixations_with_objects['sceneID'].dropna().unique(), size=3, replace=False
+    )
+    # randomly select 3 scenes
+    
+    
+    mscoco_image_dir = os.path.join(DATA_PATH, "AVS-UTILS", "avs_scenes")
+    
+    for scene_id in random_scenes:
+        print(f"\nPlotting fixations for scene {scene_id}")
+        plot_fixations_on_scene(
+            scene_id, 
+            fixations_with_objects, 
+            mscoco_image_dir,
+            max_fixations=30
         )
-        # randomly select 3 scenes
+    
+    # Print final summary
+    print(f"\n=== Summary ===")
+    print(f"Subject: {SUBJECT_ID}, Session: {SESSION_ID}")
+    print(f"Total fixations: {len(fixations_with_objects)}")
+    print(f"Fixations on objects: {len(fixations_with_objects[fixations_with_objects['object_label'] != 'None'])}")
+    print(f"Unique scenes: {len(fixations_with_objects['sceneID'].unique())}")
+    print(f"Unique objects fixated: {len(fixations_with_objects[fixations_with_objects['object_label'] != 'None']['object_label'].unique())}")
+    
+    top_objects = fixations_with_objects[fixations_with_objects['object_label'] != 'None']['object_label'].value_counts().head(5)
+    print(f"\nTop 5 most fixated objects:")
+    for obj, count in top_objects.items():
+        print(f"  {obj}: {count} fixations")
         
-        
-        mscoco_image_dir = os.path.join(INPUT_DIR, "mscoco_scenes")
-        
-        for scene_id in random_scenes:
-            print(f"\nPlotting fixations for scene {scene_id}")
-            plot_fixations_on_scene(
-                scene_id, 
-                fixations_with_objects, 
-                mscoco_image_dir,
-                max_fixations=30
-            )
-        
-        # Print final summary
-        print(f"\n=== Summary ===")
-        print(f"Subject: {SUBJECT_ID}, Session: {SESSION_ID}")
-        print(f"Total fixations: {len(fixations_with_objects)}")
-        print(f"Fixations on objects: {len(fixations_with_objects[fixations_with_objects['object_label'] != 'None'])}")
-        print(f"Unique scenes: {len(fixations_with_objects['sceneID'].unique())}")
-        print(f"Unique objects fixated: {len(fixations_with_objects[fixations_with_objects['object_label'] != 'None']['object_label'].unique())}")
-        
-        top_objects = fixations_with_objects[fixations_with_objects['object_label'] != 'None']['object_label'].value_counts().head(5)
-        print(f"\nTop 5 most fixated objects:")
-        for obj, count in top_objects.items():
-            print(f"  {obj}: {count} fixations")
-        
-    except FileNotFoundError as e:
-        print(f"ERROR: {e}")
-        print("\nMake sure you have:")
-        print("1. Preprocessed eye tracking data in the expected format")
-        print("2. MSCOCO scene images and annotations")
-        print("3. Updated the DATA_PATH and INPUT_DIR variables in this script")
-        
-    except Exception as e:
-        print(f"ERROR: An unexpected error occurred: {e}")
-        print("Please check your data files and paths")
+    
 
 
 if __name__ == "__main__":
