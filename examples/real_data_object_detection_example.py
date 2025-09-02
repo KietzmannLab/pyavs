@@ -23,7 +23,7 @@ from PIL import Image
 # pyAVS imports
 from pyavs.scenes.objects import get_fixated_objects
 from pyavs.dataloader.eye import load_and_enrich_eye_events
-from pyavs.preprocessing.composer import AVSComposer
+from pyavs.config.config import PyAVSConfig
 
 
 def load_subject_eye_data(subject_id: int, session_id: int, 
@@ -341,7 +341,7 @@ def main():
     Main function demonstrating real data object detection workflow.
     """
     print("=== Real Data Object Detection Example ===\n")
-    from pyavs import config
+    
     # Configuration
     SUBJECT_ID = 1
     SESSION_ID = 1

@@ -23,13 +23,14 @@ from ..dataloader.loaders import load_eye_events, load_experiment_log
 from ..dataloader.eye import load_and_enrich_eye_events
 from ..utils.config import get_data_path
 from ..utils.logging import get_logger
+from ..config.config import PyAVSConfig
 
 logger = get_logger('visualization.events_on_scene')
 
 
 class EyeTrackingPlotter:
     def __init__(self, subjects: Union[int, List[int]], sessions: Union[int, List[int]], 
-                 data_path: Optional[str] = None, screen_size=(1024, 768), screen_usage=0.925):
+                 config: PyAVSConfig, data_path: Optional[str] = None):
         """
         Initialize EyeTrackingPlotter with pyavs data loading.
         
@@ -39,15 +40,14 @@ class EyeTrackingPlotter:
             Subject ID(s) to load data for
         sessions : int or list of int
             Session number(s) to load data for
+        config : PyAVSConfig
+            Configuration object with visual system parameters (required)
         data_path : str, optional
-            Path to data directory. If None, uses configured data path
-        screen_size : tuple, optional
-            Screen size in pixels (width, height)
-        screen_usage : float, optional
-            Proportion of screen used for display
-        """
-        self.screen_size = screen_size
-        self.screen_usage = screen_usage
+            Path to data directory. If None, uses config's data path
+        """        
+        self.config = config
+        self.screen_size = config.screen_size_pixels
+        self.screen_usage = config.screen_usage
         
         # Ensure subjects and sessions are lists
         if isinstance(subjects, int):
@@ -60,7 +60,7 @@ class EyeTrackingPlotter:
         
         # Set data path
         if data_path is None:
-            data_path = get_data_path()
+            data_path = self.config.data_path or get_data_path()
             if data_path is None:
                 raise ValueError("No data path configured. Use pyavs.set_data_path() or provide data_path parameter")
         
@@ -106,11 +106,12 @@ class EyeTrackingPlotter:
         
         img = Image.open(scene_file)
         
-        # Scale to match presentation size
-        scale = (self.screen_size[1] * self.screen_usage) / img.height
-        if abs(scale - 1.0) > 0.01:
-            new_size = (int(img.width * scale), int(img.height * scale))
-            img = img.resize(new_size)
+        # Scale using config parameters
+        original_size = img.size
+        rescaled_size = self.config.get_rescaled_scene_size(original_size)
+        
+        if rescaled_size != original_size:
+            img = img.resize(rescaled_size)
         
         return np.array(img)
     

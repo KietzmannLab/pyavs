@@ -13,11 +13,13 @@ from PIL import Image
 import matplotlib.pyplot as plt
 
 from ..utils.config import get_input_paths
+from ..config.config import PyAVSConfig
 from .objects import load_object_masks
 
 
 def create_fixation_crops(eye_events_df: pd.DataFrame, 
                          scene_images: Dict[int, str],
+                         config: PyAVSConfig,
                          crop_size: Tuple[int, int] = (100, 100),
                          output_dir: Optional[str] = None,
                          save_crops: bool = False,
@@ -31,6 +33,8 @@ def create_fixation_crops(eye_events_df: pd.DataFrame,
         Eye tracking events dataframe with fixation locations
     scene_images : dict
         Dictionary mapping scene IDs to image file paths
+    config : PyAVSConfig
+        Configuration object with visual system parameters (required)
     crop_size : tuple of int, optional
         Size of crops in pixels (width, height) (default: (100, 100))
     output_dir : str, optional
@@ -72,27 +76,41 @@ def create_fixation_crops(eye_events_df: pd.DataFrame,
             print(f"Error loading scene {scene_id}: {e}")
             continue
         
-        # Get fixation coordinates
+        # Get original image size and calculate rescaled size
+        original_size = scene_image.size  # (width, height)
+        rescaled_size = config.get_rescaled_scene_size(original_size)
+        
+        # Rescale image if needed
+        if rescaled_size != original_size:
+            scene_image = scene_image.resize(rescaled_size)
+        
+        img_width, img_height = rescaled_size
+        
+        # Get fixation coordinates and transform to image space
         if center_on == 'mean':
-            fix_x = fixation.get('mean_gx', fixation.get('gx', 0))
-            fix_y = fixation.get('mean_gy', fixation.get('gy', 0))
+            fix_x_screen = fixation.get('mean_gx', fixation.get('gx', 0))
+            fix_y_screen = fixation.get('mean_gy', fixation.get('gy', 0))
         elif center_on == 'start':
-            fix_x = fixation.get('start_gx', fixation.get('gx', 0))
-            fix_y = fixation.get('start_gy', fixation.get('gy', 0))
+            fix_x_screen = fixation.get('start_gx', fixation.get('gx', 0))
+            fix_y_screen = fixation.get('start_gy', fixation.get('gy', 0))
         elif center_on == 'end':
-            fix_x = fixation.get('end_gx', fixation.get('gx', 0))
-            fix_y = fixation.get('end_gy', fixation.get('gy', 0))
+            fix_x_screen = fixation.get('end_gx', fixation.get('gx', 0))
+            fix_y_screen = fixation.get('end_gy', fixation.get('gy', 0))
         else:
             raise ValueError(f"Invalid center_on value: {center_on}")
         
+        # Convert from screen coordinates to image coordinates
+        # Screen coordinates are centered, image coordinates start from top-left
+        fix_x_image = fix_x_screen - config.screen_size_pixels[0] // 2 + img_width // 2
+        fix_y_image = img_height // 2 - (fix_y_screen - config.screen_size_pixels[1] // 2)
+        
         # Calculate crop boundaries
-        left = int(fix_x - crop_width // 2)
-        top = int(fix_y - crop_height // 2)
+        left = int(fix_x_image - crop_width // 2)
+        top = int(fix_y_image - crop_height // 2)
         right = left + crop_width
         bottom = top + crop_height
         
         # Adjust boundaries to stay within image
-        img_width, img_height = scene_image.size
         left = max(0, left)
         top = max(0, top)
         right = min(img_width, right)
@@ -191,6 +209,7 @@ def extract_scene_regions(scene_id: int,
 
 def create_object_based_crops(scene_id: int,
                              object_ids: List[int],
+                             config: PyAVSConfig,
                              crop_size: Tuple[int, int] = (100, 100),
                              scene_images: Optional[Dict[int, str]] = None,
                              input_dir: Optional[str] = None) -> Dict[int, np.ndarray]:
@@ -203,6 +222,8 @@ def create_object_based_crops(scene_id: int,
         COCO scene ID
     object_ids : list of int
         List of object category IDs to crop
+    config : PyAVSConfig
+        Configuration object with visual system parameters (required)
     crop_size : tuple of int, optional
         Size of crops in pixels (width, height) (default: (100, 100))
     scene_images : dict, optional
@@ -228,7 +249,7 @@ def create_object_based_crops(scene_id: int,
         image_path = scene_images[scene_id]
     else:
         if input_dir is None:
-            input_dir = get_input_paths()
+            input_dir = config.input_dir or get_input_paths()
         
         scenes_dir = os.path.join(input_dir, 'mscoco_scenes')
         image_filename = f"{scene_id:012d}.jpg"
@@ -245,9 +266,15 @@ def create_object_based_crops(scene_id: int,
     if not os.path.exists(image_path):
         raise FileNotFoundError(f"Scene image not found: {image_path}")
     
-    # Load scene image
+    # Load and rescale scene image using config
     scene_image = Image.open(image_path)
-    img_width, img_height = scene_image.size
+    original_size = scene_image.size
+    rescaled_size = config.get_rescaled_scene_size(original_size)
+    
+    if rescaled_size != original_size:
+        scene_image = scene_image.resize(rescaled_size)
+    
+    img_width, img_height = rescaled_size
     
     crops = {}
     crop_width, crop_height = crop_size
@@ -292,6 +319,7 @@ def create_object_based_crops(scene_id: int,
 
 def visualize_fixations_on_scene(scene_id: int,
                                 fixations_df: pd.DataFrame,
+                                config: PyAVSConfig,
                                 scene_images: Optional[Dict[int, str]] = None,
                                 input_dir: Optional[str] = None,
                                 figsize: Tuple[int, int] = (12, 8),
@@ -305,6 +333,8 @@ def visualize_fixations_on_scene(scene_id: int,
         COCO scene ID
     fixations_df : pd.DataFrame
         Dataframe containing fixation data for this scene
+    config : PyAVSConfig
+        Configuration object with visual system parameters (required)
     scene_images : dict, optional
         Dictionary mapping scene IDs to image paths
     input_dir : str, optional
@@ -324,7 +354,7 @@ def visualize_fixations_on_scene(scene_id: int,
         image_path = scene_images[scene_id]
     else:
         if input_dir is None:
-            input_dir = get_input_paths()
+            input_dir = config.input_dir or get_input_paths()
         
         scenes_dir = os.path.join(input_dir, 'mscoco_scenes')
         image_filename = f"{scene_id:012d}.jpg"
@@ -341,8 +371,13 @@ def visualize_fixations_on_scene(scene_id: int,
     if not os.path.exists(image_path):
         raise FileNotFoundError(f"Scene image not found: {image_path}")
     
-    # Load and display scene
+    # Load and rescale scene image using config
     scene_image = Image.open(image_path)
+    original_size = scene_image.size
+    rescaled_size = config.get_rescaled_scene_size(original_size)
+    
+    if rescaled_size != original_size:
+        scene_image = scene_image.resize(rescaled_size)
     
     fig, ax = plt.subplots(1, 1, figsize=figsize)
     ax.imshow(scene_image)
@@ -351,10 +386,22 @@ def visualize_fixations_on_scene(scene_id: int,
     scene_fixations = fixations_df[fixations_df['sceneID'] == scene_id]
     scene_fixations = scene_fixations[scene_fixations['type'] == 'fixation']
     
+    img_width, img_height = rescaled_size
+    
     if len(scene_fixations) > 0:
-        # Plot fixations
-        x_coords = scene_fixations.get('mean_gx', scene_fixations.get('gx', []))
-        y_coords = scene_fixations.get('mean_gy', scene_fixations.get('gy', []))
+        # Transform fixation coordinates to image space using config
+        x_coords = []
+        y_coords = []
+        for _, fixation in scene_fixations.iterrows():
+            x_screen = fixation.get('mean_gx', fixation.get('gx', 0))
+            y_screen = fixation.get('mean_gy', fixation.get('gy', 0))
+            
+            # Convert to image coordinates
+            x_image = x_screen - config.screen_size_pixels[0] // 2 + img_width // 2
+            y_image = img_height // 2 - (y_screen - config.screen_size_pixels[1] // 2)
+            
+            x_coords.append(x_image)
+            y_coords.append(y_image)
         
         # Color by fixation sequence if available
         if 'fix_sequence' in scene_fixations.columns:
@@ -367,10 +414,9 @@ def visualize_fixations_on_scene(scene_id: int,
         
         # Add sequence numbers if available
         if 'fix_sequence' in scene_fixations.columns:
-            for idx, row in scene_fixations.iterrows():
-                ax.annotate(str(int(row['fix_sequence'])), 
-                          (row.get('mean_gx', row.get('gx', 0)), 
-                           row.get('mean_gy', row.get('gy', 0))),
+            for idx, (x, y, fix_seq) in enumerate(zip(x_coords, y_coords, scene_fixations['fix_sequence'])):
+                ax.annotate(str(int(fix_seq)), 
+                          (x, y),
                           xytext=(5, 5), textcoords='offset points',
                           fontsize=8, color='white', weight='bold')
     

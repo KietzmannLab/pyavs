@@ -162,6 +162,16 @@ class PyAVSConfig:
     output_format: str = "h5"  # "h5", "fif", "mat"
     compression: str = "gzip"
     
+    # === VISUAL SYSTEM AND DISPLAY PARAMETERS ===
+    
+    # Screen configuration (from machine room setup)
+    screen_size_pixels: Tuple[int, int] = (1024, 768)  # (width, height) in pixels
+    screen_size_degrees: float = 33.10  # Screen width in degrees of visual angle
+    screen_usage: float = 0.925  # Proportion of screen used for scene display
+    
+    # Scene image configuration
+    input_image_size: Tuple[int, int] = (947, 710)  # Default scene image size (width, height)
+    
     # === OUTPUT AND STORAGE OPTIONS ===
     
     # Output control (machine room patterns)
@@ -387,6 +397,44 @@ class PyAVSConfig:
         """Get ROIs that are sensor-level."""
         sensor_rois = ["mag", "grad"]
         return [roi for roi in self.rois if roi in sensor_rois]
+    
+    # === VISUAL SYSTEM DERIVED PARAMETERS ===
+    
+    def get_pixels_per_degree(self) -> float:
+        """Calculate pixels per degree of visual angle."""
+        return self.screen_size_pixels[0] / self.screen_size_degrees
+    
+    def get_scene_scaling_factor(self, scene_height: Optional[int] = None) -> float:
+        """Calculate scaling factor for scene images."""
+        if scene_height is None:
+            scene_height = self.input_image_size[1]
+        return (self.screen_size_pixels[1] * self.screen_usage) / scene_height
+    
+    def get_rescaled_scene_size(self, scene_size: Optional[Tuple[int, int]] = None) -> Tuple[int, int]:
+        """Get rescaled scene size based on screen parameters."""
+        if scene_size is None:
+            scene_size = self.input_image_size
+        
+        scaling_factor = self.get_scene_scaling_factor(scene_size[1])
+        
+        if abs(scaling_factor - 1.0) > 0.01:
+            rescaled_width = int(scene_size[0] * scaling_factor)
+            rescaled_height = int(scene_size[1] * scaling_factor)
+            return (rescaled_width, rescaled_height)
+        else:
+            return scene_size
+    
+    def get_visual_system_params(self) -> Dict[str, Any]:
+        """Get all visual system parameters as a dictionary."""
+        return {
+            'screen_size_pixels': self.screen_size_pixels,
+            'screen_size_degrees': self.screen_size_degrees,
+            'screen_usage': self.screen_usage,
+            'input_image_size': self.input_image_size,
+            'pixels_per_degree': self.get_pixels_per_degree(),
+            'scene_scaling_factor': self.get_scene_scaling_factor(),
+            'rescaled_scene_size': self.get_rescaled_scene_size()
+        }
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert entire configuration to dictionary."""
