@@ -22,6 +22,7 @@ from pycocotools.coco import COCO
 from scipy.spatial.distance import euclidean
 import pickle
 from dataclasses import dataclass, asdict
+from pathlib import Path
 
 from ..utils.config import get_input_paths
 
@@ -291,142 +292,67 @@ class CocoObjectMasker:
 
 class FixationObjectChecker:
     """
-    Fixation object checker using compressed masks and spatial indexing.
+    Fixation object checker using transformed AVS scene annotations.
     
-    This class provides efficient coordinate-to-object mapping using:
-    - Bounding box pre-filtering for fast candidate selection
-    - On-demand mask loading to minimize memory usage
-    - Spatial indexing for quick coordinate lookups
+    This class works with pre-transformed annotations that match the processed
+    scene format used in the AVS experiment. Annotations are loaded from
+    JSON files created by the AVS scene annotation transformer.
     """
     
-    def __init__(self, metadata_file: str,
-                 compressed_masks_dir: str,
-                 annotation_dir: Optional[str] = None,
-                 output_dir: Optional[str] = None,
-                 mscoco_image_dir: Optional[str] = None,
-                 stim_screen_x_pix: Optional[int] = None,
-                 stim_screen_y_pix: Optional[int] = None,
-                 use_screen_area: Optional[float] = None):
+    def __init__(self, transformed_annotations_dir: str):
         """
         Initialize the fixation object checker.
         
         Parameters
         ----------
-        metadata_file : str
-            Path to object mask metadata JSON file
-        compressed_masks_dir : str
-            Path to directory containing compressed mask files
-        annotation_dir : str, optional
-            Path to MSCOCO annotation directory (for computing missing masks)
-        output_dir : str, optional
-            Path to output directory (for computing missing masks)
-        mscoco_image_dir : str, optional
-            Path to MSCOCO images directory (for computing missing masks)
-        stim_screen_x_pix : int, optional
-            Stimulus screen width in pixels
-        stim_screen_y_pix : int, optional
-            Stimulus screen height in pixels
-        use_screen_area : float, optional
-            Fraction of screen area used for stimuli
+        transformed_annotations_dir : str
+            Path to directory containing transformed annotation JSON files
         """
-        self.metadata_file = metadata_file
-        self.compressed_masks_dir = compressed_masks_dir
+        self.annotations_dir = Path(transformed_annotations_dir)
+        self.annotation_cache = {}  # Cache for loaded annotations
         
-        # Parameters for mask computation
-        self.annotation_dir = annotation_dir
-        self.output_dir = output_dir
-        self.mscoco_image_dir = mscoco_image_dir
-        self.stim_screen_x_pix = stim_screen_x_pix
-        self.stim_screen_y_pix = stim_screen_y_pix
-        self.use_screen_area = use_screen_area
-        
-        # Load metadata
-        self.metadata = self._load_metadata()
-        self.masker = None
+        # Get scene dimensions from config
+        from ..config.config import PyAVSConfig
+        config = PyAVSConfig()
+        self.scene_width = int(config.screen_size_pixels[0] * config.screen_usage)
+        self.scene_height = int(config.screen_size_pixels[1] * config.screen_usage)
     
-    def _load_metadata(self) -> Dict[str, List[ObjectMaskMetadata]]:
-        """Load metadata from file."""
-        if os.path.exists(self.metadata_file):
-            with open(self.metadata_file, 'r') as f:
-                data = json.load(f)
-                metadata = {}
-                for scene_id, mask_list in data.items():
-                    metadata[scene_id] = [ObjectMaskMetadata(**mask_data) for mask_data in mask_list]
-                return metadata
-        return {}
-    
-    def _get_candidates_from_bbox(self, coco_id: int, x: int, y: int) -> List[ObjectMaskMetadata]:
-        """Get object candidates based on bounding box intersection."""
-        coco_id_str = str(coco_id)
+    def _load_scene_annotations(self, coco_id: int) -> Dict:
+        """Load transformed annotations for a scene."""
+        if coco_id in self.annotation_cache:
+            return self.annotation_cache[coco_id]
         
-        if coco_id_str not in self.metadata:
-            return []
+        annotation_file = self.annotations_dir / f"{coco_id}_transformed.json"
         
-        candidates = []
-        for mask_meta in self.metadata[coco_id_str]:
-            bbox_x, bbox_y, bbox_w, bbox_h = mask_meta.bbox
-            
-            # Check if point is within bounding box
-            if (bbox_x <= x <= bbox_x + bbox_w and 
-                bbox_y <= y <= bbox_y + bbox_h):
-                candidates.append(mask_meta)
-        
-        return candidates
-    
-    def _load_mask_for_metadata(self, mask_meta: ObjectMaskMetadata) -> Optional[np.ndarray]:
-        """Load mask for given metadata."""
-        compressed_file = os.path.join(self.compressed_masks_dir, f"{mask_meta.compressed_mask_key}.rle")
-        
-        if not os.path.exists(compressed_file):
-            return None
+        if not annotation_file.exists():
+            self.annotation_cache[coco_id] = {}
+            return {}
         
         try:
-            with open(compressed_file, 'rb') as f:
-                rle = pickle.load(f)
-            return pycocotools.mask.decode(rle).astype(bool)
+            with open(annotation_file, 'r') as f:
+                annotations = json.load(f)
+            self.annotation_cache[coco_id] = annotations
+            return annotations
         except Exception as e:
-            print(f"Error loading mask {mask_meta.compressed_mask_key}: {e}")
-            return None
+            print(f"Error loading annotations for scene {coco_id}: {e}")
+            self.annotation_cache[coco_id] = {}
+            return {}
     
-    def _compute_distance_to_object(self, fixation_mask: np.ndarray, 
-                                   look_up_dist_pix: int) -> Tuple[float, np.ndarray]:
-        """
-        Compute distance to nearest object pixel in mask around fixation coordinates.
-        
-        Parameters
-        ----------
-        fixation_mask : np.ndarray
-            Binary mask around fixation location
-        look_up_dist_pix : int
-            Search radius in pixels
-            
-        Returns
-        -------
-        tuple
-            (min_distance, distance_matrix)
-        """
-        rows, cols = fixation_mask.shape
-        dist_matrix = np.full_like(fixation_mask, np.nan, dtype=float)
-        
-        center_x, center_y = look_up_dist_pix, look_up_dist_pix
-        
-        for row in range(rows):
-            for col in range(cols):
-                if fixation_mask[row, col]:
-                    dist_matrix[row, col] = euclidean([center_x, center_y], [row, col])
-        
-        return np.nanmin(dist_matrix), dist_matrix
+    def _decode_rle_mask(self, rle_data: Dict) -> np.ndarray:
+        """Decode RLE mask data."""
+        # Reconstruct RLE format for pycocotools
+        rle = {
+            'size': rle_data['size'],
+            'counts': rle_data['counts'].encode('utf-8') if isinstance(rle_data['counts'], str) else rle_data['counts']
+        }
+        return pycocotools.mask.decode(rle).astype(bool)
     
     def get_fixated_objects(self, coco_id: int, x_pos: Union[float, np.ndarray], 
-                           y_pos: Union[float, np.ndarray],
-                           scene_scaler: Optional[float] = None,
-                           scaling_mode: int = Image.BICUBIC,
-                           look_up_closest: bool = False,
-                           look_up_dist_pix: int = 10) -> Tuple[List[int], List[str]]:
+                           y_pos: Union[float, np.ndarray]) -> Tuple[List[int], List[str]]:
         """
         Check which objects are fixated at given coordinates.
         
-        Uses spatial indexing and compressed storage for efficient processing.
+        Coordinates should be in screen-centered pixels (matching the processed scene format).
         
         Parameters
         ----------
@@ -436,28 +362,17 @@ class FixationObjectChecker:
             Screen-centered x coordinates (pixels)
         y_pos : float or array  
             Screen-centered y coordinates (pixels)
-        scene_scaler : float, optional
-            Additional scaling factor applied to scenes
-        scaling_mode : int, optional
-            PIL scaling mode (default: BICUBIC)
-        look_up_closest : bool, optional
-            Whether to search for closest object if no direct hit (default: False)
-        look_up_dist_pix : int, optional
-            Search radius in pixels when look_up_closest=True (default: 10)
             
         Returns
         -------
         tuple
             (object_category_ids, object_category_names)
         """
-        coco_id_str = str(coco_id)
+        # Load annotations for this scene
+        annotations = self._load_scene_annotations(coco_id)
         
-        # Ensure we have metadata for this scene
-        if coco_id_str not in self.metadata:
-            self._compute_missing_masks(coco_id)
-        
-        if coco_id_str not in self.metadata:
-            # Still no metadata - return empty results
+        if not annotations:
+            # No annotations available
             x_pos = np.atleast_1d(x_pos)
             return [-1] * len(x_pos), ['None'] * len(x_pos)
         
@@ -468,292 +383,94 @@ class FixationObjectChecker:
         if x_pos.shape != y_pos.shape:
             raise ValueError("x_pos and y_pos must have the same shape")
         
-        # Get actual scene image dimensions (resized from MSCOCO)
-        # Note: Scenes are center-cropped and resized by scene_resizer to 
-        # screen_size_pixels * screen_usage dimensions (default: 947x710)
-        # This matches the actual size of processed scene images
-        from ..utils.config import get_config
-        config = get_config()
-        actual_img_width = int(config.screen_size_pixels[0] * config.screen_usage)
-        actual_img_height = int(config.screen_size_pixels[1] * config.screen_usage)
-        
-        # Convert screen-centered coordinates to image coordinates
-        x_pos_adjusted = np.array(x_pos + actual_img_width / 2, dtype=int)
-        y_pos_adjusted = np.array(np.abs(y_pos - actual_img_height / 2), dtype=int)
-        
-        # Apply scaling if needed
-        if scene_scaler is not None:
-            x_pos_adjusted = (x_pos_adjusted * scene_scaler).astype(int)
-            y_pos_adjusted = (y_pos_adjusted * scene_scaler).astype(int)
-            actual_img_width = int(actual_img_width * scene_scaler)
-            actual_img_height = int(actual_img_height * scene_scaler)
-        
         object_cats = []
         category_names = []
         
         # Process each fixation position
         for i in range(len(x_pos)):
-            current_x = x_pos_adjusted[i]
-            current_y = y_pos_adjusted[i]
+            # Convert screen-centered coordinates to image coordinates
+            x_img = int(x_pos[i] + self.scene_width / 2)
+            y_img = int(abs(y_pos[i] - self.scene_height / 2))
             
             # Check if fixation is outside scene boundaries
-            if (current_x < 0 or current_x >= actual_img_width or 
-                current_y < 0 or current_y >= actual_img_height):
+            if (x_img < 0 or x_img >= self.scene_width or 
+                y_img < 0 or y_img >= self.scene_height):
                 object_cats.append(-2)
                 category_names.append('outside')
                 continue
             
-            # Get candidate objects based on bounding box
-            candidates = self._get_candidates_from_bbox(coco_id, current_x, current_y)
-            
-            if not candidates:
-                # No objects in bounding box
-                if look_up_closest:
-                    closest_cat, closest_name = self._find_closest_object_efficient(
-                        coco_id, current_x, current_y, look_up_dist_pix, scene_scaler, scaling_mode
-                    )
-                    if closest_cat is not None:
-                        object_cats.append(closest_cat)
-                        category_names.append(closest_name)
-                        continue
-                
-                object_cats.append(-1)
-                category_names.append('None')
-                continue
-            
-            # Check actual mask intersection for candidates
+            # Find objects at this position
             detected_objects = []
             
-            for candidate in candidates:
-                mask = self._load_mask_for_metadata(candidate)
-                if mask is None:
-                    continue
+            for cat_id_str, obj_data in annotations.items():
+                # Check bounding box first (fast pre-filter)
+                bbox_x, bbox_y, bbox_w, bbox_h = obj_data['bbox']
                 
-                # Apply scaling to mask if needed
-                if scene_scaler is not None:
-                    mask_img = Image.fromarray(mask.astype(np.uint8) * 255)
-                    new_size = (int(mask.shape[1] * scene_scaler), int(mask.shape[0] * scene_scaler))
-                    scaled_mask = mask_img.resize(new_size, scaling_mode)
-                    mask = np.array(scaled_mask, dtype=bool)
-                
-                # Check if fixation point intersects mask
-                if (current_y < mask.shape[0] and current_x < mask.shape[1] and 
-                    mask[current_y, current_x]):
-                    detected_objects.append((candidate, mask))
+                if (bbox_x <= x_img <= bbox_x + bbox_w and 
+                    bbox_y <= y_img <= bbox_y + bbox_h):
+                    
+                    # Decode and check actual mask
+                    try:
+                        mask = self._decode_rle_mask(obj_data['rle'])
+                        
+                        if (y_img < mask.shape[0] and x_img < mask.shape[1] and 
+                            mask[y_img, x_img]):
+                            detected_objects.append(obj_data)
+                    except Exception as e:
+                        print(f"Error decoding mask for category {cat_id_str}: {e}")
+                        continue
             
+            # Handle detection results
             if len(detected_objects) == 1:
                 # Single object detected
-                candidate, _ = detected_objects[0]
-                object_cats.append(candidate.category_id)
-                category_names.append(candidate.category_name)
+                obj = detected_objects[0]
+                object_cats.append(obj['category_id'])
+                category_names.append(obj['category_name'])
                 
             elif len(detected_objects) > 1:
                 # Multiple objects: choose smallest area
-                min_area_candidate = min(detected_objects, key=lambda x: x[0].area)[0]
-                object_cats.append(min_area_candidate.category_id)
-                category_names.append(min_area_candidate.category_name)
+                min_area_obj = min(detected_objects, key=lambda x: x['area'])
+                object_cats.append(min_area_obj['category_id'])
+                category_names.append(min_area_obj['category_name'])
                 
             else:
-                # No direct hits
-                if look_up_closest:
-                    closest_cat, closest_name = self._find_closest_object_efficient(
-                        coco_id, current_x, current_y, look_up_dist_pix, scene_scaler, scaling_mode
-                    )
-                    if closest_cat is not None:
-                        object_cats.append(closest_cat)
-                        category_names.append(closest_name)
-                        continue
-                
+                # No objects detected
                 object_cats.append(-1)
                 category_names.append('None')
         
         return object_cats, category_names
     
-    def _get_actual_scene_dimensions(self) -> Tuple[int, int]:
-        """Get actual scene dimensions after resizing/cropping."""
-        from ..utils.config import get_config
-        config = get_config()
-        width = int(config.screen_size_pixels[0] * config.screen_usage)
-        height = int(config.screen_size_pixels[1] * config.screen_usage)
-        return height, width
-    
-    def _find_closest_object_efficient(self, coco_id: int, x_pos: int, y_pos: int,
-                                     look_up_dist_pix: int, scene_scaler: Optional[float] = None,
-                                     scaling_mode: int = Image.BICUBIC) -> Tuple[Optional[int], Optional[str]]:
-        """Find closest object within search radius using efficient method."""
-        coco_id_str = str(coco_id)
-        
-        if coco_id_str not in self.metadata:
-            return None, None
-        
-        # Expand search area and get candidates
-        search_bbox = (
-            max(0, x_pos - look_up_dist_pix),
-            max(0, y_pos - look_up_dist_pix),
-            x_pos + look_up_dist_pix,
-            y_pos + look_up_dist_pix
-        )
-        
-        closest_distance = float('inf')
-        closest_candidate = None
-        
-        for candidate in self.metadata[coco_id_str]:
-            bbox_x, bbox_y, bbox_w, bbox_h = candidate.bbox
-            
-            # Check if bounding boxes intersect
-            if not (bbox_x + bbox_w < search_bbox[0] or bbox_x > search_bbox[2] or
-                   bbox_y + bbox_h < search_bbox[1] or bbox_y > search_bbox[3]):
-                
-                # Load mask and check actual distance
-                mask = self._load_mask_for_metadata(candidate)
-                if mask is None:
-                    continue
-                
-                # Apply scaling if needed
-                if scene_scaler is not None:
-                    mask_img = Image.fromarray(mask.astype(np.uint8) * 255)
-                    new_size = (int(mask.shape[1] * scene_scaler), int(mask.shape[0] * scene_scaler))
-                    scaled_mask = mask_img.resize(new_size, scaling_mode)
-                    mask = np.array(scaled_mask, dtype=bool)
-                
-                # Extract search area
-                y_start = max(0, y_pos - look_up_dist_pix)
-                y_end = min(mask.shape[0], y_pos + look_up_dist_pix + 1)
-                x_start = max(0, x_pos - look_up_dist_pix)
-                x_end = min(mask.shape[1], x_pos + look_up_dist_pix + 1)
-                
-                search_area = mask[y_start:y_end, x_start:x_end]
-                
-                if search_area.any():
-                    # Find closest object pixel
-                    obj_pixels = np.where(search_area)
-                    if len(obj_pixels[0]) > 0:
-                        # Convert to absolute coordinates
-                        abs_y = obj_pixels[0] + y_start
-                        abs_x = obj_pixels[1] + x_start
-                        
-                        # Calculate distances
-                        distances = np.sqrt((abs_x - x_pos)**2 + (abs_y - y_pos)**2)
-                        min_dist = np.min(distances)
-                        
-                        if min_dist < closest_distance:
-                            closest_distance = min_dist
-                            closest_candidate = candidate
-        
-        if closest_candidate is not None:
-            return closest_candidate.category_id, closest_candidate.category_name
-        
-        return None, None
-    
-    def _compute_missing_masks(self, coco_id: int):
-        """Compute missing object masks using the masker."""
-        if self.masker is None:
-            if not all([self.annotation_dir, self.output_dir, self.mscoco_image_dir]):
-                print(f"Warning: Cannot compute masks for {coco_id} - missing parameters")
-                return
-            
-            self.masker = CocoObjectMasker(
-                annotation_dir=self.annotation_dir,
-                output_dir=self.output_dir,
-                mscoco_image_dir=self.mscoco_image_dir
-            )
-        
-        self.masker.compute_masks(coco_id)
-        # Reload metadata
-        self.metadata = self._load_metadata()
-    
-    def close(self):
-        """Close any open resources."""
-        if self.masker is not None:
-            self.masker.close()
+    def clear_cache(self):
+        """Clear the annotation cache."""
+        self.annotation_cache.clear()
+
 
 
 def get_fixated_objects(events_df: pd.DataFrame, 
-                       input_dir: Optional[str] = None,
-                       stim_screen_size_xy: Tuple[int, int] = (1024, 768),
-                       used_screen_area: float = 0.925,
-                       input_image_size_xy: Tuple[int, int] = (947, 710),
-                       verbose: bool = False,
-                       force_recompute: bool = False) -> pd.DataFrame:
+                       transformed_annotations_dir: str,
+                       verbose: bool = False) -> pd.DataFrame:
     """
-    Add object labels to fixation events dataframe using optimized storage.
+    Add object labels to fixation events using transformed AVS scene annotations.
     
-    This function uses compressed mask storage and spatial indexing to provide
-    the same functionality with 90-95% reduction in memory usage.
+    This function uses pre-transformed annotations that match the processed scene
+    format used in the AVS experiment, providing more accurate object detection.
     
     Parameters
     ----------
     events_df : pd.DataFrame
         Eye tracking events dataframe
-    input_dir : str, optional
-        Path to input data directory. If None, uses configured input path
-    stim_screen_size_xy : tuple of int, optional
-        Stimulus screen size in pixels (default: (1024, 768))
-    used_screen_area : float, optional
-        Fraction of screen area used (default: 0.925)
-    input_image_size_xy : tuple of int, optional
-        Input image size in pixels (default: (947, 710))
+    transformed_annotations_dir : str
+        Path to directory containing transformed annotation JSON files
     verbose : bool, optional
         Whether to print progress information (default: False)
-    force_recompute : bool, optional
-        Whether to force recomputation of masks (default: False)
         
     Returns
     -------
     pd.DataFrame
         Events dataframe with object_label and object_id columns added
     """
-    if input_dir is None:
-        input_dir = get_input_paths()
-    
-    # Set up paths for compressed storage
-    compressed_masks_dir = os.path.join(input_dir, 'object_masks', 'compressed')
-    os.makedirs(compressed_masks_dir, exist_ok=True)
-    
-    metadata_file = os.path.join(compressed_masks_dir, 'object_masks_metadata.json')
-    mask_files_dir = os.path.join(compressed_masks_dir, 'compressed_masks')
-    
-    # Other paths
-    annotation_dir = os.path.join(input_dir, 'annotations')
-    mscoco_image_dir = os.path.join(input_dir, 'mscoco_scenes')
-    
-    # Screen parameters
-    stim_screen_x_pix, stim_screen_y_pix = stim_screen_size_xy
-    
-    # Compute scene scaler if needed
-    if (input_image_size_xy[0] != int(stim_screen_x_pix * used_screen_area) or 
-        input_image_size_xy[1] != int(stim_screen_y_pix * used_screen_area)):
-        scene_scaler = input_image_size_xy[1] / (int(stim_screen_y_pix * used_screen_area))
-        if verbose:
-            print(f'Scene scaler: {scene_scaler}')
-    else:
-        scene_scaler = None
-        if verbose:
-            print('No scene scaler needed')
-    
     # Initialize fixation object checker
-    fix_checker = FixationObjectChecker(
-        metadata_file, mask_files_dir,
-        annotation_dir, compressed_masks_dir, mscoco_image_dir,
-        stim_screen_x_pix, stim_screen_y_pix, used_screen_area
-    )
-    
-    # Precompute masks for all unique scene IDs if force_recompute
-    if force_recompute or not os.path.exists(metadata_file):
-        unique_scene_ids = events_df['sceneID'].dropna().unique()
-        if verbose:
-            print(f"Computing compressed masks for {len(unique_scene_ids)} scenes...")
-        
-        masker = CocoObjectMasker(
-            annotation_dir=annotation_dir,
-            output_dir=compressed_masks_dir,
-            mscoco_image_dir=mscoco_image_dir
-        )
-        
-        for scene_id in unique_scene_ids:
-            if verbose and int(scene_id) % 100 == 0:
-                print(f"Processing scene {scene_id}")
-            masker.compute_masks_for_image(int(scene_id))
+    checker = FixationObjectChecker(transformed_annotations_dir)
     
     # Add object label columns
     events_df = events_df.copy()
@@ -763,6 +480,11 @@ def get_fixated_objects(events_df: pd.DataFrame,
     def center_pixel_coords(pix_coords, screen_size_pix):
         """Center pixel coordinates around zero."""
         return pix_coords - screen_size_pix / 2
+    
+    # Get screen size from config
+    from ..config.config import PyAVSConfig
+    config = PyAVSConfig()
+    screen_x_pix, screen_y_pix = config.screen_size_pixels
     
     # Process each subject and trial
     subjects = events_df.subject.unique()
@@ -796,17 +518,15 @@ def get_fixated_objects(events_df: pd.DataFrame,
                 # Get appropriate coordinates
                 coord_type = 'mean' if et_type == 'fixation' else 'end'
                 
-                x_coords = center_pixel_coords(trial_events[f"{coord_type}_gx"], stim_screen_x_pix)
-                y_coords = center_pixel_coords(trial_events[f"{coord_type}_gy"], stim_screen_y_pix)
+                x_coords = center_pixel_coords(trial_events[f"{coord_type}_gx"], screen_x_pix)
+                y_coords = center_pixel_coords(trial_events[f"{coord_type}_gy"], screen_y_pix)
                 
-                # Get object labels using optimized method
+                # Get object labels using transformed annotations
                 try:
-                    object_cat_ids, object_cat_labels = fix_checker.get_fixated_objects(
+                    object_cat_ids, object_cat_labels = checker.get_fixated_objects(
                         coco_id=scene_id,
                         x_pos=x_coords,
-                        y_pos=y_coords,
-                        scene_scaler=scene_scaler,
-                        look_up_closest=True
+                        y_pos=y_coords
                     )
                     
                     # Add labels to dataframe
@@ -826,9 +546,9 @@ def get_fixated_objects(events_df: pd.DataFrame,
     # Convert object_id to integer
     events_df['object_id'] = events_df['object_id'].astype('Int64')
     
-    fix_checker.close()
-    
     return events_df
+
+
 
 
 def load_object_masks(scene_ids: Union[int, List[int]], 
