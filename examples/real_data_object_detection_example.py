@@ -188,7 +188,6 @@ def plot_fixations_on_scene(scene_id: int, fixations_df: pd.DataFrame,
     
     # Set publication-quality matplotlib parameters
     plt.rcParams.update({
-        'font.family': 'Arial',
         'font.size': 12,
         'axes.linewidth': 1.5,
         'xtick.major.width': 1.5,
@@ -248,8 +247,8 @@ def plot_fixations_on_scene(scene_id: int, fixations_df: pd.DataFrame,
                        zorder=15)
     
     # Set publication-quality title
-    ax.set_title(f"Fixation patterns on scene {scene_id}", 
-                fontsize=16, fontweight='bold', pad=20)
+    #ax.set_title(f"Fixation patterns on scene {scene_id}", 
+    #            fontsize=16, fontweight='bold', pad=20)
     ax.axis('off')
     
     # Ensure tight layout
@@ -296,7 +295,6 @@ def plot_object_fixation_summary(fixations_df: pd.DataFrame,
     
     # Set publication-quality parameters for summary plots
     plt.rcParams.update({
-        'font.family': 'Arial',
         'font.size': 11,
         'axes.linewidth': 1.2,
         'xtick.major.width': 1.2,
@@ -449,7 +447,7 @@ def main():
     
     selected_scenes = fixations_with_objects.groupby('sceneID')['object_label'].nunique().sort_values(ascending=False).index.tolist()
     # get the top 10 scenes with most unique object fixations
-    top_scenes = selected_scenes[:10]
+    top_scenes = selected_scenes[:20]
    
     
     
