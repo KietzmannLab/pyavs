@@ -171,10 +171,10 @@ class AVSSceneAnnotationTransformer:
     def _get_coco_id_from_filename(self, filename: str) -> Optional[int]:
         """Extract COCO ID from filename."""
         try:
-            # Assuming filename format like "000000012345.jpg" or similar
+            # Assuming filename format like "000000580951_MEG_size.jpg" or similar
             stem = Path(filename).stem
             # Remove leading zeros and convert to int
-            return int(stem.lstrip('0') or '0')
+            return int(stem.split('_')[0])
         except (ValueError, AttributeError):
             self.logger.warning(f"Could not extract COCO ID from filename: {filename}")
             return None
@@ -297,7 +297,7 @@ class AVSSceneAnnotationTransformer:
             
             # Convert RLE to serializable format
             rle_serializable = {
-                'size': rle['size'].tolist(),
+                'size': rle['size'],
                 'counts': rle['counts'].decode('utf-8') if isinstance(rle['counts'], bytes) else rle['counts']
             }
             

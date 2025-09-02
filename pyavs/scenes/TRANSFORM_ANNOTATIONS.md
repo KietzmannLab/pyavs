@@ -13,13 +13,13 @@ AVS scenes are processed versions of MSCOCO images that have been:
 To ensure accurate object detection, the object masks must be transformed using the same operations.
 
 ## Usage
-
+DATA_DIR = "/share/klab/datasets/avs"
 ```bash
 python -m pyavs.scenes.transform_scene_annotations \
-    --avs-scenes-dir /path/to/DATA_DIR/AVS-UTILS/avs_scenes \
-    --output-dir /path/to/DATA_DIR/AVS-UTILS/avs_scene_annotations/coco_objects \
-    --mscoco-annotations-dir /path/to/mscoco/annotations \
-    --mscoco-images-dir /path/to/mscoco/images \
+    --avs-scenes-dir /share/klab/datasets/avs/AVS-UTILS/avs_scenes \
+    --output-dir /share/klab/datasets/avs/AVS-UTILS/avs_scene_annotations/coco_objects \
+    --mscoco-annotations-dir /share/klab/datasets/avs/input/annotations \
+    --mscoco-images-dir /share/klab/datasets/avs/input/mscoco_scenes \
     --verbose
 ```
 
