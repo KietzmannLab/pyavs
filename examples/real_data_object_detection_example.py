@@ -1,17 +1,20 @@
 """
-Real data example: Load eye tracking data and visualize object detection.
+Real data example: Load eye tracking data and visualize object detection using transformed annotations.
 
 This example demonstrates how to:
 1. Load actual eye tracking data for a subject and session
-2. Apply object detection to get fixated objects
+2. Apply object detection using pre-transformed AVS scene annotations
 3. Visualize fixations and object labels overlaid on scene images
 4. Create summary plots of object fixation patterns
 
 Requirements:
 - Eye tracking data files (preprocessed)
-- MSCOCO scene images
-- MSCOCO annotations
-- matplotlib, seaborn for plotting
+- Transformed AVS scene annotations (run transform_scene_annotations.py first)
+- Processed scene images (AVS-UTILS/avs_scenes)
+- matplotlib for plotting
+
+Note: This uses the new simplified pyAVS approach with pre-transformed annotations
+that match the processed scene format used in the AVS experiment.
 """
 
 import os
@@ -89,17 +92,17 @@ def load_subject_eye_data(subject_id: int, session_id: int,
 
 
 def add_object_labels_to_data(fixations_df: pd.DataFrame, 
-                             input_dir: str,
+                             transformed_annotations_dir: str,
                              verbose: bool = True) -> pd.DataFrame:
     """
-    Add object labels to fixation data using optimized detection.
+    Add object labels to fixation data using transformed AVS scene annotations.
     
     Parameters
     ----------
     fixations_df : pd.DataFrame
         Fixation events dataframe
-    input_dir : str
-        Path to MSCOCO data directory
+    transformed_annotations_dir : str
+        Path to transformed annotations directory
     verbose : bool, optional
         Print progress information
         
@@ -108,14 +111,13 @@ def add_object_labels_to_data(fixations_df: pd.DataFrame,
     pd.DataFrame
         Fixations with object labels added
     """
-    print("Adding object labels to fixations...")
+    print("Adding object labels to fixations using transformed annotations...")
     
-    # Use the optimized object detection
+    # Use the new AVS transformed annotations approach
     fixations_with_objects = get_fixated_objects(
         fixations_df,
-        input_dir=input_dir,
-        verbose=verbose,
-        force_recompute=False  # Use cached masks if available
+        transformed_annotations_dir=transformed_annotations_dir,
+        verbose=verbose
     )
     
     # Print summary statistics
@@ -362,7 +364,7 @@ def main():
     SUBJECT_ID = 1
     SESSION_ID = 1
     DATA_PATH = config.data_path
-    INPUT_DIR = "/share/klab/datasets/avs/input"  # Path to MSCOCO data
+    TRANSFORMED_ANNOTATIONS_DIR = "/share/klab/datasets/avs/AVS-UTILS/avs_scene_annotations/coco_objects"
     
     print(f"Using standardized visual parameters:")
     print(f"  Screen size: {config.screen_size_pixels} pixels")
@@ -376,9 +378,10 @@ def main():
         print("Please update DATA_PATH in the script to point to your AVS data directory")
         return
     
-    if not os.path.exists(INPUT_DIR):
-        print(f"ERROR: MSCOCO data path not found: {INPUT_DIR}")
-        print("Please update INPUT_DIR in the script to point to your MSCOCO data directory")
+    if not os.path.exists(TRANSFORMED_ANNOTATIONS_DIR):
+        print(f"ERROR: Transformed annotations directory not found: {TRANSFORMED_ANNOTATIONS_DIR}")
+        print("Please run the annotation transformation script first:")
+        print("python -m pyavs.scenes.transform_scene_annotations --avs-scenes-dir ... --output-dir ...")
         return
     
   
@@ -388,7 +391,7 @@ def main():
     
     # Step 2: Add object labels
     print(f"\nStep 2: Adding object labels to {len(fixations_df)} fixations")
-    fixations_with_objects = add_object_labels_to_data(fixations_df, INPUT_DIR, verbose=True)
+    fixations_with_objects = add_object_labels_to_data(fixations_df, TRANSFORMED_ANNOTATIONS_DIR, verbose=True)
     
     # Step 3: Create visualizations
     print(f"\nStep 3: Creating visualizations")
