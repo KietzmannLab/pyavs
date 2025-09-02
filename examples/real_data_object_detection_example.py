@@ -131,8 +131,8 @@ def add_object_labels_to_data(fixations_df: pd.DataFrame,
 
 
 def plot_fixations_on_scene(scene_id: int, fixations_df: pd.DataFrame, 
-                           mscoco_image_dir: str, output_dir: str = "plots",
-                           max_fixations: int = 50) -> None:
+                           mscoco_image_dir: str, config: PyAVSConfig,
+                           output_dir: str = "plots", max_fixations: int = 50) -> None:
     """
     Plot fixations with object labels overlaid on a scene image.
     
@@ -144,6 +144,8 @@ def plot_fixations_on_scene(scene_id: int, fixations_df: pd.DataFrame,
         Fixations dataframe with object labels
     mscoco_image_dir : str
         Path to MSCOCO images directory
+    config : PyAVSConfig
+        Configuration with visual system parameters (required)
     output_dir : str, optional
         Output directory for plots
     max_fixations : int, optional
@@ -172,9 +174,15 @@ def plot_fixations_on_scene(scene_id: int, fixations_df: pd.DataFrame,
         image_file = candidate_path
        
     
-    # Load and display image
+    # Load and rescale image using config
     scene_image = Image.open(image_file)
-    img_width, img_height = scene_image.size
+    original_size = scene_image.size
+    rescaled_size = config.get_rescaled_scene_size(original_size)
+    
+    if rescaled_size != original_size:
+        scene_image = scene_image.resize(rescaled_size)
+    
+    img_width, img_height = rescaled_size
     
     # Create plot
     _, ax = plt.subplots(1, 1, figsize=(12, 8))
@@ -185,13 +193,17 @@ def plot_fixations_on_scene(scene_id: int, fixations_df: pd.DataFrame,
     object_colors = dict(zip(unique_objects, colors))
     
     # Set image extent to center coordinate system
-    ax.imshow(scene_image)#, extent=[-img_width/2, img_width/2, -img_height/2, img_height/2])
+    ax.imshow(scene_image, extent=[-img_width/2, img_width/2, -img_height/2, img_height/2])
    
     for i, (_, fixation) in enumerate(scene_fixations.iterrows()):
-        # Coordinates are already screen-centered, use directly
-        x = fixation['mean_gx']
-        y = fixation['mean_gy'] 
-        print(x, y)
+        # Convert screen coordinates to image coordinates using config
+        x_screen = fixation['mean_gx']
+        y_screen = fixation['mean_gy']
+        
+        # Transform to centered image coordinates
+        x = x_screen - config.screen_size_pixels[0]//2
+        y = -(y_screen - config.screen_size_pixels[1]//2)
+        
         object_label = fixation['object_label']
         color = object_colors[object_label]
         
@@ -342,11 +354,21 @@ def main():
     """
     print("=== Real Data Object Detection Example ===\n")
     
+    # Create configuration with standardized parameters
+    config = PyAVSConfig()
+    config.data_path = "/share/klab/datasets/avs/"
+    
     # Configuration
     SUBJECT_ID = 1
     SESSION_ID = 1
-    DATA_PATH = "/share/klab/datasets/avs/"
+    DATA_PATH = config.data_path
     INPUT_DIR = "/share/klab/datasets/avs/input"  # Path to MSCOCO data
+    
+    print(f"Using standardized visual parameters:")
+    print(f"  Screen size: {config.screen_size_pixels} pixels")
+    print(f"  Screen usage: {config.screen_usage}")
+    print(f"  Pixels per degree: {config.get_pixels_per_degree():.1f}")
+    print(f"  Scene scaling factor: {config.get_scene_scaling_factor():.3f}\n")
     
     # Check if paths exist
     if not os.path.exists(DATA_PATH):
@@ -388,6 +410,7 @@ def main():
             int(scene_id), 
             fixations_with_objects, 
             mscoco_image_dir,
+            config
         )
     
     # Print final summary
