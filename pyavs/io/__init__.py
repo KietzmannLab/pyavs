@@ -11,6 +11,7 @@ from .write import (
     save_annotated_raw,
     save_source_data,
     save_epochs,
+    save_metadata_csv,
     save_population_codes_h5
 )
 
@@ -46,6 +47,7 @@ __all__ = [
     'save_annotated_raw',
     'save_source_data',
     'save_epochs',
+    'save_metadata_csv',
     'save_population_codes_h5',
     
     # Reading functions

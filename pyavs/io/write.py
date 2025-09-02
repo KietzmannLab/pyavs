@@ -12,6 +12,7 @@ import mne
 import h5py
 import json
 import hashlib
+from pathlib import Path
 from typing import List, Optional, Dict, Any, Union
 
 from ..utils.config import get_data_path
@@ -563,6 +564,47 @@ def _raw_to_h5_format(raw: mne.io.Raw) -> Dict[str, np.ndarray]:
     return {'raw_data': data_expanded}
 
 
+
+
+def save_metadata_csv(metadata: pd.DataFrame, subject_id: int, session: int, 
+                      event_type: str, data_path: Optional[str] = None) -> str:
+    """
+    Save epochs metadata as CSV file.
+    
+    Parameters
+    ----------
+    metadata : pd.DataFrame
+        Epochs metadata to save
+    subject_id : int
+        Subject ID
+    session : int
+        Session number
+    event_type : str
+        Event type (e.g., 'fixation', 'saccade')
+    data_path : str, optional
+        Path to data directory
+        
+    Returns
+    -------
+    str
+        Path to saved CSV file
+    """
+    if data_path is None:
+        from ..utils.config import get_data_path
+        data_path = get_data_path()
+    
+    # Create output directory using same structure as epochs
+    output_dir = _create_derivatives_directory(data_path, subject_id, session, 'epochs')
+    
+    # Create filename
+    csv_file = Path(output_dir) / f"sub-{subject_id:02d}_ses-{session:02d}_{event_type}_metadata.csv"
+    
+    # Save metadata
+    if metadata is not None and not metadata.empty:
+        metadata.to_csv(csv_file, index=False)
+        return str(csv_file)
+    else:
+        raise ValueError("Metadata is empty or None")
 
 
 def _save_parameter_metadata(metadata_file: str, metadata: Dict[str, Any]) -> None:
