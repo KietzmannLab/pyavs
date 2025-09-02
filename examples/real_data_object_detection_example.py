@@ -151,7 +151,8 @@ def plot_fixations_on_scene(scene_id: int, fixations_df: pd.DataFrame,
     """
     # Filter fixations for this scene
     scene_fixations = fixations_df[fixations_df['sceneID'] == scene_id].copy()
-    
+    scene_fixations = scene_fixations.loc[scene_fixations["recording"] == "scene"]
+    scene_fixations = scene_fixations.loc[scene_fixations["type"] == "fixation"]
     if len(scene_fixations) == 0:
         print(f"No fixations found for scene {scene_id}")
         return
@@ -184,14 +185,13 @@ def plot_fixations_on_scene(scene_id: int, fixations_df: pd.DataFrame,
     object_colors = dict(zip(unique_objects, colors))
     
     # Set image extent to center coordinate system
-    ax.imshow(scene_image, extent=[-img_width/2, img_width/2, -img_height/2, img_height/2])
-    
-    # Plot fixations colored by object
+    ax.imshow(scene_image)#, extent=[-img_width/2, img_width/2, -img_height/2, img_height/2])
+   
     for i, (_, fixation) in enumerate(scene_fixations.iterrows()):
         # Coordinates are already screen-centered, use directly
         x = fixation['mean_gx']
-        y = fixation['mean_gy']
-        
+        y = fixation['mean_gy'] 
+        print(x, y)
         object_label = fixation['object_label']
         color = object_colors[object_label]
         
@@ -373,8 +373,9 @@ def main():
     
     # Plot summary statistics
     plot_object_fixation_summary(fixations_with_objects)
-    random_scenes = np.random.choice(
-        fixations_with_objects['sceneID'].dropna().unique(), size=3, replace=False
+    rng = np.random.default_rng(seed=42)
+    random_scenes = rng.choice(
+        fixations_with_objects['sceneID'].dropna().unique(), size=10, replace=False
     )
     # randomly select 3 scenes
     
@@ -384,10 +385,9 @@ def main():
     for scene_id in random_scenes:
         print(f"\nPlotting fixations for scene {scene_id}")
         plot_fixations_on_scene(
-            scene_id, 
+            int(scene_id), 
             fixations_with_objects, 
             mscoco_image_dir,
-            max_fixations=30
         )
     
     # Print final summary
