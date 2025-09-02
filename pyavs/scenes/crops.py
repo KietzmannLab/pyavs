@@ -102,7 +102,7 @@ def create_fixation_crops(eye_events_df: pd.DataFrame,
         # Convert from screen coordinates to image coordinates
         # Screen coordinates are centered, image coordinates start from top-left
         fix_x_image = fix_x_screen - config.screen_size_pixels[0] // 2 + img_width // 2
-        fix_y_image = img_height // 2 - (fix_y_screen - config.screen_size_pixels[1] // 2)
+        fix_y_image = img_height // 2 + (fix_y_screen - config.screen_size_pixels[1] // 2)
         
         # Calculate crop boundaries
         left = int(fix_x_image - crop_width // 2)
@@ -398,7 +398,7 @@ def visualize_fixations_on_scene(scene_id: int,
             
             # Convert to image coordinates
             x_image = x_screen - config.screen_size_pixels[0] // 2 + img_width // 2
-            y_image = img_height // 2 - (y_screen - config.screen_size_pixels[1] // 2)
+            y_image = img_height // 2 + (y_screen - config.screen_size_pixels[1] // 2)
             
             x_coords.append(x_image)
             y_coords.append(y_image)

@@ -186,17 +186,30 @@ def plot_fixations_on_scene(scene_id: int, fixations_df: pd.DataFrame,
     
     img_width, img_height = rescaled_size
     
-    # Create plot
-    _, ax = plt.subplots(1, 1, figsize=(12, 8))
+    # Set publication-quality matplotlib parameters
+    plt.rcParams.update({
+        'font.family': 'Arial',
+        'font.size': 12,
+        'axes.linewidth': 1.5,
+        'xtick.major.width': 1.5,
+        'ytick.major.width': 1.5,
+        'figure.dpi': 300
+    })
+    
+    # Create plot with publication-quality size (300 DPI)
+    fig, ax = plt.subplots(1, 1, figsize=(10, 7.5))  # 3000x2250 pixels at 300 DPI
     
     # Get unique object labels and assign colors
     unique_objects = scene_fixations['object_label'].unique()
-    colors = plt.cm.tab20(np.linspace(0, 1, len(unique_objects)))
+    colors = plt.cm.Set1(np.linspace(0, 1, min(len(unique_objects), 9)))  # Better color palette
     object_colors = dict(zip(unique_objects, colors))
     
     # Set image extent to center coordinate system
     ax.imshow(scene_image, extent=[-img_width/2, img_width/2, -img_height/2, img_height/2])
    
+    # Track label positions to avoid overlaps
+    label_positions = {}
+    
     for i, (_, fixation) in enumerate(scene_fixations.iterrows()):
         # Convert screen coordinates to image coordinates using config
         x_screen = fixation['mean_gx']
@@ -204,42 +217,58 @@ def plot_fixations_on_scene(scene_id: int, fixations_df: pd.DataFrame,
         
         # Transform to centered image coordinates
         x = x_screen - config.screen_size_pixels[0]//2
-        y = -(y_screen - config.screen_size_pixels[1]//2)
+        y = y_screen - config.screen_size_pixels[1]//2
         
         object_label = fixation['object_label']
         color = object_colors[object_label]
         
-        # Plot fixation point
-        ax.scatter(x, y, c=[color], s=100, alpha=0.8, 
-                  edgecolors='white', linewidth=2, zorder=10)
+        # Plot fixation point with larger, more visible marker
+        ax.scatter(x, y, c=[color], s=150, alpha=0.9, 
+                  edgecolors='white', linewidth=3, zorder=10)
         
-        # Add sequence number
-        ax.text(x + 15, y + 15, str(i+1), 
-               fontsize=8, color='white', fontweight='bold',
-               bbox=dict(boxstyle='round,pad=0.3', facecolor='black', alpha=0.7))
+        # Add object label as text annotation directly on the image
+        # Position text to avoid overlap
+        if object_label not in label_positions:
+            label_positions[object_label] = (x, y)
+            
+            # Create professional text annotation with background
+            ax.annotate(object_label, 
+                       xy=(x, y), xytext=(10, 10), 
+                       textcoords='offset points',
+                       fontsize=11, fontweight='bold', 
+                       color='black',
+                       bbox=dict(boxstyle='round,pad=0.4', 
+                               facecolor='lightgray', 
+                               edgecolor='white',
+                               alpha=0.85),
+                       arrowprops=dict(arrowstyle='->', 
+                                     connectionstyle='arc3,rad=0.1',
+                                     color=color,
+                                     lw=2),
+                       zorder=15)
     
-    # Create legend
-    legend_elements = []
-    for obj_label, color in object_colors.items():
-        count = len(scene_fixations[scene_fixations['object_label'] == obj_label])
-        legend_elements.append(
-            plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=color,
-                      markersize=8, label=f"{obj_label} ({count})")
-        )
-    
-    ax.legend(handles=legend_elements, loc='upper right', bbox_to_anchor=(1, 1))
-    
-    ax.set_title(f"Fixations on Scene {scene_id}\n"
-                f"{len(scene_fixations)} fixations, "
-                f"{len(unique_objects)} different objects", fontsize=14)
+    # Set publication-quality title
+    ax.set_title(f"Fixation patterns on scene {scene_id}", 
+                fontsize=16, fontweight='bold', pad=20)
     ax.axis('off')
     
-    # Save plot
+    # Ensure tight layout
+    plt.tight_layout()
+    
+    # Save plot in both PNG and PDF formats
     os.makedirs(output_dir, exist_ok=True)
-    output_file = os.path.join(output_dir, f"scene_{scene_id}_fixations.png")
-    print(f"Saving plot to {output_file}")
-    plt.savefig(output_file, dpi=300, bbox_inches='tight')
-    print(f"Saved fixation plot: {output_file}")
+    
+    # Save as high-resolution PNG
+    png_file = os.path.join(output_dir, f"scene_{scene_id}_fixations.png")
+    plt.savefig(png_file, dpi=300, bbox_inches='tight', facecolor='white', edgecolor='none')
+    
+    # Save as PDF for publications
+    pdf_file = os.path.join(output_dir, f"scene_{scene_id}_fixations.pdf")
+    plt.savefig(pdf_file, format='pdf', bbox_inches='tight', facecolor='white', edgecolor='none')
+    
+    print(f"Saved fixation plots:")
+    print(f"  PNG: {png_file}")
+    print(f"  PDF: {pdf_file}")
     
     plt.show()
 
@@ -265,7 +294,17 @@ def plot_object_fixation_summary(fixations_df: pd.DataFrame,
         print("No object fixations to plot")
         return
     
-    _, axes = plt.subplots(2, 2, figsize=(15, 12))
+    # Set publication-quality parameters for summary plots
+    plt.rcParams.update({
+        'font.family': 'Arial',
+        'font.size': 11,
+        'axes.linewidth': 1.2,
+        'xtick.major.width': 1.2,
+        'ytick.major.width': 1.2,
+        'figure.dpi': 300
+    })
+    
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
     
     # 1. Most fixated objects
     object_counts = object_fixations['object_label'].value_counts().head(15)
@@ -341,11 +380,18 @@ def plot_object_fixation_summary(fixations_df: pd.DataFrame,
     
     plt.tight_layout()
     
-    # Save plot
+    # Save plots in both formats
     os.makedirs(output_dir, exist_ok=True)
-    output_file = os.path.join(output_dir, "object_fixation_summary.png")
-    plt.savefig(output_file, dpi=300, bbox_inches='tight')
-    print(f"Saved summary plot: {output_file}")
+    
+    png_file = os.path.join(output_dir, "object_fixation_summary.png")
+    pdf_file = os.path.join(output_dir, "object_fixation_summary.pdf")
+    
+    plt.savefig(png_file, dpi=300, bbox_inches='tight', facecolor='white', edgecolor='none')
+    plt.savefig(pdf_file, format='pdf', bbox_inches='tight', facecolor='white', edgecolor='none')
+    
+    print(f"Saved summary plots:")
+    print(f"  PNG: {png_file}")
+    print(f"  PDF: {pdf_file}")
     
     plt.show()
 
