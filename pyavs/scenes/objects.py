@@ -347,12 +347,64 @@ class FixationObjectChecker:
         }
         return pycocotools.mask.decode(rle).astype(bool)
     
-    def get_fixated_objects(self, coco_id: int, x_pos: Union[float, np.ndarray], 
-                           y_pos: Union[float, np.ndarray]) -> Tuple[List[int], List[str]]:
+    def _compute_distance_to_nearest_object_pixel(self, mask: np.ndarray, 
+                                                 fix_x: int, fix_y: int,
+                                                 search_radius: int) -> float:
         """
-        Check which objects are fixated at given coordinates.
+        Compute Euclidean distance from fixation to nearest object pixel within search area.
         
-        Coordinates should be in screen-centered pixels (matching the processed scene format).
+        Parameters
+        ----------
+        mask : np.ndarray
+            Boolean object mask
+        fix_x, fix_y : int
+            Fixation coordinates in image space
+        search_radius : int
+            Search radius in pixels
+            
+        Returns
+        -------
+        float
+            Distance to nearest object pixel, or np.inf if no object found
+        """
+        from scipy.spatial.distance import euclidean
+        
+        # Define search area bounds
+        y_start = max(0, fix_y - search_radius)
+        y_end = min(mask.shape[0], fix_y + search_radius + 1)
+        x_start = max(0, fix_x - search_radius)
+        x_end = min(mask.shape[1], fix_x + search_radius + 1)
+        
+        # Extract search area from mask
+        search_area = mask[y_start:y_end, x_start:x_end]
+        
+        if not search_area.any():
+            return np.inf
+        
+        # Find all object pixels in search area
+        obj_pixels_local = np.where(search_area)
+        
+        if len(obj_pixels_local[0]) == 0:
+            return np.inf
+        
+        # Convert to absolute coordinates
+        obj_y = obj_pixels_local[0] + y_start  
+        obj_x = obj_pixels_local[1] + x_start
+        
+        # Calculate distances to all object pixels
+        distances = np.sqrt((obj_x - fix_x)**2 + (obj_y - fix_y)**2)
+        
+        return float(np.min(distances))
+    
+    def get_fixated_objects(self, coco_id: int, x_pos: Union[float, np.ndarray], 
+                           y_pos: Union[float, np.ndarray],
+                           error_margin_pixels: int = 10) -> Tuple[List[int], List[str]]:
+        """
+        Check which objects are fixated at given coordinates with error margin tolerance.
+        
+        This method first checks for direct hits at the exact fixation coordinates. If no 
+        object is found, it searches within an error margin around the fixation to account 
+        for eye tracker noise and calibration drift.
         
         Parameters
         ----------
@@ -362,6 +414,9 @@ class FixationObjectChecker:
             Screen-centered x coordinates (pixels)
         y_pos : float or array  
             Screen-centered y coordinates (pixels)
+        error_margin_pixels : int, optional
+            Search radius in pixels around fixation for nearest object (default: 10)
+            This accounts for eye tracker noise and calibration drift.
             
         Returns
         -------
@@ -399,8 +454,8 @@ class FixationObjectChecker:
                 category_names.append('outside')
                 continue
             
-            # Find objects at this position
-            detected_objects = []
+            # Step 1: Check for direct hits at exact fixation coordinates
+            direct_hit_objects = []
             
             for cat_id_str, obj_data in annotations.items():
                 # Check bounding box first (fast pre-filter)
@@ -409,34 +464,68 @@ class FixationObjectChecker:
                 if (bbox_x <= x_img <= bbox_x + bbox_w and 
                     bbox_y <= y_img <= bbox_y + bbox_h):
                     
-                    # Decode and check actual mask
+                    # Decode and check actual mask for exact hit
                     try:
                         mask = self._decode_rle_mask(obj_data['rle'])
                         
                         if (y_img < mask.shape[0] and x_img < mask.shape[1] and 
                             mask[y_img, x_img]):
-                            detected_objects.append(obj_data)
+                            direct_hit_objects.append(obj_data)
                     except Exception as e:
                         print(f"Error decoding mask for category {cat_id_str}: {e}")
                         continue
             
-            # Handle detection results
-            if len(detected_objects) == 1:
-                # Single object detected
-                obj = detected_objects[0]
+            # Handle direct hits
+            if len(direct_hit_objects) == 1:
+                # Single direct hit
+                obj = direct_hit_objects[0]
                 object_cats.append(obj['category_id'])
                 category_names.append(obj['category_name'])
                 
-            elif len(detected_objects) > 1:
-                # Multiple objects: choose smallest area
-                min_area_obj = min(detected_objects, key=lambda x: x['area'])
+            elif len(direct_hit_objects) > 1:
+                # Multiple direct hits: choose smallest area
+                min_area_obj = min(direct_hit_objects, key=lambda x: x['area'])
                 object_cats.append(min_area_obj['category_id'])
                 category_names.append(min_area_obj['category_name'])
                 
             else:
-                # No objects detected
-                object_cats.append(-1)
-                category_names.append('None')
+                # Step 2: No direct hit - search within error margin
+                candidate_objects = []
+                
+                for cat_id_str, obj_data in annotations.items():
+                    # Expand bounding box check to include error margin
+                    bbox_x, bbox_y, bbox_w, bbox_h = obj_data['bbox']
+                    
+                    # Check if fixation is within error margin of bounding box
+                    if (bbox_x - error_margin_pixels <= x_img <= bbox_x + bbox_w + error_margin_pixels and 
+                        bbox_y - error_margin_pixels <= y_img <= bbox_y + bbox_h + error_margin_pixels):
+                        
+                        try:
+                            mask = self._decode_rle_mask(obj_data['rle'])
+                            
+                            # Compute distance to nearest object pixel within search radius
+                            distance = self._compute_distance_to_nearest_object_pixel(
+                                mask, x_img, y_img, error_margin_pixels
+                            )
+                            
+                            # Only consider objects within the error margin
+                            if distance <= error_margin_pixels:
+                                candidate_objects.append((obj_data, distance))
+                                
+                        except Exception as e:
+                            print(f"Error processing object {cat_id_str} for error margin search: {e}")
+                            continue
+                
+                # Select closest object within error margin
+                if candidate_objects:
+                    # Sort by distance and choose closest
+                    closest_obj, closest_distance = min(candidate_objects, key=lambda x: x[1])
+                    object_cats.append(closest_obj['category_id'])
+                    category_names.append(closest_obj['category_name'])
+                else:
+                    # No objects found even with error margin
+                    object_cats.append(-1)
+                    category_names.append('None')
         
         return object_cats, category_names
     
@@ -448,12 +537,14 @@ class FixationObjectChecker:
 
 def get_fixated_objects(events_df: pd.DataFrame, 
                        transformed_annotations_dir: str,
-                       verbose: bool = False) -> pd.DataFrame:
+                       verbose: bool = False,
+                       error_margin_pixels: int = 10) -> pd.DataFrame:
     """
     Add object labels to fixation events using transformed AVS scene annotations.
     
     This function uses pre-transformed annotations that match the processed scene
     format used in the AVS experiment, providing more accurate object detection.
+    Includes error margin tolerance to account for eye tracker noise and calibration drift.
     
     Parameters
     ----------
@@ -463,6 +554,9 @@ def get_fixated_objects(events_df: pd.DataFrame,
         Path to directory containing transformed annotation JSON files
     verbose : bool, optional
         Whether to print progress information (default: False)
+    error_margin_pixels : int, optional
+        Search radius in pixels around fixation for nearest object (default: 10)
+        This accounts for eye tracker noise and calibration drift.
         
     Returns
     -------
@@ -521,12 +615,13 @@ def get_fixated_objects(events_df: pd.DataFrame,
                 x_coords = center_pixel_coords(trial_events[f"{coord_type}_gx"], screen_x_pix)
                 y_coords = center_pixel_coords(trial_events[f"{coord_type}_gy"], screen_y_pix)
                 
-                # Get object labels using transformed annotations
+                # Get object labels using transformed annotations with error margin
                 try:
                     object_cat_ids, object_cat_labels = checker.get_fixated_objects(
                         coco_id=scene_id,
                         x_pos=x_coords,
-                        y_pos=y_coords
+                        y_pos=y_coords,
+                        error_margin_pixels=error_margin_pixels
                     )
                     
                     # Add labels to dataframe

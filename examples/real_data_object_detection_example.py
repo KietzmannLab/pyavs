@@ -444,7 +444,7 @@ def main():
     
     # Plot summary statistics
     plot_object_fixation_summary(fixations_with_objects)
-    rng = np.random.default_rng(seed=42)
+    
     # sort scenes by number of unique object fixations (getting more interesting scenes first)
     
     selected_scenes = fixations_with_objects.groupby('sceneID')['object_label'].nunique().sort_values(ascending=False).index.tolist()
