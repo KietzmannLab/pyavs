@@ -468,19 +468,25 @@ class FixationObjectChecker:
         if x_pos.shape != y_pos.shape:
             raise ValueError("x_pos and y_pos must have the same shape")
         
-        # Get image dimensions from metadata
-        img_height, img_width = self._get_image_dimensions(coco_id)
+        # Get actual scene image dimensions (resized from MSCOCO)
+        # Note: Scenes are center-cropped and resized by scene_resizer to 
+        # screen_size_pixels * screen_usage dimensions (default: 947x710)
+        # This matches the actual size of processed scene images
+        from ..utils.config import get_config
+        config = get_config()
+        actual_img_width = int(config.screen_size_pixels[0] * config.screen_usage)
+        actual_img_height = int(config.screen_size_pixels[1] * config.screen_usage)
         
         # Convert screen-centered coordinates to image coordinates
-        x_pos_adjusted = np.array(x_pos + img_width / 2, dtype=int)
-        y_pos_adjusted = np.array(np.abs(y_pos - img_height / 2), dtype=int)
+        x_pos_adjusted = np.array(x_pos + actual_img_width / 2, dtype=int)
+        y_pos_adjusted = np.array(np.abs(y_pos - actual_img_height / 2), dtype=int)
         
         # Apply scaling if needed
         if scene_scaler is not None:
             x_pos_adjusted = (x_pos_adjusted * scene_scaler).astype(int)
             y_pos_adjusted = (y_pos_adjusted * scene_scaler).astype(int)
-            img_width = int(img_width * scene_scaler)
-            img_height = int(img_height * scene_scaler)
+            actual_img_width = int(actual_img_width * scene_scaler)
+            actual_img_height = int(actual_img_height * scene_scaler)
         
         object_cats = []
         category_names = []
@@ -491,8 +497,8 @@ class FixationObjectChecker:
             current_y = y_pos_adjusted[i]
             
             # Check if fixation is outside scene boundaries
-            if (current_x < 0 or current_x >= img_width or 
-                current_y < 0 or current_y >= img_height):
+            if (current_x < 0 or current_x >= actual_img_width or 
+                current_y < 0 or current_y >= actual_img_height):
                 object_cats.append(-2)
                 category_names.append('outside')
                 continue
@@ -563,21 +569,13 @@ class FixationObjectChecker:
         
         return object_cats, category_names
     
-    def _get_image_dimensions(self, coco_id: int) -> Tuple[int, int]:
-        """Get image dimensions from metadata or estimate."""
-        coco_id_str = str(coco_id)
-        
-        if coco_id_str in self.metadata and self.metadata[coco_id_str]:
-            # Estimate from bounding boxes
-            max_x, max_y = 0, 0
-            for meta in self.metadata[coco_id_str]:
-                bbox_x, bbox_y, bbox_w, bbox_h = meta.bbox
-                max_x = max(max_x, bbox_x + bbox_w)
-                max_y = max(max_y, bbox_y + bbox_h)
-            return max_y, max_x
-        
-        # Default fallback
-        return 768, 1024
+    def _get_actual_scene_dimensions(self) -> Tuple[int, int]:
+        """Get actual scene dimensions after resizing/cropping."""
+        from ..utils.config import get_config
+        config = get_config()
+        width = int(config.screen_size_pixels[0] * config.screen_usage)
+        height = int(config.screen_size_pixels[1] * config.screen_usage)
+        return height, width
     
     def _find_closest_object_efficient(self, coco_id: int, x_pos: int, y_pos: int,
                                      look_up_dist_pix: int, scene_scaler: Optional[float] = None,
