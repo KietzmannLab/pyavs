@@ -407,7 +407,7 @@ def main():
     config.data_path = "/share/klab/datasets/avs/"
     
     # Configuration
-    SUBJECT_ID = 1
+    SUBJECT_ID = 4
     SESSION_ID = 1
     DATA_PATH = config.data_path
     TRANSFORMED_ANNOTATIONS_DIR = "/share/klab/datasets/avs/AVS-UTILS/avs_scene_annotations/coco_objects"
@@ -445,15 +445,17 @@ def main():
     # Plot summary statistics
     plot_object_fixation_summary(fixations_with_objects)
     rng = np.random.default_rng(seed=42)
-    random_scenes = rng.choice(
-        fixations_with_objects['sceneID'].dropna().unique(), size=10, replace=False
-    )
-    # randomly select 3 scenes
+    # sort scenes by number of unique object fixations (getting more interesting scenes first)
+    
+    selected_scenes = fixations_with_objects.groupby('sceneID')['object_label'].nunique().sort_values(ascending=False).index.tolist()
+    # get the top 10 scenes with most unique object fixations
+    top_scenes = selected_scenes[:10]
+   
     
     
     mscoco_image_dir = os.path.join(DATA_PATH, "AVS-UTILS", "avs_scenes")
     
-    for scene_id in random_scenes:
+    for scene_id in top_scenes:
         print(f"\nPlotting fixations for scene {scene_id}")
         plot_fixations_on_scene(
             int(scene_id), 
