@@ -98,28 +98,51 @@ def process_single_subject_session(subject_id: int, session: int,
     try:
         logger.info(f"Processing subject {subject_id}, session {session}")
         
-        # Initialize composer
-        composer = AVSComposer(
-            subject=subject_id,
-            session_num=session,
-            data_path=data_path,
-            output_path=str(output_dir)
-        )
+        # Initialize composer with config parameters
+        composer_kwargs = config.get_composer_kwargs()
+        composer_kwargs.update({
+            'subject': subject_id,
+            'session_num': session,
+            'data_path': data_path,
+            'output_path': str(output_dir)
+        })
+        composer = AVSComposer(**composer_kwargs)
         
         # Load and preprocess MEG data
         logger.info("Loading MEG data...")
         composer.load_meg_data()
         
-        # Apply ICA if available
-        try:
-            composer.apply_ica_to_blocks()
-            logger.info("Applied ICA to MEG blocks")
-        except Exception as e:
-            logger.warning(f"ICA application failed: {e}")
+        # Interpolate bad channels if configured
+        if config.interpolate_bad_channels:
+            logger.info("Interpolating bad channels")
+            for raw in composer.raws:
+                if raw.info['bads']:
+                    raw.interpolate_bads(reset_bads=True)
         
-        # Filter and concatenate MEG data
-        composer.filter_meg_data()
+        # Apply ICA if configured and available
+        if config.apply_ica or config.use_precomputed_ica:
+            try:
+                composer.apply_ica_to_blocks()
+                logger.info("Applied ICA to MEG blocks")
+            except Exception as e:
+                logger.warning(f"ICA application failed: {e}")
+        else:
+            logger.info("ICA not applied (disabled in config)")
+        
+        # Filter MEG data using config parameters
+        composer.filter_meg_data(
+            l_freq=config.filter_params.get('l_freq'),
+            h_freq=config.filter_params.get('h_freq'),
+            picks=config.filter_params.get('picks'),
+            causal=config.filter_params.get('causal', True)
+        )
         composer.concatenate_raws_per_session()
+        
+        # Resample if configured
+        if config.resample_freq and config.resample_freq != composer.raw_meg.info['sfreq']:
+            logger.info(f"Resampling from {composer.raw_meg.info['sfreq']} Hz to {config.resample_freq} Hz")
+            composer.raw_meg.resample(config.resample_freq, n_jobs=config.n_jobs)
+        
         composer.find_events_in_raw()
         
         logger.info(f"Found {len(composer.meg_trigger_events)} MEG trigger events")
@@ -167,7 +190,10 @@ def process_single_subject_session(subject_id: int, session: int,
                     subject_id=subject_id,
                     session=session,
                     event_type=f"{event_type}_scene",
-                    data_path=data_path
+                    data_path=data_path,
+                    filter_params=config.filter_params,
+                    sampling_rate=config.resample_freq,
+                    blocks=composer.blocks if hasattr(composer, 'blocks') else None
                 )
                 
                 results['epochs_created'][event_type] = {
@@ -322,7 +348,7 @@ def main():
         epilog="""
 Examples:
   # Process single subject and session
-  python compute_fixation_epochs.py --subject 1 --session 1 --data-path /path/to/data
+  python /home/student/p/psulewski/pyAVS/scripts/compute_fixation_epochs.py --subject 1 --session 1 --data-path /share/klab/datasets/avs/
   
   # Process multiple subjects and sessions
   python compute_fixation_epochs.py --subjects 1 2 3 --sessions 1 2 --data-path /path/to/data
@@ -407,6 +433,10 @@ Examples:
     print(f"Recording type: {RECORDING_TYPE}")
     print(f"Object labels: {'No' if args.no_object_labels else 'Yes'}")
     print(f"Parallel jobs: {args.n_jobs}")
+    print(f"Filter settings: {config.filter_params['l_freq']}-{config.filter_params['h_freq']} Hz")
+    print(f"Resampling: {config.resample_freq} Hz")
+    print(f"ICA application: {'Yes' if config.apply_ica or config.use_precomputed_ica else 'No'}")
+    print(f"Bad channel interpolation: {'Yes' if config.interpolate_bad_channels else 'No'}")
     print()
     
     # Process epochs
