@@ -174,7 +174,7 @@ def _process_messages(events: pd.DataFrame, messages: pd.DataFrame, explog: pd.D
                 
                 # Add block and trial_per_block info
                 trial_info = explog.loc[explog.trial == trialid_int]
-                if not trial_info.empty:
+                if len(trial_info) > 0:
                     events.loc[mask, 'trial_per_block'] = int(trial_info.iloc[0]['trial_per_block'])
                     events.loc[mask, 'block'] = int(trial_info.iloc[0]['block'])
                     

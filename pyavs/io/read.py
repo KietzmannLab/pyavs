@@ -355,7 +355,7 @@ def load_eye_events(subjects: List[int], sessions: List[int],
             try:
                 # Load experiment log
                 exp_log = load_experiment_log(subject_id, session, data_path)
-                if exp_log is not None and not exp_log.empty:
+                if exp_log is not None and len(exp_log) > 0:
                     exp_log['subject_id'] = subject_id
                     exp_log['session'] = session
                     all_exp_logs.append(exp_log)
@@ -363,7 +363,7 @@ def load_eye_events(subjects: List[int], sessions: List[int],
                 # Load eye tracking events
                 for event_type in event_types:
                     events = load_eye_events_single(subject_id, session, event_type, data_path, recording)
-                    if events is not None and not events.empty:
+                    if events is not None and len(events) > 0:
                         events['subject_id'] = subject_id
                         events['session'] = session
                         events['type'] = event_type

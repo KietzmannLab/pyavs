@@ -496,7 +496,7 @@ def save_population_codes_h5(population_codes: Dict[str, np.ndarray],
         # Fixation mask functionality removed
         
         # Save metadata if available
-        if not metadata.empty:
+        if len(metadata) > 0:
             metadata_group = storage.create_group('metadata')
             for col in metadata.columns:
                 metadata_group.create_dataset(col, data=metadata[col].values)
@@ -600,7 +600,7 @@ def save_metadata_csv(metadata: pd.DataFrame, subject_id: int, session: int,
     csv_file = Path(output_dir) / f"sub-{subject_id:02d}_ses-{session:02d}_{event_type}_metadata.csv"
     
     # Save metadata
-    if not metadata.empty:
+    if len(metadata) > 0:
         metadata.to_csv(csv_file, index=False)
         return str(csv_file)
     else:
