@@ -600,7 +600,7 @@ def save_metadata_csv(metadata: pd.DataFrame, subject_id: int, session: int,
     csv_file = Path(output_dir) / f"sub-{subject_id:02d}_ses-{session:02d}_{event_type}_metadata.csv"
     
     # Save metadata
-    if metadata is not None and not metadata.empty:
+    if not metadata.empty:
         metadata.to_csv(csv_file, index=False)
         return str(csv_file)
     else:

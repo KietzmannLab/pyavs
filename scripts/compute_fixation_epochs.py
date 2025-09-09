@@ -112,30 +112,14 @@ def process_single_subject_session(subject_id: int, session: int,
         logger.info("Loading MEG data...")
         composer.load_meg_data()
         
-        # Interpolate bad channels if configured
-        if config.interpolate_bad_channels:
-            logger.info("Interpolating bad channels")
-            for raw in composer.raws:
-                if raw.info['bads']:
-                    raw.interpolate_bads(reset_bads=True)
+        # Apply ICA if available
         
-        # Apply ICA if configured and available
-        if config.apply_ica or config.use_precomputed_ica:
-            try:
-                composer.apply_ica_to_blocks()
-                logger.info("Applied ICA to MEG blocks")
-            except Exception as e:
-                logger.warning(f"ICA application failed: {e}")
-        else:
-            logger.info("ICA not applied (disabled in config)")
+        composer.apply_ica_to_blocks(use_precomputed=True)
+        logger.info("Applied ICA to MEG blocks")
         
-        # Filter MEG data using config parameters
-        composer.filter_meg_data(
-            l_freq=config.filter_params.get('l_freq'),
-            h_freq=config.filter_params.get('h_freq'),
-            picks=config.filter_params.get('picks'),
-            causal=config.filter_params.get('causal', True)
-        )
+        
+        # Filter and concatenate MEG data
+        composer.filter_meg_data(ignore_existing_filter=True)
         composer.concatenate_raws_per_session()
         
         # Resample if configured
@@ -149,81 +133,75 @@ def process_single_subject_session(subject_id: int, session: int,
         
         # Process each event type
         for event_type in EVENT_TYPES:
-            try:
-                logger.info(f"Processing {event_type} events...")
-                
-                # Load eye tracking events with object labels
-                composer.get_et_annotations(
-                    et_event_type=event_type,
-                    recording=RECORDING_TYPE,
-                    get_object_labels=include_object_labels
-                )
-                
-                if not hasattr(composer, 'et_events') or len(composer.et_events) == 0:
-                    logger.warning(f"No {event_type} events found")
-                    continue
-                
-                logger.info(f"Loaded {len(composer.et_events)} {event_type} events")
-                
-                # Create epochs
-                composer.make_et_event_epochs(
-                    tmin=config.tmin,
-                    tmax=config.tmax,
-                    event_type=event_type,
-                    recording=RECORDING_TYPE,
-                    save_epochs=False,  # We'll save manually for better control
-                    get_metadata=True,
-                    get_object_labels=include_object_labels,
-                    baseline=None  # No baseline correction (AVS practice)
-                )
-                
-                if not hasattr(composer, 'et_epochs') or len(composer.et_epochs) == 0:
-                    logger.warning(f"No {event_type} epochs created")
-                    continue
-                
-                epochs = composer.et_epochs
-                logger.info(f"Created {len(epochs)} {event_type} epochs")
-                
-                # Save epochs using pyAVS save_epochs function
-                epochs_path = save_epochs(
-                    epochs=epochs,
-                    subject_id=subject_id,
-                    session=session,
-                    event_type=f"{event_type}_scene",
-                    data_path=data_path,
-                    filter_params=config.filter_params,
-                    sampling_rate=config.resample_freq,
-                    blocks=composer.blocks if hasattr(composer, 'blocks') else None
-                )
-                
-                results['epochs_created'][event_type] = {
-                    'n_epochs': len(epochs),
-                    'path': epochs_path,
-                    'time_range': f"{epochs.tmin:.3f} to {epochs.tmax:.3f} s",
-                    'sampling_rate': epochs.info['sfreq']
-                }
-                
-                # Save metadata as CSV using pyAVS IO infrastructure
-                if epochs.metadata is not None:
-                    metadata_path = save_metadata_csv(
-                        metadata=epochs.metadata,
-                        subject_id=subject_id,
-                        session=session,
-                        event_type=event_type,
-                        data_path=data_path
-                    )
-                    
-                    results['metadata_saved'][event_type] = {
-                        'path': metadata_path,
-                        'n_columns': len(epochs.metadata.columns),
-                        'columns': list(epochs.metadata.columns)[:10]  # First 10 columns
-                    }
-                
-            except Exception as e:
-                error_msg = f"Error processing {event_type} events: {str(e)}"
-                logger.error(error_msg)
-                results['errors'].append(error_msg)
+            
+            logger.info(f"Processing {event_type} events...")
+            
+            # Load eye tracking events with object labels
+            composer.get_et_annotations(
+                event_type=event_type,
+                recording=RECORDING_TYPE,
+                get_object_labels=include_object_labels
+            )
+            
+            if not hasattr(composer, 'et_events') or len(composer.et_events) == 0:
+                logger.warning(f"No {event_type} events found")
+                continue
+            
+            logger.info(f"Loaded {len(composer.et_events)} {event_type} events")
+            
+            # Create epochs
+            composer.make_et_event_epochs(
+                tmin=config.tmin,
+                tmax=config.tmax,
+                event_type=event_type,
+                recording=RECORDING_TYPE,
+                save_epochs=False,  # We'll save manually for better control
+                get_metadata=True,
+                get_object_labels=include_object_labels,
+                baseline=None  # No baseline correction (AVS practice)
+            )
+            
+            if not hasattr(composer, 'et_epochs') or len(composer.et_epochs) == 0:
+                logger.warning(f"No {event_type} epochs created")
+                continue
+            
+            epochs = composer.et_epochs
+            logger.info(f"Created {len(epochs)} {event_type} epochs")
+            
+            # Save epochs using pyAVS save_epochs function
+            epochs_path = save_epochs(
+                epochs=epochs,
+                subject_id=subject_id,
+                session=session,
+                event_type=f"{event_type}_scene",
+                data_path=data_path
+            )
+            
+            results['epochs_created'][event_type] = {
+                'n_epochs': len(epochs),
+                'path': epochs_path,
+                'time_range': f"{epochs.tmin:.3f} to {epochs.tmax:.3f} s",
+                'sampling_rate': epochs.info['sfreq']
+            }
+            
+            # Save metadata as CSV using pyAVS IO infrastructure
+            # The truth value of a DataFrame is ambiguous. Use a.empty, a.bool(), a.item(), a.any() or a.all().
         
+            metadata_path = save_metadata_csv(
+                metadata=epochs.metadata,
+                subject_id=subject_id,
+                session=session,
+                event_type=event_type,
+                data_path=data_path
+            )
+            
+            results['metadata_saved'][event_type] = {
+                'path': metadata_path,
+                'n_columns': len(epochs.metadata.columns),
+                'columns': list(epochs.metadata.columns)[:10]  # First 10 columns
+            }
+            
+           
         # Mark as successful if any epochs were created
         if results['epochs_created']:
             results['status'] = 'success'
@@ -440,34 +418,28 @@ Examples:
     print()
     
     # Process epochs
-    try:
-        results = process_batch(
-            subjects=subjects,
-            sessions=sessions,
-            data_path=args.data_path,
-            n_jobs=args.n_jobs,
-            include_object_labels=not args.no_object_labels
-        )
-        
-        # Print summary
-        print_batch_summary(results)
-        
-        # Return exit code based on results
-        failed_results = [r for r in results if r['status'] == 'failed']
-        if failed_results:
-            print(f"\nWarning: {len(failed_results)} combinations failed")
-            return 1
-        else:
-            print("\nAll processing completed successfully!")
-            return 0
+   
+    results = process_batch(
+        subjects=subjects,
+        sessions=sessions,
+        data_path=args.data_path,
+        n_jobs=args.n_jobs,
+        include_object_labels=not args.no_object_labels
+    )
+    
+    # Print summary
+    print_batch_summary(results)
+    
+    # Return exit code based on results
+    failed_results = [r for r in results if r['status'] == 'failed']
+    if failed_results:
+        print(f"\nWarning: {len(failed_results)} combinations failed")
+        return 1
+    else:
+        print("\nAll processing completed successfully!")
+        return 0
             
-    except KeyboardInterrupt:
-        print("\nProcessing interrupted by user")
-        return 1
-    except Exception as e:
-        print(f"\nUnexpected error: {e}")
-        logger.exception("Unexpected error in main processing")
-        return 1
+
 
 
 if __name__ == "__main__":
