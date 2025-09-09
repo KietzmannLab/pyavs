@@ -969,7 +969,8 @@ class AVSComposer:
                 logger.debug(f"Epochs annotations duration: {self.et_epochs.annotations.duration}")
                 
                 # find all columns that are not all nan
-                non_nan_columns = events_df_for_metadata.columns[events_df_for_metadata.notna().any()].tolist()
+                non_nan_mask = events_df_for_metadata.notna().any()
+                non_nan_columns = events_df_for_metadata.columns[non_nan_mask].tolist()
                 print(f"Non-NaN columns in events dataframe: {non_nan_columns}")
                 raise ValueError("The event durations in the events dataframe and the epochs object are not the same. This should not happen. Please check your data.")
             else:

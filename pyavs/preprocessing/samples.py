@@ -361,7 +361,7 @@ def validate_samples_scene_assignment(samples: pd.DataFrame, verbose: bool = Tru
     }
     
     # Calculate mean samples per trial
-    if samples['trial'].notna().any():
+    if samples['trial'].notna().any().item():
         trial_counts = samples.groupby(['subject', 'session', 'trial']).size()
         stats['mean_samples_per_trial'] = trial_counts.mean()
     

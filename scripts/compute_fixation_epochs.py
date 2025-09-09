@@ -123,9 +123,9 @@ def process_single_subject_session(subject_id: int, session: int,
         composer.concatenate_raws_per_session()
         
         # Resample if configured
-        if config.resample_freq and config.resample_freq != composer.raw_meg.info['sfreq']:
-            logger.info(f"Resampling from {composer.raw_meg.info['sfreq']} Hz to {config.resample_freq} Hz")
-            composer.raw_meg.resample(config.resample_freq, n_jobs=config.n_jobs)
+        if config.resample_freq and config.resample_freq != composer.raws_concatenated.info['sfreq']:
+            logger.info(f"Resampling from {composer.raws_concatenated.info['sfreq']} Hz to {config.resample_freq} Hz")
+            composer.raws_concatenated.resample(config.resample_freq, n_jobs=config.n_jobs)
         
         composer.find_events_in_raw()
         
