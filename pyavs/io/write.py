@@ -167,7 +167,7 @@ def save_data_h5(data: Union[np.ndarray, mne.Epochs, mne.io.Raw, Dict[str, np.nd
     # Use the unified save_population_codes_h5 function
     return save_population_codes_h5(
         population_codes=population_codes,
-        metadata=metadata or pd.DataFrame(),
+        metadata=metadata if metadata is not None else pd.DataFrame(),
         subject_id=subject_id,
         session=session,
         event_type=event_type,

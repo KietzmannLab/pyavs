@@ -95,122 +95,116 @@ def process_single_subject_session(subject_id: int, session: int,
         'errors': []
     }
     
-    try:
-        logger.info(f"Processing subject {subject_id}, session {session}")
+    logger.info(f"Processing subject {subject_id}, session {session}")
+    
+    # Initialize composer with config parameters
+    composer_kwargs = config.get_composer_kwargs()
+    composer_kwargs.update({
+        'subject': subject_id,
+        'session_num': session,
+        'data_path': data_path,
+        'output_path': str(output_dir)
+    })
+    composer = AVSComposer(**composer_kwargs)
+    
+    # Load and preprocess MEG data
+    logger.info("Loading MEG data...")
+    composer.load_meg_data()
+    
+    # Apply ICA if available
+    
+    composer.apply_ica_to_blocks(use_precomputed=True)
+    logger.info("Applied ICA to MEG blocks")
+    
+    
+    # Filter and concatenate MEG data
+    composer.filter_meg_data(ignore_existing_filter=True)
+    composer.concatenate_raws_per_session()
+    
+    # Resample if configured
+    if config.resample_freq and config.resample_freq != composer.raws_concatenated.info['sfreq']:
+        logger.info(f"Resampling from {composer.raws_concatenated.info['sfreq']} Hz to {config.resample_freq} Hz")
+        composer.raws_concatenated.resample(config.resample_freq, n_jobs=config.n_jobs)
+    
+    composer.find_events_in_raw()
+    
+    logger.info(f"Found {len(composer.meg_trigger_events)} MEG trigger events")
+    
+    # Process each event type
+    for event_type in EVENT_TYPES:
         
-        # Initialize composer with config parameters
-        composer_kwargs = config.get_composer_kwargs()
-        composer_kwargs.update({
-            'subject': subject_id,
-            'session_num': session,
-            'data_path': data_path,
-            'output_path': str(output_dir)
-        })
-        composer = AVSComposer(**composer_kwargs)
+        logger.info(f"Processing {event_type} events...")
         
-        # Load and preprocess MEG data
-        logger.info("Loading MEG data...")
-        composer.load_meg_data()
+        # Load eye tracking events with object labels
+        composer.get_et_annotations(
+            event_type=event_type,
+            recording=RECORDING_TYPE,
+            get_object_labels=include_object_labels
+        )
         
-        # Apply ICA if available
+        if not hasattr(composer, 'et_events') or len(composer.et_events) == 0:
+            logger.warning(f"No {event_type} events found")
+            continue
         
-        composer.apply_ica_to_blocks(use_precomputed=True)
-        logger.info("Applied ICA to MEG blocks")
+        logger.info(f"Loaded {len(composer.et_events)} {event_type} events")
         
+        # Create epochs
+        composer.make_et_event_epochs(
+            tmin=config.tmin,
+            tmax=config.tmax,
+            event_type=event_type,
+            recording=RECORDING_TYPE,
+            save_epochs=False,  # We'll save manually for better control
+            get_metadata=True,
+            get_object_labels=include_object_labels,
+            baseline=None  # No baseline correction (AVS practice)
+        )
         
-        # Filter and concatenate MEG data
-        composer.filter_meg_data(ignore_existing_filter=True)
-        composer.concatenate_raws_per_session()
+        if not hasattr(composer, 'et_epochs') or len(composer.et_epochs) == 0:
+            logger.warning(f"No {event_type} epochs created")
+            continue
         
-        # Resample if configured
-        if config.resample_freq and config.resample_freq != composer.raws_concatenated.info['sfreq']:
-            logger.info(f"Resampling from {composer.raws_concatenated.info['sfreq']} Hz to {config.resample_freq} Hz")
-            composer.raws_concatenated.resample(config.resample_freq, n_jobs=config.n_jobs)
+        epochs = composer.et_epochs
+        logger.info(f"Created {len(epochs)} {event_type} epochs")
         
-        composer.find_events_in_raw()
+        # Save epochs using pyAVS save_epochs function
+        epochs_path = save_epochs(
+            epochs=epochs,
+            subject_id=subject_id,
+            session=session,
+            event_type=f"{event_type}_scene",
+            data_path=data_path
+        )
         
-        logger.info(f"Found {len(composer.meg_trigger_events)} MEG trigger events")
+        results['epochs_created'][event_type] = {
+            'n_epochs': len(epochs),
+            'path': epochs_path,
+            'time_range': f"{epochs.tmin:.3f} to {epochs.tmax:.3f} s",
+            'sampling_rate': epochs.info['sfreq']
+        }
         
-        # Process each event type
-        for event_type in EVENT_TYPES:
-            
-            logger.info(f"Processing {event_type} events...")
-            
-            # Load eye tracking events with object labels
-            composer.get_et_annotations(
-                event_type=event_type,
-                recording=RECORDING_TYPE,
-                get_object_labels=include_object_labels
-            )
-            
-            if not hasattr(composer, 'et_events') or len(composer.et_events) == 0:
-                logger.warning(f"No {event_type} events found")
-                continue
-            
-            logger.info(f"Loaded {len(composer.et_events)} {event_type} events")
-            
-            # Create epochs
-            composer.make_et_event_epochs(
-                tmin=config.tmin,
-                tmax=config.tmax,
-                event_type=event_type,
-                recording=RECORDING_TYPE,
-                save_epochs=False,  # We'll save manually for better control
-                get_metadata=True,
-                get_object_labels=include_object_labels,
-                baseline=None  # No baseline correction (AVS practice)
-            )
-            
-            if not hasattr(composer, 'et_epochs') or len(composer.et_epochs) == 0:
-                logger.warning(f"No {event_type} epochs created")
-                continue
-            
-            epochs = composer.et_epochs
-            logger.info(f"Created {len(epochs)} {event_type} epochs")
-            
-            # Save epochs using pyAVS save_epochs function
-            epochs_path = save_epochs(
-                epochs=epochs,
-                subject_id=subject_id,
-                session=session,
-                event_type=f"{event_type}_scene",
-                data_path=data_path
-            )
-            
-            results['epochs_created'][event_type] = {
-                'n_epochs': len(epochs),
-                'path': epochs_path,
-                'time_range': f"{epochs.tmin:.3f} to {epochs.tmax:.3f} s",
-                'sampling_rate': epochs.info['sfreq']
-            }
-            
-            # Save metadata as CSV using pyAVS IO infrastructure
-            # The truth value of a DataFrame is ambiguous. Use a.empty, a.bool(), a.item(), a.any() or a.all().
+        # Save metadata as CSV using pyAVS IO infrastructure
+        # The truth value of a DataFrame is ambiguous. Use a.empty, a.bool(), a.item(), a.any() or a.all().
+    
+        metadata_path = save_metadata_csv(
+            metadata=epochs.metadata,
+            subject_id=subject_id,
+            session=session,
+            event_type=event_type,
+            data_path=data_path
+        )
         
-            metadata_path = save_metadata_csv(
-                metadata=epochs.metadata,
-                subject_id=subject_id,
-                session=session,
-                event_type=event_type,
-                data_path=data_path
-            )
-            
-            results['metadata_saved'][event_type] = {
-                'path': metadata_path,
-                'n_columns': len(epochs.metadata.columns),
-                'columns': list(epochs.metadata.columns)[:10]  # First 10 columns
-            }
-            
-           
-        # Mark as successful if any epochs were created
-        if results['epochs_created']:
-            results['status'] = 'success'
-            logger.info(f"Successfully processed subject {subject_id}, session {session}")
+        results['metadata_saved'][event_type] = {
+            'path': metadata_path,
+            'n_columns': len(epochs.metadata.columns),
+            'columns': list(epochs.metadata.columns)[:10]  # First 10 columns
+        }
         
-    except Exception as e:
-        error_msg = f"Failed to process subject {subject_id}, session {session}: {str(e)}"
-        logger.error(error_msg)
-        results['errors'].append(error_msg)
+       
+    # Mark as successful if any epochs were created
+    if results['epochs_created']:
+        results['status'] = 'success'
+        logger.info(f"Successfully processed subject {subject_id}, session {session}")
     
     return results
 
@@ -389,18 +383,10 @@ Examples:
     
     # Validate subjects and sessions
     for subject in subjects:
-        try:
-            validate_subject_id(subject)
-        except ValueError as e:
-            print(f"Error: Invalid subject ID {subject}: {e}")
-            return 1
+        validate_subject_id(subject)
     
     for session in sessions:
-        try:
-            validate_session(session)
-        except ValueError as e:
-            print(f"Error: Invalid session {session}: {e}")
-            return 1
+        validate_session(session)
     
     # Print configuration
     print("=== Fixation Event Epochs Computation ===")
