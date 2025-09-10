@@ -67,7 +67,6 @@ def save_data_h5(data: Union[np.ndarray, mne.Epochs, mne.io.Raw, Dict[str, np.nd
                  rois: Optional[List[str]] = None,
                  sampling_rate: int = 500,
                  filter_params: Optional[Dict[str, float]] = None,
-                 offset_data: Optional[Dict[str, np.ndarray]] = None,
                  data_path: Optional[str] = None,
                  hemi: str = 'both',
                  compression: str = 'gzip',
@@ -106,8 +105,6 @@ def save_data_h5(data: Union[np.ndarray, mne.Epochs, mne.io.Raw, Dict[str, np.nd
         Sampling rate in Hz (default: 500)
     filter_params : dict, optional
         Filter parameters with 'l_freq' and 'h_freq' keys
-    offset_data : dict, optional
-        Offset-locked data for fixation events
     data_path : str, optional
         Path to data directory
     hemi : str, optional
@@ -176,7 +173,6 @@ def save_data_h5(data: Union[np.ndarray, mne.Epochs, mne.io.Raw, Dict[str, np.nd
         rois=rois,
         sampling_rate=sampling_rate,
         filter_params=filter_params,
-        offset_data=offset_data,
         data_path=data_path,
         hemi=hemi,
         compression=compression,
@@ -321,7 +317,6 @@ def save_population_codes_h5(population_codes: Dict[str, np.ndarray],
                             random_epochs: Optional[np.ndarray] = None,
                             sampling_rate: int = 500,
                             filter_params: Optional[Dict[str, float]] = None,
-                            offset_data: Optional[Dict[str, np.ndarray]] = None,
                             data_path: Optional[str] = None,
                             hemi: str = 'both',
                             compression: str = 'gzip',
@@ -358,8 +353,6 @@ def save_population_codes_h5(population_codes: Dict[str, np.ndarray],
         Sampling rate in Hz (default: 500)
     filter_params : dict, optional
         Filter parameters with 'l_freq' and 'h_freq' keys (default: None)
-    offset_data : dict, optional
-        Offset-locked data for fixation events (default: None)
     data_path : str, optional
         Path to data directory (default: None, uses configured path)
     hemi : str, optional
@@ -489,17 +482,10 @@ def save_population_codes_h5(population_codes: Dict[str, np.ndarray],
         storage.attrs["hz"] = sampling_rate
         storage.attrs["filter"] = [filter_params.get("l_freq", 0.2), filter_params.get("h_freq", 200.0)]
         
-        # Additional attributes for fixation events
-        if event_type == "fixation":
-            storage.attrs["offset_lock_steps"] = True
-        
         # Fixation mask functionality removed
         
-        # Save metadata if available
-        if len(metadata) > 0:
-            metadata_group = storage.create_group('metadata')
-            for col in metadata.columns:
-                metadata_group.create_dataset(col, data=metadata[col].values)
+        # Metadata is saved separately as CSV (see save_metadata_csv function)
+        # Skip HDF5 metadata storage to avoid DataFrame serialization issues
         
         # Store data for each ROI
         for roi_name in rois:
@@ -515,10 +501,6 @@ def save_population_codes_h5(population_codes: Dict[str, np.ndarray],
             
             # Save onset data
             roi_group.create_dataset("onset", data=roi_data, dtype=np.float32, compression=compression)
-            
-            # Save offset data for fixation events
-            if event_type == "fixation" and offset_data is not None and roi_name in offset_data:
-                roi_group.create_dataset("offset", data=offset_data[roi_name], dtype=np.float32, compression=compression)
         
         # Flush to ensure data is written
         storage.flush()
