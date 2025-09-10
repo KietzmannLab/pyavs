@@ -17,7 +17,6 @@ import os
 import sys
 import numpy as np
 import pandas as pd
-from pathlib import Path
 from typing import List, Tuple
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -111,10 +110,15 @@ def analyze_caption_similarities(subjects: List[int], sessions: List[int],
     
     logger.info(f"Loaded {len(captions_df)} caption entries")
     
+    # Debug: show example of MSCOCO captions (already parsed by load_captions)
+    if len(captions_df) > 0:
+        example_idx = 0
+        example_captions = captions_df['mscoco_captions'].iloc[example_idx]
+        logger.info(f"Example MSCOCO captions: {example_captions}")
+    
     # Filter for entries with both transcribed and MSCOCO captions
     valid_entries = captions_df[
         (captions_df['transcribed_caption'].notna()) & 
-        (captions_df['mscoco_captions'].notna()) &
         (captions_df['mscoco_captions'].apply(lambda x: x is not None and len(x) > 0))
     ].copy()
     
@@ -137,7 +141,7 @@ def analyze_caption_similarities(subjects: List[int], sessions: List[int],
     mscoco_indices = []  # Track which scene each caption belongs to
     
     for idx, caption_list in enumerate(valid_entries['mscoco_captions']):
-        if caption_list and isinstance(caption_list, list):
+        if caption_list and len(caption_list) > 0:
             for caption in caption_list:
                 if caption and str(caption).strip():
                     all_mscoco_captions.append(str(caption).strip())
@@ -265,7 +269,7 @@ def create_similarity_plots(results: pd.DataFrame, output_dir: str):
     plt.style.use('default')
     
     # Plot 1: Distribution of similarities
-    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    _, axes = plt.subplots(2, 2, figsize=(12, 10))
     
     # Transcription vs MSCOCO similarities
     axes[0, 0].hist(results['mean_similarity_to_mscoco'].dropna(), bins=20, alpha=0.7, color='blue')
@@ -306,7 +310,7 @@ def create_similarity_plots(results: pd.DataFrame, output_dir: str):
     plt.close()
     
     # Plot 2: Heatmap of individual similarities
-    fig, ax = plt.subplots(figsize=(10, 8))
+    _, ax = plt.subplots(figsize=(10, 8))
     
     # Create similarity matrix for visualization (sample of scenes)
     n_scenes_to_show = min(50, len(results))

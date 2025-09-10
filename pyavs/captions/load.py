@@ -15,6 +15,49 @@ from ..utils.logging import get_logger
 logger = get_logger('captions.load')
 
 
+def parse_mscoco_captions(caption_string):
+    """
+    Parse MSCOCO captions from string format to list of individual captions.
+    
+    The captions are stored as a string representation of a list:
+    "['caption1', 'caption2', 'caption3', 'caption4', 'caption5']"
+    
+    Parameters
+    ----------
+    caption_string : str or list
+        MSCOCO captions in string or list format
+        
+    Returns
+    -------
+    list
+        List of individual caption strings
+    """
+    if caption_string is None or pd.isna(caption_string):
+        return []
+    
+    # If already a list, return as is
+    if isinstance(caption_string, list):
+        return [str(cap).strip() for cap in caption_string if cap and str(cap).strip()]
+    
+    # Convert to string and clean
+    caption_string = str(caption_string).strip()
+    
+    if not caption_string:
+        return []
+    
+    try:
+        # Parse as a literal list using ast
+        parsed = ast.literal_eval(caption_string)
+        if isinstance(parsed, list):
+            return [str(cap).strip() for cap in parsed if cap and str(cap).strip()]
+        else:
+            # If it's not a list, treat as single caption
+            return [str(parsed).strip()] if str(parsed).strip() else []
+    except (ValueError, SyntaxError):
+        # If parsing fails, return as single caption
+        return [caption_string.strip()] if caption_string.strip() else []
+
+
 def load_captions(subjects: Union[int, List[int]], 
                   sessions: Union[int, List[int]],
                   data_path: Optional[str] = None) -> pd.DataFrame:
@@ -99,24 +142,10 @@ def load_captions(subjects: Union[int, List[int]],
                 
                 # Add MSCOCO captions (stored in 'captions' column as string lists)
                 if 'captions' in explog.columns:
-                    mscoco_captions = []
-                    for idx, row in explog.iterrows():
-                        if pd.notna(row['captions']) and isinstance(row['captions'], str):
-                            try:
-                                # Parse the string representation of the list
-                                parsed_captions = ast.literal_eval(row['captions'])
-                                if isinstance(parsed_captions, list):
-                                    mscoco_captions.append(parsed_captions)
-                                else:
-                                    mscoco_captions.append(None)
-                            except (ValueError, SyntaxError) as e:
-                                logger.warning(f"Could not parse captions for trial {row.get('trial', idx)}: {e}")
-                                mscoco_captions.append(None)
-                        else:
-                            mscoco_captions.append(None)
-                    caption_data['mscoco_captions'] = mscoco_captions
+                    logger.info("Parsing MSCOCO captions from 'captions' column")
+                    caption_data['mscoco_captions'] = explog['captions'].apply(parse_mscoco_captions)
                 else:
-                    caption_data['mscoco_captions'] = None
+                    caption_data['mscoco_captions'] = [None] * len(caption_data)
                     logger.warning(f"No 'captions' column found in {log_filename}")
                 
                 # Note: subject and session are already in the data from the file
