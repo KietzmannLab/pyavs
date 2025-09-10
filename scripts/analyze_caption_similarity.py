@@ -211,6 +211,7 @@ def analyze_caption_similarities(subjects: List[int], sessions: List[int],
     
     # Save results and create plots if output directory specified
     if output_dir:
+        
         os.makedirs(output_dir, exist_ok=True)
         
         # Save results
@@ -300,6 +301,7 @@ def create_similarity_plots(results: pd.DataFrame, output_dir: str):
             axes[1, 1].set_title('Cross-Language vs Same-Language\nSimilarity')
     
     plt.tight_layout()
+    print(f"Saving plots to: {output_dir}")
     plt.savefig(os.path.join(output_dir, 'caption_similarity_distributions.png'), dpi=300, bbox_inches='tight')
     plt.close()
     

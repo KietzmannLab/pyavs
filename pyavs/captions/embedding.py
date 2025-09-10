@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 from typing import List, Optional, Union, Dict
 from ..utils.logging import get_logger
-
+import torch
 logger = get_logger('captions.embedding')
 
 # Optional dependencies - will be imported when needed

@@ -62,7 +62,7 @@ def load_captions(subjects: Union[int, List[int]],
             # Construct file path
             sub_sess_dir = f"as{subject:02d}_{session:02d}"
             log_filename = f"explog_transcribed_corrected_{subject:02d}_{session:02d}.csv"
-            explog_path = os.path.join(data_path, sub_sess_dir, log_filename)
+            explog_path = os.path.join(data_path, "results", sub_sess_dir, log_filename)
             
             if not os.path.exists(explog_path):
                 logger.warning(f"Explog file not found: {explog_path}")
