@@ -14,7 +14,6 @@ import json
 import hashlib
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Union
-
 from ..utils.config import get_data_path
 from ..utils.validation import validate_subject_id, validate_session
 from ..utils.logging import get_logger
@@ -375,6 +374,8 @@ def save_population_codes_h5(population_codes: Dict[str, np.ndarray],
     """
     validate_subject_id(subject_id)
     validate_session(session)
+    import logging
+    logger = logging.getLogger(__name__)
     
     if data_path is None:
         data_path = get_data_path()
@@ -424,7 +425,7 @@ def save_population_codes_h5(population_codes: Dict[str, np.ndarray],
             config.save(config_file, format='json')
         except Exception as e:
             # Log warning but don't fail the save operation
-            import logging
+         
             logger = logging.getLogger(__name__)
             logger.warning(f"Could not save config file: {e}")
         
@@ -461,7 +462,8 @@ def save_population_codes_h5(population_codes: Dict[str, np.ndarray],
             random_epochs = np.arange(n_epochs)
     if filter_params is None:
         filter_params = {'l_freq': 0.2, 'h_freq': 200.0}
-    
+ 
+    logger = logging.getLogger(__name__)
     logger.info(f"Saving data to: {h5_path}")
     logger.info(f"Data type: {data_type}, Event type: {event_type}, ROIs: {len(rois)}")
     
