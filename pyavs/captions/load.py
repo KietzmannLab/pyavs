@@ -58,7 +58,7 @@ def parse_mscoco_captions(caption_string):
 
     # Parse as a literal list using ast
     parsed = ast.literal_eval(caption_string)
-    print(f"Parsed captions: {parsed}")
+    #print(f"Parsed captions: {parsed}")
     if isinstance(parsed, list):
         return [str(cap).strip() for cap in parsed if cap and str(cap).strip()]
     else:
@@ -169,12 +169,12 @@ def find_coco_annotations(data_path: str) -> List[str]:
     list of str
         List of paths to annotations files found
     """
-    # Search for both train and val annotations (prioritize captions files)
-    target_files = [
-        'captions_val2014.json',
-        'captions_train2014.json', 
-        'instances_val2014.json',
-        'instances_train2014.json'
+    # Common annotation file names (prioritize captions files)
+    annotation_files = [
+        'captions_val2017.json',
+        'captions_train2017.json',
+        'instances_val2017.json',
+        'instances_train2017.json'
     ]
     
     # Search in data path and common subdirectories
@@ -191,7 +191,9 @@ def find_coco_annotations(data_path: str) -> List[str]:
     found_files = []
     
     for search_path in search_paths:
+        logger.info(f"Searching for COCO annotations in: {search_path}")
         if not os.path.exists(search_path):
+            logger.info(f"Search path does not exist: {search_path}")
             continue
             
         for ann_file in target_files:
@@ -333,7 +335,8 @@ def load_captions(subjects: Union[int, List[int]],
     
     # Try to replace parsed MSCOCO captions with COCO API captions
     if use_coco and not result.empty:
-        # Find COCO annotations files if not provided
+        logger.info("Attempting to load COCO captions via API...")
+        # Find COCO annotations file if not provided
         if coco_annotations_path is None:
             coco_annotations_path = find_coco_annotations(data_path)
         elif isinstance(coco_annotations_path, str):
