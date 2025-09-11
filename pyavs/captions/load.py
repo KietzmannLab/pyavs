@@ -7,10 +7,17 @@ This module provides functions to load transcribed and MSCOCO captions from expl
 import os
 import pandas as pd
 import ast
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Dict
 from ..utils.config import get_data_path
 from ..utils.validation import validate_subject_id, validate_session
 from ..utils.logging import get_logger
+
+# Optional dependency for COCO
+try:
+    from pycocotools.coco import COCO
+    HAS_PYCOCOTOOLS = True
+except ImportError:
+    HAS_PYCOCOTOOLS = False
 
 logger = get_logger('captions.load')
 
@@ -57,11 +64,113 @@ def parse_mscoco_captions(caption_string):
     else:
         # If it's not a list, treat as single caption
         return [str(parsed).strip()] if str(parsed).strip() else []
-  
+
+
+def load_coco_captions_for_scenes(scene_ids: List[int], coco_annotations_path: str) -> Dict[int, List[str]]:
+    """
+    Load COCO captions directly from annotations file for specific scene IDs.
+    
+    Parameters
+    ----------
+    scene_ids : list of int
+        List of scene IDs (which are COCO image IDs)
+    coco_annotations_path : str
+        Path to COCO annotations JSON file
+        
+    Returns
+    -------
+    dict
+        Dictionary mapping scene_id to list of captions
+    """
+    if not HAS_PYCOCOTOOLS:
+        logger.warning("pycocotools not available. Install with: pip install pycocotools")
+        return {}
+    
+    if not os.path.exists(coco_annotations_path):
+        logger.warning(f"COCO annotations file not found: {coco_annotations_path}")
+        return {}
+    
+    logger.info(f"Loading COCO captions from: {coco_annotations_path}")
+    coco = COCO(coco_annotations_path)
+    
+    captions_dict = {}
+    found_scenes = 0
+    
+    for scene_id in scene_ids:
+        # Get annotation IDs for this image
+        ann_ids = coco.getAnnIds(imgIds=scene_id)
+        
+        if not ann_ids:
+            logger.debug(f"No COCO annotations found for scene_id: {scene_id}")
+            captions_dict[scene_id] = []
+            continue
+        
+        # Load annotations
+        anns = coco.loadAnns(ann_ids)
+        
+        # Extract captions
+        captions = [ann['caption'].strip() for ann in anns if 'caption' in ann]
+        captions_dict[scene_id] = captions
+        
+        if captions:
+            found_scenes += 1
+            logger.debug(f"Found {len(captions)} COCO captions for scene_id {scene_id}")
+    
+    logger.info(f"Successfully loaded COCO captions for {found_scenes}/{len(scene_ids)} scenes")
+    return captions_dict
+
+
+def find_coco_annotations(data_path: str) -> Optional[str]:
+    """
+    Try to find COCO annotations file in common locations.
+    
+    Parameters
+    ----------
+    data_path : str
+        Base data path to search in
+        
+    Returns
+    -------
+    str or None
+        Path to annotations file if found
+    """
+    # Common annotation file names (prioritize captions files)
+    annotation_files = [
+        'captions_val2014.json',
+        'captions_train2014.json',
+        'instances_val2014.json',
+        'instances_train2014.json'
+    ]
+    
+    # Search in data path and common subdirectories
+    search_paths = [
+        data_path,
+        os.path.join(data_path, 'annotations'),
+        os.path.join(data_path, 'coco'),
+        os.path.join(data_path, 'input'),
+        os.path.join(data_path, 'input', 'coco'),
+        os.path.join(data_path, 'input', 'annotations'),
+        os.path.dirname(data_path)  # Parent directory
+    ]
+    
+    for search_path in search_paths:
+        if not os.path.exists(search_path):
+            continue
+            
+        for ann_file in annotation_files:
+            full_path = os.path.join(search_path, ann_file)
+            if os.path.exists(full_path):
+                logger.info(f"Found COCO annotations: {full_path}")
+                return full_path
+    
+    return None
+
 
 def load_captions(subjects: Union[int, List[int]], 
                   sessions: Union[int, List[int]],
-                  data_path: Optional[str] = None) -> pd.DataFrame:
+                  data_path: Optional[str] = None,
+                  coco_annotations_path: Optional[str] = None,
+                  use_coco: bool = True) -> pd.DataFrame:
     """
     Load transcribed and MSCOCO captions from explog files.
     
@@ -73,6 +182,10 @@ def load_captions(subjects: Union[int, List[int]],
         Session number(s) to load
     data_path : str, optional
         Path to data directory (default: None, uses configured path)
+    coco_annotations_path : str, optional
+        Path to COCO annotations file (default: None, auto-search if use_coco=True)
+    use_coco : bool, default True
+        Whether to try loading COCO captions via API (falls back to parsing if fails)
         
     Returns
     -------
@@ -175,6 +288,43 @@ def load_captions(subjects: Union[int, List[int]],
     # Combine all data
     result = pd.concat(all_captions, ignore_index=True)
     logger.info(f"Loaded captions for {len(result)} trials across {len(subjects)} subjects and {len(sessions)} sessions")
+    
+    # Try to replace parsed MSCOCO captions with COCO API captions
+    if use_coco and not result.empty:
+        # Find COCO annotations file if not provided
+        if coco_annotations_path is None:
+            coco_annotations_path = find_coco_annotations(data_path)
+        
+        if coco_annotations_path and HAS_PYCOCOTOOLS:
+            try:
+                logger.info("Replacing parsed MSCOCO captions with COCO API captions...")
+                
+                # Get unique scene IDs
+                scene_ids = result['scene_ID'].dropna().astype(int).unique().tolist()
+                
+                # Load captions from COCO
+                coco_captions = load_coco_captions_for_scenes(scene_ids, coco_annotations_path)
+                
+                if coco_captions:
+                    # Replace captions in dataframe
+                    result['mscoco_captions'] = result['scene_ID'].map(
+                        lambda x: coco_captions.get(int(x) if pd.notna(x) else None, [])
+                    )
+                    
+                    # Count how many were successfully replaced
+                    successful = len([x for x in result['mscoco_captions'] if len(x) > 0])
+                    logger.info(f"Successfully loaded COCO captions for {successful}/{len(result)} entries")
+                else:
+                    logger.warning("No COCO captions were loaded, keeping parsed captions")
+                    
+            except Exception as e:
+                logger.error(f"Failed to load COCO captions: {e}")
+                logger.info("Keeping original parsed captions")
+        
+        elif not HAS_PYCOCOTOOLS:
+            logger.info("pycocotools not available, using parsed captions")
+        elif not coco_annotations_path:
+            logger.info("COCO annotations file not found, using parsed captions")
     
     return result
 

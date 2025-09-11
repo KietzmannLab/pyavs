@@ -25,7 +25,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 # Add pyavs to path for development
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from pyavs.captions import load_captions_with_coco, encode_captions
+from pyavs.captions import load_captions, encode_captions
 from pyavs.utils.validation import validate_subject_id, validate_session
 from pyavs.utils.logging import get_logger
 
@@ -104,12 +104,13 @@ def analyze_caption_similarities(subjects: List[int], sessions: List[int],
     """
     logger.info(f"Loading captions for subjects {subjects}, sessions {sessions}")
     
-    # Load caption data (with COCO API if possible)
-    captions_df = load_captions_with_coco(
+    # Load caption data (with COCO API by default)
+    captions_df = load_captions(
         subjects=subjects, 
         sessions=sessions, 
         data_path=data_path,
-        coco_annotations_path=coco_annotations_path
+        coco_annotations_path=coco_annotations_path,
+        use_coco=True
     )
     
     if captions_df.empty:
