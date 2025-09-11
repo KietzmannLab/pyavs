@@ -45,18 +45,16 @@ def parse_mscoco_captions(caption_string):
     if not caption_string:
         return []
     
-    try:
-        # Parse as a literal list using ast
-        parsed = ast.literal_eval(caption_string)
-        if isinstance(parsed, list):
-            return [str(cap).strip() for cap in parsed if cap and str(cap).strip()]
-        else:
-            # If it's not a list, treat as single caption
-            return [str(parsed).strip()] if str(parsed).strip() else []
-    except (ValueError, SyntaxError):
-        # If parsing fails, return as single caption
-        return [caption_string.strip()] if caption_string.strip() else []
 
+    # Parse as a literal list using ast
+    parsed = ast.literal_eval(caption_string)
+    print(f"Parsed captions: {parsed}")
+    if isinstance(parsed, list):
+        return [str(cap).strip() for cap in parsed if cap and str(cap).strip()]
+    else:
+        # If it's not a list, treat as single caption
+        return [str(parsed).strip()] if str(parsed).strip() else []
+  
 
 def load_captions(subjects: Union[int, List[int]], 
                   sessions: Union[int, List[int]],

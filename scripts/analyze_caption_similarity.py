@@ -54,13 +54,13 @@ def compute_similarities(transcribed_embeddings: np.ndarray,
     n_scenes = len(transcribed_embeddings)
     similarities_to_mscoco = np.full((n_scenes, 5), np.nan)
     mscoco_self_similarities = []
-    
+
     for i, (trans_emb, mscoco_embs) in enumerate(zip(transcribed_embeddings, mscoco_embeddings_list)):
         if trans_emb is not None and mscoco_embs is not None and len(mscoco_embs) > 0:
             # Reshape embeddings for cosine similarity
             trans_emb = trans_emb.reshape(1, -1)
             mscoco_embs = np.array(mscoco_embs)
-            
+            print(np.shape(mscoco_embs))
             # Compute similarities between transcription and each MSCOCO caption
             similarities = cosine_similarity(trans_emb, mscoco_embs)[0]
             similarities_to_mscoco[i, :len(similarities)] = similarities
