@@ -22,6 +22,9 @@ def parse_mscoco_captions(caption_string):
     The captions are stored as a string representation of a list:
     "['caption1', 'caption2', 'caption3', 'caption4', 'caption5']"
     
+    But often they appear concatenated without proper separators, so we need
+    to split them using sentence patterns.
+    
     Parameters
     ----------
     caption_string : str or list
@@ -30,7 +33,7 @@ def parse_mscoco_captions(caption_string):
     Returns
     -------
     list
-        List of individual caption strings
+        List of individual caption strings (up to 5)
     """
     if caption_string is None or pd.isna(caption_string):
         return []

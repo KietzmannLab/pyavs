@@ -25,7 +25,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 # Add pyavs to path for development
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from pyavs.captions import load_captions, encode_captions
+from pyavs.captions import load_captions_with_coco, encode_captions
 from pyavs.utils.validation import validate_subject_id, validate_session
 from pyavs.utils.logging import get_logger
 
@@ -79,7 +79,8 @@ def compute_similarities(transcribed_embeddings: np.ndarray,
 
 
 def analyze_caption_similarities(subjects: List[int], sessions: List[int], 
-                               data_path: str, output_dir: str = None) -> pd.DataFrame:
+                               data_path: str, output_dir: str = None,
+                               coco_annotations_path: str = None) -> pd.DataFrame:
     """
     Main analysis function to compute and analyze caption similarities.
     
@@ -93,6 +94,8 @@ def analyze_caption_similarities(subjects: List[int], sessions: List[int],
         Path to data directory
     output_dir : str, optional
         Directory to save results and plots
+    coco_annotations_path : str, optional
+        Path to COCO annotations file for direct caption loading
         
     Returns
     -------
@@ -101,8 +104,13 @@ def analyze_caption_similarities(subjects: List[int], sessions: List[int],
     """
     logger.info(f"Loading captions for subjects {subjects}, sessions {sessions}")
     
-    # Load caption data
-    captions_df = load_captions(subjects=subjects, sessions=sessions, data_path=data_path)
+    # Load caption data (with COCO API if possible)
+    captions_df = load_captions_with_coco(
+        subjects=subjects, 
+        sessions=sessions, 
+        data_path=data_path,
+        coco_annotations_path=coco_annotations_path
+    )
     
     if captions_df.empty:
         logger.error("No caption data loaded")
@@ -363,6 +371,10 @@ Examples:
     parser.add_argument('--data-path', type=str, required=True,
                        help='Path to AVS data directory')
     
+    # COCO annotations
+    parser.add_argument('--coco-annotations', type=str, default=None,
+                       help='Path to COCO annotations file (optional, will auto-search if not provided)')
+    
     # Output options
     parser.add_argument('--output-dir', type=str, default=None,
                        help='Directory to save results and plots (optional)')
@@ -417,7 +429,8 @@ Examples:
         subjects=subjects,
         sessions=sessions,
         data_path=args.data_path,
-        output_dir=args.output_dir
+        output_dir=args.output_dir,
+        coco_annotations_path=args.coco_annotations
     )
     
     if results.empty:
