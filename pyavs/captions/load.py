@@ -196,7 +196,7 @@ def find_coco_annotations(data_path: str) -> List[str]:
             logger.info(f"Search path does not exist: {search_path}")
             continue
             
-        for ann_file in target_files:
+        for ann_file in annotation_files:
             full_path = os.path.join(search_path, ann_file)
             if os.path.exists(full_path) and full_path not in found_files:
                 logger.info(f"Found COCO annotations: {full_path}")
@@ -273,7 +273,7 @@ def load_captions(subjects: Union[int, List[int]],
                 # Load explog file
                 explog = pd.read_csv(explog_path)
                 logger.info(f"Loaded {len(explog)} rows from {log_filename}")
-                
+        
                 # Extract core identifier and caption columns
                 required_columns = ['subject', 'session', 'trial', 'block', 'trial_per_block', 
                                   'scene_ID', 'scene_filename', 'caption_task']
@@ -332,6 +332,9 @@ def load_captions(subjects: Union[int, List[int]],
     # Combine all data
     result = pd.concat(all_captions, ignore_index=True)
     logger.info(f"Loaded captions for {len(result)} trials across {len(subjects)} subjects and {len(sessions)} sessions")
+    # susbample only for scenes with transcribed captions
+    logger.info("Filtering to trials with non-empty transcribed captions")
+    result = result[result['transcribed_caption'].notna() & (result['transcribed_caption'].str.strip() != "")]
     
     # Try to replace parsed MSCOCO captions with COCO API captions
     if use_coco and not result.empty:
@@ -372,7 +375,8 @@ def load_captions(subjects: Union[int, List[int]],
             logger.info("pycocotools not available, using parsed captions")
         elif not coco_annotations_path:
             logger.info("No COCO annotations files found, using parsed captions")
-    
+  
+ 
     return result
 
 

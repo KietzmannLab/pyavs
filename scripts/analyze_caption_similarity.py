@@ -56,13 +56,17 @@ def compute_similarities(transcribed_embeddings: np.ndarray,
     mscoco_self_similarities = []
 
     for i, (trans_emb, mscoco_embs) in enumerate(zip(transcribed_embeddings, mscoco_embeddings_list)):
+    
         if trans_emb is not None and mscoco_embs is not None and len(mscoco_embs) > 0:
+            
             # Reshape embeddings for cosine similarity
             trans_emb = trans_emb.reshape(1, -1)
             mscoco_embs = np.array(mscoco_embs)
             print(np.shape(mscoco_embs))
             # Compute similarities between transcription and each MSCOCO caption
             similarities = cosine_similarity(trans_emb, mscoco_embs)[0]
+            if len(similarities) > 5:
+                similarities = similarities[:5]
             similarities_to_mscoco[i, :len(similarities)] = similarities
             
             # Compute pairwise similarities within MSCOCO captions
@@ -275,67 +279,47 @@ def print_summary_statistics(results: pd.DataFrame):
 
 def create_similarity_plots(results: pd.DataFrame, output_dir: str):
     """Create visualization plots for similarity analysis."""
-    plt.style.use('default')
+    # poster style
+    sns.set_context("poster")
+    # Plot 1: Distribution of similarities (2d kde plot with regression linem magma colored)
+    plt.figure(figsize=(8, 8))
+    sns.kdeplot(
+        data=results, 
+        x='mean_similarity_to_mscoco', 
+        y='mscoco_self_similarity_mean', 
+        fill=True, cmap='magma_r', thresh=0.05, levels=50, alpha=1)
     
-    # Plot 1: Distribution of similarities
-    _, axes = plt.subplots(2, 2, figsize=(12, 10))
+    sns.regplot(
+        data=results, 
+        x='mean_similarity_to_mscoco', 
+        y='mscoco_self_similarity_mean', 
+        scatter=False, 
+        line_kws={'color': 'white', 'linestyle': '--'}
+    )
+    # axis from 0 to 0.9
+    plt.xlim(0, 0.9)
+    plt.ylim(0, 0.9)
+    # make cool labels with units in []
+    plt.xlabel('German AVS <> COCO captions\n[cosine similarity]')
+    plt.ylabel('COCO <> COCO captions\n[cosine similarity]')
+    plt.title('AVS caption quality analysis')
+    # despine
+    sns.despine()
     
-    # Transcription vs MSCOCO similarities
-    axes[0, 0].hist(results['mean_similarity_to_mscoco'].dropna(), bins=20, alpha=0.7, color='blue')
-    axes[0, 0].set_title('Distribution of Mean Similarity\n(German → MSCOCO)')
-    axes[0, 0].set_xlabel('Cosine Similarity')
-    axes[0, 0].set_ylabel('Frequency')
-    
-    # Max similarity distribution
-    axes[0, 1].hist(results['max_similarity_to_mscoco'].dropna(), bins=20, alpha=0.7, color='green')
-    axes[0, 1].set_title('Distribution of Max Similarity\n(German → Best MSCOCO)')
-    axes[0, 1].set_xlabel('Cosine Similarity')
-    axes[0, 1].set_ylabel('Frequency')
-    
-    # MSCOCO self-similarities
-    valid_self_sims = results['mscoco_self_similarity_mean'].dropna()
-    if len(valid_self_sims) > 0:
-        axes[1, 0].hist(valid_self_sims, bins=20, alpha=0.7, color='orange')
-        axes[1, 0].set_title('Distribution of MSCOCO Self-Similarities')
-        axes[1, 0].set_xlabel('Mean Cosine Similarity')
-        axes[1, 0].set_ylabel('Frequency')
-    
-    # Comparison scatter plot
-    if len(valid_self_sims) > 0:
-        # Align the data
-        comparison_data = results[['mean_similarity_to_mscoco', 'mscoco_self_similarity_mean']].dropna()
-        if len(comparison_data) > 0:
-            axes[1, 1].scatter(comparison_data['mscoco_self_similarity_mean'], 
-                             comparison_data['mean_similarity_to_mscoco'], 
-                             alpha=0.6)
-            axes[1, 1].plot([0, 1], [0, 1], 'r--', alpha=0.5)  # y=x line
-            axes[1, 1].set_xlabel('MSCOCO Self-Similarity')
-            axes[1, 1].set_ylabel('German → MSCOCO Similarity')
-            axes[1, 1].set_title('Cross-Language vs Same-Language\nSimilarity')
-    
+    # get the stats for the regression line
+    # fit a statsmodels regression line and print intercept and slope
+    import statsmodels.api as sm
+    X = results['mean_similarity_to_mscoco']
+    Y = results['mscoco_self_similarity_mean']
+    X = sm.add_constant(X)
+    model = sm.OLS(Y, X, missing='drop').fit()
+    intercept, slope = model.params
+    r_squared = model.rsquared
+    plt.text(0.05, 0.85, f'y = {slope:.2f}x + {intercept:.2f}\n$R^2$ = {r_squared:.2f}', 
+             transform=plt.gca().transAxes, color='k',
+             bbox=dict(facecolor='white', alpha=0.1, boxstyle='round,pad=0.5'))
     plt.tight_layout()
-    print(f"Saving plots to: {output_dir}")
-    plt.savefig(os.path.join(output_dir, 'caption_similarity_distributions.png'), dpi=300, bbox_inches='tight')
-    plt.close()
-    
-    # Plot 2: Heatmap of individual similarities
-    _, ax = plt.subplots(figsize=(10, 8))
-    
-    # Create similarity matrix for visualization (sample of scenes)
-    n_scenes_to_show = min(50, len(results))
-    similarity_matrix = results[['similarity_to_mscoco_1', 'similarity_to_mscoco_2', 
-                               'similarity_to_mscoco_3', 'similarity_to_mscoco_4', 
-                               'similarity_to_mscoco_5']].iloc[:n_scenes_to_show].values
-    
-    sns.heatmap(similarity_matrix, annot=False, cmap='viridis', 
-                xticklabels=['MSCOCO 1', 'MSCOCO 2', 'MSCOCO 3', 'MSCOCO 4', 'MSCOCO 5'],
-                yticklabels=[f'Scene {i+1}' for i in range(n_scenes_to_show)], ax=ax)
-    ax.set_title(f'German Transcription Similarity to MSCOCO Captions\n(First {n_scenes_to_show} scenes)')
-    ax.set_xlabel('MSCOCO Caption Index')
-    ax.set_ylabel('Scene')
-    
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'caption_similarity_heatmap.png'), dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join(output_dir, 'caption_similarity_heatmap.pdf'), dpi=300, bbox_inches='tight')
     plt.close()
     
     logger.info(f"Plots saved to: {output_dir}")
