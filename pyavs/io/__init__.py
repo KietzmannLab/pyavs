@@ -28,6 +28,7 @@ from .read import (
     load_experiment_log,
     load_anatomical,
     load_scenes,
+    load_scene_images,
     find_population_codes_files,
     list_available_parameter_sets,
     load_source_data  # Alias
@@ -62,6 +63,7 @@ __all__ = [
     'load_experiment_log',
     'load_anatomical',
     'load_scenes',
+    'load_scene_images',
     'find_population_codes_files',
     'list_available_parameter_sets',
     'load_source_data',  # Alias

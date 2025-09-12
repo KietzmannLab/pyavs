@@ -20,13 +20,21 @@ import sys
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 import logging
-import pandas as pd
 from joblib import Parallel, delayed
 
 # Add pyavs to path for development
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from pyavs.scenes import extract_crop_embeddings, get_available_models, get_default_ecoset_path
+# Try to import pyavs components, handle thingsvision import issues gracefully
+try:
+    from pyavs.scenes import extract_crop_embeddings, get_available_models, get_default_ecoset_path
+    EMBEDDINGS_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: Could not import embeddings functions: {e}")
+    print("This is likely due to thingsvision/torchtyping compatibility issues.")
+    print("Please check your environment or install compatible versions.")
+    EMBEDDINGS_AVAILABLE = False
+
 from pyavs.io import load_eye_events, load_scene_images
 from pyavs.config import PyAVSConfig
 from pyavs.utils.validation import validate_subject_id, validate_session

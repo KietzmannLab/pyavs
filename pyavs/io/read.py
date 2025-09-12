@@ -588,6 +588,75 @@ def load_scenes(data_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
     return scenes_info if scenes_info else None
 
 
+def load_scene_images(data_path: Optional[str] = None) -> Dict[int, str]:
+    """
+    Load scene images and return mapping from scene IDs to file paths.
+    
+    This function looks for COCO scene images and creates a mapping from
+    scene IDs (extracted from filenames) to full file paths.
+    
+    Parameters
+    ----------
+    data_path : str, optional
+        Path to data directory
+        
+    Returns
+    -------
+    dict
+        Dictionary mapping scene IDs to image file paths
+    """
+    if data_path is None:
+        data_path = get_data_path()
+        if data_path is None:
+            raise ValueError("No data path configured")
+    
+    scene_images = {}
+    
+    # Look for COCO scenes in common locations
+    potential_paths = [
+        os.path.join(data_path, "input", "mscoco_scenes"),
+        os.path.join(data_path, "stimuli", "scenes"),
+        os.path.join(data_path, "mscoco_scenes"),
+        os.path.join(data_path, "input", "coco", "images"),
+        os.path.join(data_path, "coco", "images")
+    ]
+    
+    # Also check subdirectories for train/val splits
+    subdirs = ['', 'train2017', 'val2017', 'test2017']
+    
+    for base_path in potential_paths:
+        if not os.path.exists(base_path):
+            continue
+            
+        for subdir in subdirs:
+            search_path = os.path.join(base_path, subdir) if subdir else base_path
+            if not os.path.exists(search_path):
+                continue
+                
+            logger.debug(f"Searching for scene images in: {search_path}")
+            
+            # Find image files with COCO naming convention
+            for filename in os.listdir(search_path):
+                if not filename.lower().endswith(('.jpg', '.jpeg', '.png')):
+                    continue
+                    
+                # Extract scene ID from filename (assumes COCO format: 000000123456.jpg)
+                try:
+                    name_part = os.path.splitext(filename)[0]
+                    scene_id = int(name_part)
+                    file_path = os.path.join(search_path, filename)
+                    
+                    if scene_id not in scene_images:  # Don't overwrite if already found
+                        scene_images[scene_id] = file_path
+                        
+                except ValueError:
+                    # Skip files that don't follow COCO naming convention
+                    continue
+    
+    logger.info(f"Found {len(scene_images)} scene images")
+    return scene_images
+
+
 def find_population_codes_files(subject_id: int,
                                session: int,
                                data_path: Optional[str] = None,
