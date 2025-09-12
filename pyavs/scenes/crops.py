@@ -127,7 +127,7 @@ def create_fixation_crops(eye_events_df: pd.DataFrame,
         trial = fixation.get('trial', 0)
         fix_sequence = fixation.get('fix_sequence', idx)
         
-        crop_id = f"sub{subject:02d}_trial{trial:03d}_fix{fix_sequence:03d}_scene{scene_id}"
+        crop_id = f"sub{subject:02d}_trial{trial:04d}_fix{fix_sequence:03d}_scene{scene_id}"
         
         crops[crop_id] = crop_array
         
