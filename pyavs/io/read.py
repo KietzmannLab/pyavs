@@ -181,6 +181,188 @@ def load_epochs_h5(subject_id: int,
     )
 
 
+def load_metadata_csv(subject_id: int, session: int, event_type: str, 
+                     data_path: Optional[str] = None) -> pd.DataFrame:
+    """
+    Load metadata from CSV file.
+    
+    Parameters
+    ----------
+    subject_id : int
+        Subject ID
+    session : int
+        Session number
+    event_type : str
+        Event type (e.g., 'fixation', 'saccade')
+    data_path : str, optional
+        Path to data directory
+        
+    Returns
+    -------
+    pd.DataFrame
+        Metadata DataFrame
+    """
+    if data_path is None:
+        data_path = get_data_path()
+        if data_path is None:
+            raise ValueError("No data path configured")
+    
+    # Create expected path for metadata CSV
+    from .write import _create_derivatives_directory
+    output_dir = _create_derivatives_directory(data_path, subject_id, session, 'epochs')
+    
+    # Extract event type without '_scene' suffix for filename
+    base_event_type = event_type.replace('_scene', '')
+    csv_filename = f"sub-{subject_id:02d}_ses-{session:02d}_task-avs_{base_event_type}_metadata.csv"
+    csv_path = os.path.join(output_dir, csv_filename)
+    
+    if os.path.exists(csv_path):
+        try:
+            metadata_df = pd.read_csv(csv_path)
+            logger.info(f"Loaded metadata from: {csv_path}")
+            return metadata_df
+        except Exception as e:
+            logger.warning(f"Failed to load metadata from {csv_path}: {e}")
+            return pd.DataFrame()
+    else:
+        logger.warning(f"Metadata CSV file not found: {csv_path}")
+        return pd.DataFrame()
+
+
+def load_epochs(subject_id: int,
+               session: int,
+               event_type: str = 'fixation_scene',
+               data_path: Optional[str] = None) -> mne.Epochs:
+    """
+    Load MNE Epochs object from HDF5 files.
+    
+    This function loads epochs data and reconstructs a proper MNE Epochs object
+    with metadata attached, suitable for RSA analysis and other MNE operations.
+    
+    Parameters
+    ----------
+    subject_id : int
+        Subject ID
+    session : int
+        Session number
+    event_type : str, optional
+        Event type (default: 'fixation_scene')
+    data_path : str, optional
+        Path to data directory
+        
+    Returns
+    -------
+    mne.Epochs
+        Reconstructed epochs object with metadata
+    """
+    # Load data using existing function
+    data_dict, metadata_df, attributes_dict = load_epochs_h5(
+        subject_id=subject_id,
+        session=session,
+        event_type=event_type,
+        data_path=data_path
+    )
+    
+    # Try to load metadata from CSV file (preferred source)
+    csv_metadata = load_metadata_csv(subject_id, session, event_type, data_path)
+    if not csv_metadata.empty:
+        metadata_df = csv_metadata
+    
+    if not data_dict:
+        raise ValueError(f"No epoch data found for subject {subject_id}, session {session}, event_type {event_type}")
+    
+    # Reconstruct epochs data - combine mag and grad if they exist separately
+    if 'mag' in data_dict and 'grad' in data_dict:
+        # Combine magnetometer and gradiometer data
+        epochs_data = np.concatenate([data_dict['grad'], data_dict['mag']], axis=1)
+        
+        # Create channel info - simplified approach
+        n_grad = data_dict['grad'].shape[1]
+        n_mag = data_dict['mag'].shape[1]
+        n_channels = n_grad + n_mag
+        
+        # Create basic channel names
+        ch_names = [f'MEG{i:04d}' for i in range(1, n_grad + 1)] + \
+                  [f'MEG{i:04d}' for i in range(n_grad + 1, n_channels + 1)]
+        
+        # Create channel types
+        ch_types = ['grad'] * n_grad + ['mag'] * n_mag
+        
+    elif 'epochs' in data_dict:
+        epochs_data = data_dict['epochs']
+        n_channels = epochs_data.shape[1]
+        ch_names = [f'CH{i:04d}' for i in range(1, n_channels + 1)]
+        ch_types = ['misc'] * n_channels
+    else:
+        # Use the first available data key
+        key = list(data_dict.keys())[0]
+        epochs_data = data_dict[key]
+        n_channels = epochs_data.shape[1]
+        ch_names = [f'CH{i:04d}' for i in range(1, n_channels + 1)]
+        ch_types = ['misc'] * n_channels
+    
+    # Get timing information
+    if 'times' in attributes_dict:
+        times = attributes_dict['times']
+        tmin = times[0]
+        sfreq = attributes_dict.get('hz', 500)
+    else:
+        # Fallback timing - this should be improved
+        logger.warning("No timing information found, using defaults")
+        tmin = -0.5
+        sfreq = 500
+        times = np.linspace(tmin, tmin + (epochs_data.shape[2] - 1) / sfreq, epochs_data.shape[2])
+    
+    # Create MNE info object
+    info = mne.create_info(
+        ch_names=ch_names,
+        sfreq=sfreq,
+        ch_types=ch_types
+    )
+    
+    # Create fake events for MNE Epochs (required but not used in RSA)
+    n_epochs = epochs_data.shape[0]
+    events = np.column_stack([
+        np.arange(n_epochs) * int(sfreq),  # sample indices
+        np.zeros(n_epochs, dtype=int),      # dummy previous event
+        np.ones(n_epochs, dtype=int)        # event id
+    ])
+    
+    # Create MNE Epochs object
+    epochs = mne.EpochsArray(
+        data=epochs_data,
+        info=info,
+        events=events,
+        tmin=tmin,
+        event_id={'fixation': 1},
+        verbose=False
+    )
+    
+    # Attach metadata if available
+    if not metadata_df.empty:
+        # Ensure metadata has the right number of rows
+        if len(metadata_df) != n_epochs:
+            logger.warning(f"Metadata length ({len(metadata_df)}) doesn't match epochs ({n_epochs})")
+            if len(metadata_df) > n_epochs:
+                metadata_df = metadata_df.iloc[:n_epochs]
+            else:
+                # Create minimal metadata
+                metadata_df = pd.DataFrame({'epoch': range(n_epochs)})
+        
+        epochs.metadata = metadata_df
+        logger.info(f"Loaded {n_epochs} epochs with {len(metadata_df.columns)} metadata columns")
+    else:
+        logger.warning("No metadata found - RSA analysis may not work properly")
+        # Create minimal metadata with required columns for RSA
+        epochs.metadata = pd.DataFrame({
+            'epoch': range(n_epochs),
+            'fixation_id': range(n_epochs),  # Fallback for matching
+            'object_label': ['unknown'] * n_epochs  # Fallback for grouping
+        })
+    
+    return epochs
+
+
 def load_annotated_raw_h5(subject_id: int,
                           session: int,
                           suffix: str = 'annotated',
