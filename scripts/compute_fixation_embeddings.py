@@ -3,8 +3,8 @@
 Compute neural network embeddings from stored fixation crops.
 
 This script processes previously stored fixation crop images and computes
-neural network embeddings using various models. It operates on the PNG files
-created by store_fixation_crops.py.
+neural network embeddings using various models. It follows the workflow pattern
+from the old codebase, using thingsvision for efficient batch processing.
 
 Usage:
     python compute_fixation_embeddings.py --subjects 1 2 3 --sessions 1 2 --crop-size 112 112
@@ -21,16 +21,13 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 import logging
 from joblib import Parallel, delayed
-import numpy as np
-import pandas as pd
-from PIL import Image
 
 # Add pyavs to path for development
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 # Try to import pyavs components, handle thingsvision import issues gracefully
 try:
-    from pyavs.scenes import get_available_models, get_default_ecoset_path
+    from pyavs.scenes.embeddings import extract_embeddings_from_crops, get_available_models, get_default_ecoset_path, create_bids_embeddings_path
     EMBEDDINGS_AVAILABLE = True
 except ImportError as e:
     print(f"Warning: Could not import embeddings functions: {e}")
@@ -105,28 +102,42 @@ def find_crop_directories(data_path: str, subjects: Optional[List[int]] = None,
             crops_base_dir = ses_dir / 'fixation_crops'
             if not crops_base_dir.exists():
                 continue
-            
-            # Create crop
-            crop = im_rescaled.crop((left, top, right, bottom))
-            
-            # Create unique filename (following old codebase pattern)
-            start_time = int(fixation['start_time'] * 1000)  # Convert to ms
-            crop_identifier = f"{int(subject_id):02d}_{int(fixation['trial']):04d}_{int(fixation['fix_sequence']):02d}_{int(start_time):010d}_{int(scene_id):07d}"
-            crop_filename = f"{crop_identifier}.png"
-            crop_path = crops_dir / crop_filename
-            
-            # Save crop
-            crop.save(crop_path)
-            total_crops += 1
+                
+            for crop_size_dir in crops_base_dir.glob('*x*'):
+                if not crop_size_dir.is_dir():
+                    continue
+                    
+                try:
+                    width, height = map(int, crop_size_dir.name.split('x'))
+                    current_crop_size = (width, height)
+                except ValueError:
+                    continue
+                    
+                if crop_size and current_crop_size != crop_size:
+                    continue
+                    
+                # Check if there are any PNG files
+                png_files = list(crop_size_dir.glob('*.png'))
+                if png_files:
+                    combinations.append({
+                        'subject_id': subject_id,
+                        'session': session,
+                        'crop_size': current_crop_size,
+                        'crops_path': crop_size_dir,
+                        'n_crops': len(png_files)
+                    })
+                    logger.debug(f"Found {len(png_files)} crops for subject {subject_id}, session {session}, size {current_crop_size}")
     
-    logger.info(f"Stored {total_crops} fixation crops")
-    return total_crops
+    return combinations
 
 
-def process_subject_session(subject_id: int, session: int, data_path: str, 
-                          crop_size: tuple) -> Dict[str, Any]:
+def compute_embeddings_for_subject(subject_id: int, session: int, crop_size: tuple,
+                                 crops_path: Path, model_name: str, layers: List[str],
+                                 batch_size: int, device: Optional[str],
+                                 weights_path: Optional[str], data_path: str,
+                                 overwrite: bool = False, verbose: bool = False) -> Dict[str, Any]:
     """
-    Compute embeddings for all crops in a directory.
+    Compute embeddings for all crops for a subject/session using thingsvision workflow.
     
     Parameters
     ----------
@@ -150,6 +161,10 @@ def process_subject_session(subject_id: int, session: int, data_path: str,
         Path to custom model weights
     data_path : str
         Base data path for saving outputs
+    overwrite : bool, default False
+        Whether to overwrite existing embeddings
+    verbose : bool, default False
+        Print verbose output
         
     Returns
     -------
@@ -159,8 +174,6 @@ def process_subject_session(subject_id: int, session: int, data_path: str,
     if not EMBEDDINGS_AVAILABLE:
         raise ImportError("Embeddings functionality not available - missing dependencies")
     
-    from pyavs.scenes.embeddings import _setup_model, _extract_layer_embeddings, _save_layer_embeddings, _create_bids_embeddings_path
-    
     logger.info(f"Processing crops for subject {subject_id}, session {session}, size {crop_size}")
     
     results = {
@@ -168,7 +181,7 @@ def process_subject_session(subject_id: int, session: int, data_path: str,
         'session': session,
         'crop_size': crop_size,
         'status': 'failed',
-        'embeddings_created': {},
+        'layers_processed': [],
         'total_crops': 0,
         'error_message': None
     }
@@ -178,66 +191,41 @@ def process_subject_session(subject_id: int, session: int, data_path: str,
         validate_subject_id(subject_id)
         validate_session(session)
         
-        # Load eye tracking data using direct dataloader
-        logger.info(f"Loading eye events for subject {subject_id}, session {session}")
-        
-        # Import the eye tracking dataloader function
-        from pyavs.dataloader.eye import load_and_enrich_eye_events, add_cross_event_information, add_fixation_sequence_position
-        
-        # Load eye tracking events for fixations with recording='scene'
-        _, eye_events_df = load_and_enrich_eye_events(
-            subjects=[subject_id],
-            sessions=[session],
-            add_cross_event_info=True,
-            data_path=data_path,
-            preprocessed=True
-        )
-        eye_events_df = add_fixation_sequence_position(eye_events_df)
-        # subsample the fixation events to only those with recording='scene'
-        logger.info(f"removing non-scene recording events. Number of events removed: {len(eye_events_df) - len(eye_events_df[eye_events_df['recording'] == 'scene'])}")
-        eye_events_df = eye_events_df[eye_events_df['recording'] == 'scene']
-        logger.info(f"Removindg non-fixation events. Number of removed events: {len(eye_events_df) - len(eye_events_df[eye_events_df['type'] == 'fixation'])}")
-        eye_events_df = eye_events_df[eye_events_df['type'] == 'fixation']
-        
-        if eye_events_df.empty:
-            results['error_message'] = "No eye tracking data found"
+        # Check if crops directory exists and has files
+        if not crops_path.exists():
+            results['error_message'] = f"Crops directory not found: {crops_path}"
             return results
+            
+        crop_files = list(crops_path.glob('*.png'))
+        if not crop_files:
+            results['error_message'] = "No crop files found"
+            return results
+            
+        results['total_crops'] = len(crop_files)
+        logger.info(f"Found {len(crop_files)} crop files")
         
         # Set up output directory
-        save_dir = _create_bids_embeddings_path(subject_id, session, data_path, model_name)
+        output_dir = create_bids_embeddings_path(subject_id, session, data_path, model_name)
         
-        # Extract embeddings for each layer
-        embeddings = {}
-        
-        for layer in layers:
-            logger.info(f"Extracting embeddings from layer: {layer}")
-            
-            layer_embeddings = _extract_layer_embeddings(
-                crops_data, extractor, layer, batch_size
-            )
-            
-            embeddings[layer] = layer_embeddings
-            
-            # Save layer embeddings
-            _save_layer_embeddings(layer_embeddings, layer, save_dir)
-            
-            results['embeddings_created'][layer] = {
-                'n_embeddings': len(layer_embeddings),
-                'embedding_shape': list(layer_embeddings.values())[0].shape if layer_embeddings else None
-            }
-        
-        # Save metadata CSV
-        if embeddings and crops_data:
-            from pyavs.scenes.embeddings import create_embeddings_metadata_csv
-            metadata_path = os.path.join(save_dir, f"sub-{subject_id:02d}_ses-{session:02d}_embeddings_metadata.csv")
-            create_embeddings_metadata_csv(crops_data, embeddings, metadata_path)
+        # Extract embeddings using the cleaned embeddings module
+        output_paths = extract_embeddings_from_crops(
+            crops_dir=str(crops_path),
+            output_dir=output_dir,
+            model_name=model_name,
+            layers=layers,
+            batch_size=batch_size,
+            device=device,
+            weights_path=weights_path,
+            overwrite=overwrite,
+            verbose=verbose
+        )
         
         # Record results
         results['status'] = 'success'
-        results['total_crops'] = len(crops_data)
+        results['layers_processed'] = list(output_paths.keys())
         
         logger.info(f"Successfully processed subject {subject_id}, session {session}")
-        logger.info(f"Created embeddings for {results['total_crops']} crops across {len(layers)} layers")
+        logger.info(f"Created embeddings for {results['total_crops']} crops across {len(results['layers_processed'])} layers")
         
     except Exception as e:
         results['error_message'] = str(e)
@@ -298,7 +286,9 @@ Examples:
     parser.add_argument('--weights-path', type=str,
                        help='Path to custom model weights (uses EcoSet default if not specified)')
     
-    # Data and processing
+    # Processing options
+    parser.add_argument('--overwrite', action='store_true',
+                       help='Overwrite existing embeddings')
     parser.add_argument('--data-path', type=str,
                        help='Path to data directory (uses configured path if not specified)')
     parser.add_argument('--n-jobs', type=int, default=1,
@@ -390,7 +380,7 @@ Examples:
         results = []
         for i, combo in enumerate(combinations, 1):
             logger.info(f"Processing {i}/{len(combinations)}: Subject {combo['subject_id']}, Session {combo['session']}, Size {combo['crop_size']}")
-            result = compute_embeddings_for_crops(
+            result = compute_embeddings_for_subject(
                 subject_id=combo['subject_id'],
                 session=combo['session'],
                 crop_size=combo['crop_size'],
@@ -400,14 +390,16 @@ Examples:
                 batch_size=args.batch_size,
                 device=args.device,
                 weights_path=args.weights_path,
-                data_path=data_path
+                data_path=data_path,
+                overwrite=args.overwrite,
+                verbose=args.verbose
             )
             results.append(result)
     else:
         # Parallel processing
         logger.info(f"Using {args.n_jobs} parallel jobs")
         results = Parallel(n_jobs=args.n_jobs)(
-            delayed(compute_embeddings_for_crops)(
+            delayed(compute_embeddings_for_subject)(
                 subject_id=combo['subject_id'],
                 session=combo['session'],
                 crop_size=combo['crop_size'],
@@ -417,7 +409,9 @@ Examples:
                 batch_size=args.batch_size,
                 device=args.device,
                 weights_path=args.weights_path,
-                data_path=data_path
+                data_path=data_path,
+                overwrite=args.overwrite,
+                verbose=args.verbose
             ) for combo in combinations
         )
     
@@ -426,6 +420,7 @@ Examples:
     failed = [r for r in results if r['status'] == 'failed']
     
     total_crops = sum(r['total_crops'] for r in successful)
+    total_layers = sum(len(r['layers_processed']) for r in successful)
     
     logger.info("="*60)
     logger.info("PROCESSING SUMMARY")
@@ -433,7 +428,8 @@ Examples:
     logger.info(f"Total combinations processed: {len(results)}")
     logger.info(f"Successful: {len(successful)}")
     logger.info(f"Failed: {len(failed)}")
-    logger.info(f"Total embeddings created: {total_crops}")
+    logger.info(f"Total crops processed: {total_crops}")
+    logger.info(f"Total layer embeddings created: {total_layers}")
     
     if failed:
         logger.warning("\\nFailed combinations:")
@@ -443,8 +439,7 @@ Examples:
     if successful:
         logger.info(f"\\nEmbeddings saved to BIDS structure in: {data_path}/derivatives/pyavs/")
         logger.info("Files created:")
-        logger.info("  - sub-XX/ses-YY/embeddings/{model_name}/{layer}/embeddings.npz")
-        logger.info("  - sub-XX/ses-YY/embeddings/{model_name}/sub-XX_ses-YY_embeddings_metadata.csv")
+        logger.info(f"  - sub-XX/ses-YY/embeddings/{args.model_name}/{{layer}}/features.h5")
     
     return 0 if not failed else 1
 
