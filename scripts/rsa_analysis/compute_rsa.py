@@ -36,26 +36,52 @@ logger = get_logger('scripts.rsa_analysis.meg_rsa_pipeline')
 
 def load_fixation_epochs(subject_id: int, session: int, data_path: str) -> Tuple[np.ndarray, pd.DataFrame, np.ndarray]:
     """Load fixation epochs."""
-    epochs, metadata, times = load_epochs_h5(
-        subject_id=subject_id,
-        session=session,
-        event_type='fixation_scene',
-        data_path=data_path
-    )
-
-    # if mag and grad in epochs.keys. Merge them
-    if 'mag' in epochs.keys() and 'grad' in epochs.keys():
-        epochs = np.concatenate([epochs['mag'], epochs['grad']], axis=1)
-        print(f"Merged mag and grad channels: {epochs.shape}")
-    elif 'mag' in epochs.keys():
-        epochs = epochs['mag']
-        print(f"Using mag channels only: {epochs.shape}")
-    elif 'grad' in epochs.keys():
-        epochs = epochs['grad']
-        print(f"Using grad channels only: {epochs.shape}")
-    else:
-        raise ValueError("No valid channel types found in epochs.")
-    return epochs, metadata, times
+    from pyavs.io.read import load_epochs
+    
+    # Use the enhanced load_epochs function that handles metadata properly
+    try:
+        epochs_obj = load_epochs(
+            subject_id=subject_id,
+            session=session,
+            event_type='fixation_scene',
+            data_path=data_path
+        )
+        
+        # Extract data and metadata from MNE Epochs object
+        epochs_data = epochs_obj.get_data()  # (n_epochs, n_channels, n_times)
+        metadata = epochs_obj.metadata
+        times = epochs_obj.times
+        
+        print(f"Loaded epochs with metadata: {epochs_data.shape}")
+        print(f"Metadata columns: {list(metadata.columns) if metadata is not None else 'None'}")
+        
+    except Exception as e:
+        print(f"Enhanced loading failed, falling back to basic loading: {e}")
+        
+        # Fallback to original loading method
+        epochs_dict, metadata, attrs = load_epochs_h5(
+            subject_id=subject_id,
+            session=session,
+            event_type='fixation_scene',
+            data_path=data_path
+        )
+        
+        # Merge mag and grad channels
+        if 'mag' in epochs_dict.keys() and 'grad' in epochs_dict.keys():
+            epochs_data = np.concatenate([epochs_dict['grad'], epochs_dict['mag']], axis=1)
+            print(f"Merged mag and grad channels: {epochs_data.shape}")
+        elif 'mag' in epochs_dict.keys():
+            epochs_data = epochs_dict['mag']
+            print(f"Using mag channels only: {epochs_data.shape}")
+        elif 'grad' in epochs_dict.keys():
+            epochs_data = epochs_dict['grad']
+            print(f"Using grad channels only: {epochs_data.shape}")
+        else:
+            raise ValueError("No valid channel types found in epochs.")
+        
+        times = attrs.get('times', np.linspace(-0.5, 0.8, epochs_data.shape[2]))
+    
+    return epochs_data, metadata, times
 
 
 def load_embeddings(subject_id: int, session: int, data_path: str, 
@@ -93,9 +119,44 @@ def match_epochs_to_embeddings(metadata: pd.DataFrame, file_names: List[str]) ->
 
 def group_by_objects(epochs_data: np.ndarray, embeddings: np.ndarray,
                     metadata: pd.DataFrame, object_column: str = 'object_label') -> Tuple[np.ndarray, np.ndarray, List[str]]:
-    """Group data by object labels."""
+    """Group data by object labels, loading object labels if needed."""
+    
+    # Check if object labels are present in metadata
+    if object_column not in metadata.columns:
+        print(f"Object labels not found in metadata. Adding {object_column} column...")
+        
+        # Add object labels using the objects module
+        try:
+            from pyavs.scenes.objects import get_fixated_objects
+            from pyavs.utils.config import get_input_paths
+            
+            # Get transformed annotations directory
+            input_paths = get_input_paths()
+            transformed_annotations_dir = os.path.join(input_paths, 'annotations', 'transformed')
+            
+            if os.path.exists(transformed_annotations_dir):
+                # Add object labels to metadata
+                metadata = get_fixated_objects(
+                    events_df=metadata,
+                    transformed_annotations_dir=transformed_annotations_dir,
+                    verbose=True,
+                    error_margin_pixels=10
+                )
+                print(f"Added object labels. Unique objects: {metadata[object_column].value_counts()}")
+            else:
+                print(f"Transformed annotations not found at: {transformed_annotations_dir}")
+                raise FileNotFoundError(f"Cannot find transformed annotations at {transformed_annotations_dir}")
+                
+        except Exception as e:
+            print(f"Failed to add object labels: {e}")
+            raise ValueError(f"Object labels required for grouping but could not be loaded: {e}")
+    
+    # Group by object labels
     unique_objects = metadata[object_column].dropna().unique()
-    object_labels = sorted([obj for obj in unique_objects if obj != 'unknown'])
+    object_labels = sorted([obj for obj in unique_objects if obj not in ['unknown', 'None', 'outside']])
+    
+    if len(object_labels) == 0:
+        raise ValueError("No valid object labels found for grouping")
     
     n_objects = len(object_labels)
     n_channels, n_times = epochs_data.shape[1], epochs_data.shape[2]
@@ -104,11 +165,19 @@ def group_by_objects(epochs_data: np.ndarray, embeddings: np.ndarray,
     grouped_epochs = np.zeros((n_objects, n_channels, n_times))
     grouped_embeddings = np.zeros((n_objects, n_features))
     
+    print(f"Grouping {len(epochs_data)} epochs into {n_objects} object categories")
+    
     for i, obj_label in enumerate(object_labels):
         obj_mask = metadata[object_column] == obj_label
         obj_indices = np.where(obj_mask)[0]
+        
+        if len(obj_indices) == 0:
+            print(f"Warning: No epochs found for object '{obj_label}'")
+            continue
+            
         grouped_epochs[i] = np.mean(epochs_data[obj_indices], axis=0)
         grouped_embeddings[i] = np.mean(embeddings[obj_indices], axis=0)
+        print(f"  {obj_label}: {len(obj_indices)} epochs")
     
     return grouped_epochs, grouped_embeddings, object_labels
 
