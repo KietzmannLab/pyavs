@@ -28,7 +28,7 @@ except ImportError as e:
 
 # Project imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
-from pyavs.io.read import load_epochs_h5
+from pyavs.io.read import load_epochs_h5, load_metadata_csv
 from pyavs.utils.logging import get_logger
 
 logger = get_logger('scripts.rsa_analysis.meg_rsa_pipeline')
@@ -36,52 +36,32 @@ logger = get_logger('scripts.rsa_analysis.meg_rsa_pipeline')
 
 def load_fixation_epochs(subject_id: int, session: int, data_path: str) -> Tuple[np.ndarray, pd.DataFrame, np.ndarray]:
     """Load fixation epochs."""
-    from pyavs.io.read import load_epochs
-    
-    # Use the enhanced load_epochs function that handles metadata properly
-    try:
-        epochs_obj = load_epochs(
-            subject_id=subject_id,
-            session=session,
-            event_type='fixation_scene',
-            data_path=data_path
-        )
-        
-        # Extract data and metadata from MNE Epochs object
-        epochs_data = epochs_obj.get_data()  # (n_epochs, n_channels, n_times)
-        metadata = epochs_obj.metadata
-        times = epochs_obj.times
-        
-        print(f"Loaded epochs with metadata: {epochs_data.shape}")
-        print(f"Metadata columns: {list(metadata.columns) if metadata is not None else 'None'}")
-        
-    except Exception as e:
-        print(f"Enhanced loading failed, falling back to basic loading: {e}")
-        
-        # Fallback to original loading method
-        epochs_dict, metadata, attrs = load_epochs_h5(
-            subject_id=subject_id,
-            session=session,
-            event_type='fixation_scene',
-            data_path=data_path
-        )
-        
-        # Merge mag and grad channels
-        if 'mag' in epochs_dict.keys() and 'grad' in epochs_dict.keys():
-            epochs_data = np.concatenate([epochs_dict['grad'], epochs_dict['mag']], axis=1)
-            print(f"Merged mag and grad channels: {epochs_data.shape}")
-        elif 'mag' in epochs_dict.keys():
-            epochs_data = epochs_dict['mag']
-            print(f"Using mag channels only: {epochs_data.shape}")
-        elif 'grad' in epochs_dict.keys():
-            epochs_data = epochs_dict['grad']
-            print(f"Using grad channels only: {epochs_data.shape}")
-        else:
-            raise ValueError("No valid channel types found in epochs.")
-        
-        times = attrs.get('times', np.linspace(-0.5, 0.8, epochs_data.shape[2]))
-    
-    return epochs_data, metadata, times
+    epochs, _, times = load_epochs_h5(
+        subject_id=subject_id,
+        session=session,
+        event_type='fixation_scene',
+        data_path=data_path
+    )
+    metadata =load_metadata_csv(
+        subject_id=subject_id,
+        session=session,
+        event_type='fixation',
+        data_path=data_path
+    )
+    print(metadata.head())
+    # if mag and grad in epochs.keys. Merge them
+    if 'mag' in epochs.keys() and 'grad' in epochs.keys():
+        epochs = np.concatenate([epochs['mag'], epochs['grad']], axis=1)
+        print(f"Merged mag and grad channels: {epochs.shape}")
+    elif 'mag' in epochs.keys():
+        epochs = epochs['mag']
+        print(f"Using mag channels only: {epochs.shape}")
+    elif 'grad' in epochs.keys():
+        epochs = epochs['grad']
+        print(f"Using grad channels only: {epochs.shape}")
+    else:
+        raise ValueError("No valid channel types found in epochs.")
+    return epochs, metadata, times
 
 
 def load_embeddings(subject_id: int, session: int, data_path: str, 
@@ -89,36 +69,65 @@ def load_embeddings(subject_id: int, session: int, data_path: str,
     """Load neural network embeddings."""
     embeddings_dir = (Path(data_path) / 'derivatives' / 'pyavs' / 
                      f"sub-{subject_id:02d}" / f"ses-{session:02d}" / 
-                     'embeddings' / model_name / layer)
+                     'embeddings' / model_name )
     
-    features_file = embeddings_dir / 'features.h5'
+    
+    features_file = embeddings_dir / layer /'features.hdf5'
+    # filenmes file
+    filenames_file = embeddings_dir  / 'file_names.txt'
+    
     
     with h5py.File(features_file, 'r') as f:
         features = f['features'][:]
-        file_names = [name.decode('utf-8') if isinstance(name, bytes) else name 
-                     for name in f['file_names'][:]]
+
+    # make a list of the filenames
+    with open(filenames_file, 'r') as f:
+        file_names = [line.strip() for line in f.readlines()]
     
+    print(f"Loaded {features.shape[0]} embeddings from {features_file}")
     return features, file_names
 
 
 def match_epochs_to_embeddings(metadata: pd.DataFrame, file_names: List[str]) -> Tuple[np.ndarray, np.ndarray]:
     """Match epoch indices to embedding indices."""
-    file_to_idx = {os.path.splitext(fname)[0]: i for i, fname in enumerate(file_names)}
-    
+
+    filename_decomposed = [os.path.splitext(os.path.basename(f))[0].split('_') for f in file_names]
+    # make all list entries int
+    filename_decomposed = [[int(part) if part.isdigit() else part for part in parts] for parts in filename_decomposed]
+ 
+    # make this a dataframe
+    filenames_df = pd.DataFrame(filename_decomposed, columns=['subject', 'trial', 'fix_sequence', 'start_time', 'scene_id'])
+    print(filenames_df.head())
     epoch_indices = []
     embedding_indices = []
-    
+    print(metadata.head()   )
     for epoch_idx, row in metadata.iterrows():
-        fixation_id = str(row['fixation_id'])
-        if fixation_id in file_to_idx:
+        subject = int(row['subject'])
+        trial = int(row['trial'])
+        fix_sequence = int(row['fix_sequence'])
+        start_time = int(row['start_time']*1000)  # convert to ms
+        scene_id = int(row['sceneID'])
+        
+        match = filenames_df[
+            (filenames_df['subject'] == subject) &
+            (filenames_df['trial'] == trial) &
+            (filenames_df['fix_sequence'] == fix_sequence) &
+            (filenames_df['start_time'] == start_time) &
+            (filenames_df['scene_id'] == scene_id)
+        ]
+        
+        if not match.empty:
+            embedding_idx = match.index[0]
             epoch_indices.append(epoch_idx)
-            embedding_indices.append(file_to_idx[fixation_id])
-    
+            embedding_indices.append(embedding_idx)
+        else:
+            logger.warning(f"No embedding match for epoch {epoch_idx} with metadata {row.to_dict()}")
+    logger.info(f"Matched {len(epoch_indices)} epochs to embeddings")
     return np.array(epoch_indices), np.array(embedding_indices)
 
 
 def group_by_objects(epochs_data: np.ndarray, embeddings: np.ndarray,
-                    metadata: pd.DataFrame, object_column: str = 'object_label') -> Tuple[np.ndarray, np.ndarray, List[str]]:
+                    metadata: pd.DataFrame, data_path: str, object_column: str = 'object_label', ) -> Tuple[np.ndarray, np.ndarray, List[str]]:
     """Group data by object labels, loading object labels if needed."""
     
     # Check if object labels are present in metadata
@@ -128,11 +137,9 @@ def group_by_objects(epochs_data: np.ndarray, embeddings: np.ndarray,
         # Add object labels using the objects module
         try:
             from pyavs.scenes.objects import get_fixated_objects
-            from pyavs.utils.config import get_input_paths
             
-            # Get transformed annotations directory
-            input_paths = get_input_paths()
-            transformed_annotations_dir = os.path.join(input_paths, 'annotations', 'transformed')
+            
+            transformed_annotations_dir = os.path.join(data_path, 'AVS-UTILS' , "avs_scene_annotations", "coco_objects")
             
             if os.path.exists(transformed_annotations_dir):
                 # Add object labels to metadata
@@ -262,8 +269,8 @@ def process_subject_session(subject_id: int, session: int, model_name: str, laye
         # Group by objects if requested
         if use_object_labels:
             final_epochs_data, final_embeddings, object_labels = group_by_objects(
-                matched_epochs_data, matched_embeddings, matched_metadata
-            )
+                matched_epochs_data, matched_embeddings, matched_metadata, data_path=data_path)
+            
         else:
             final_epochs_data = matched_epochs_data
             final_embeddings = matched_embeddings
@@ -277,6 +284,8 @@ def process_subject_session(subject_id: int, session: int, model_name: str, laye
         embedding_rdm = compute_embedding_rdm(final_embeddings, distance_metric)
         rsa_timeseries = compute_rsa_correlation(meg_rdm_timeseries, embedding_rdm)
         
+        print(np.round(rsa_timeseries, 2))
+        print(f"Max RSA correlation: {np.max(rsa_timeseries):.3f} at time {times[np.argmax(rsa_timeseries)]:.3f}s")
         # Save results
         output_file = output_dir / f"sub-{subject_id:02d}_ses-{session:02d}_model-{model_name}_layer-{layer}_rsa.npz"
         np.savez_compressed(

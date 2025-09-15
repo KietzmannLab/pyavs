@@ -213,7 +213,8 @@ def load_metadata_csv(subject_id: int, session: int, event_type: str,
     
     # Extract event type without '_scene' suffix for filename
     base_event_type = event_type.replace('_scene', '')
-    csv_filename = f"sub-{subject_id:02d}_ses-{session:02d}_task-avs_{base_event_type}_metadata.csv"
+    # sub-01_ses-01_fixation_metadata.csv
+    csv_filename = f"sub-{subject_id:02d}_ses-{session:02d}_{base_event_type}_metadata.csv"
     csv_path = os.path.join(output_dir, csv_filename)
     
     if os.path.exists(csv_path):

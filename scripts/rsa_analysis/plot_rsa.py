@@ -35,14 +35,8 @@ from pyavs.utils.logging import get_logger
 logger = get_logger('scripts.rsa_analysis.plot_rsa')
 
 # RSA dependencies
-try:
-    import rsatoolbox
-    from rsatoolbox.rdm import RDMs
-    from rsatoolbox.inference import compute_noise_ceiling
-    HAS_RSATOOLBOX = True
-except ImportError:
-    HAS_RSATOOLBOX = False
-    logger.warning("rsatoolbox not available. Install with: pip install rsatoolbox")
+from rsatoolbox.rdm import RDMs
+from rsatoolbox.inference.noise_ceiling import boot_noise_ceiling
 
 # Set matplotlib style
 plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
@@ -66,8 +60,8 @@ def load_rsa_results(rsa_file: str) -> Dict[str, Any]:
     if not os.path.exists(rsa_file):
         raise FileNotFoundError(f"RSA file not found: {rsa_file}")
     
-    data = np.load(rsa_file)
-    
+    data = np.load(rsa_file, allow_pickle=True)
+    print(data.files)
     return {
         'rsa_timeseries': data['rsa_timeseries'],
         'times': data['times'],
@@ -75,10 +69,7 @@ def load_rsa_results(rsa_file: str) -> Dict[str, Any]:
         'embedding_rdm': data['embedding_rdm'],
         'epoch_indices': data['epoch_indices'],
         'embedding_indices': data['embedding_indices'],
-        'subject_id': int(data['subject_id']),
-        'session': int(data['session']),
-        'model_name': str(data['model_name']),
-        'layer': str(data['layer']),
+        'object_labels': data['object_labels'].tolist() if 'object_labels' in data else None,
         'distance_metric': str(data['distance_metric'])
     }
 
@@ -100,9 +91,7 @@ def compute_noise_ceiling_timeseries(meg_rdm_timeseries: np.ndarray,
     tuple
         (lower_bound, upper_bound) noise ceiling time series
     """
-    if not HAS_RSATOOLBOX:
-        raise ImportError("rsatoolbox is required for noise ceiling computation")
-    
+   
     n_times, n_conditions, _ = meg_rdm_timeseries.shape
     lower_bound = np.zeros(n_times)
     upper_bound = np.zeros(n_times)
@@ -122,7 +111,7 @@ def compute_noise_ceiling_timeseries(meg_rdm_timeseries: np.ndarray,
         try:
             # This is a simplified noise ceiling - ideally you'd have multiple RDMs
             # from different subjects/sessions
-            nc_lower, nc_upper = compute_noise_ceiling(rdms, n_bootstrap=n_bootstrap)
+            nc_lower, nc_upper = boot_noise_ceiling(rdms, n_bootstrap=n_bootstrap)
             lower_bound[t] = nc_lower
             upper_bound[t] = nc_upper
         except:
@@ -427,9 +416,7 @@ Examples:
         logging.getLogger('pyavs').setLevel(logging.DEBUG)
     
     # Check dependencies
-    if not HAS_RSATOOLBOX:
-        logger.warning("rsatoolbox not available - noise ceiling computation disabled")
-        args.no_noise_ceiling = True
+   
     
     # Determine RSA results directory
     if args.rsa_dir:
@@ -472,17 +459,7 @@ Examples:
         try:
             rsa_data = load_rsa_results(rsa_file)
             
-            # Apply filters
-            if args.subjects and rsa_data['subject_id'] not in args.subjects:
-                continue
-            if args.single_subject and rsa_data['subject_id'] != args.single_subject:
-                continue
-            if args.sessions and rsa_data['session'] not in args.sessions:
-                continue
-            if args.model_name and rsa_data['model_name'] != args.model_name:
-                continue
-            if args.layer and rsa_data['layer'] != args.layer:
-                continue
+            
             
             rsa_data_list.append(rsa_data)
             logger.debug(f"Loaded: Subject {rsa_data['subject_id']}, Session {rsa_data['session']}")
