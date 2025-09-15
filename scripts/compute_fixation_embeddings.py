@@ -65,7 +65,7 @@ def setup_output_directory(data_path: str) -> Path:
 def get_subject_sessions(data_path: str, subjects: Optional[List[int]] = None, 
                         sessions: Optional[List[int]] = None) -> List[tuple]:
     """
-    Get all available subject-session combinations.
+    Get all available subject-session combinations compatible with AVS Composer.
     
     Parameters
     ----------
@@ -81,48 +81,55 @@ def get_subject_sessions(data_path: str, subjects: Optional[List[int]] = None,
     list of tuple
         List of (subject_id, session) pairs
     """
-    derivatives_dir = Path(data_path) / 'derivatives' / 'pyavs'
+    from pyavs.utils.paths import get_legacy_paths
     
-    if not derivatives_dir.exists():
-        logger.warning(f"Derivatives directory not found: {derivatives_dir}")
+    # Check for legacy file structure that AVS Composer expects
+    results_dir = Path(data_path) / 'results'
+    
+    if not results_dir.exists():
+        logger.warning(f"Results directory not found: {results_dir}")
         return []
     
     combinations = []
     
-    # Find available subject directories
-    for sub_dir in derivatives_dir.glob('sub-*'):
-        if not sub_dir.is_dir():
+    # Scan for subject-session directories in legacy format (as01_01, as02_01, etc.)
+    for sub_sess_dir in results_dir.glob('as*_*'):
+        if not sub_sess_dir.is_dir():
             continue
             
         try:
-            subject_id = int(sub_dir.name.split('-')[1])
+            # Parse directory name (e.g., "as01_01" -> subject_id=1, session=1)
+            parts = sub_sess_dir.name.split('_')
+            if len(parts) != 2:
+                continue
+                
+            subject_part = parts[0]  # e.g., "as01"
+            session_part = parts[1]  # e.g., "01"
+            
+            if not subject_part.startswith('as'):
+                continue
+                
+            subject_id = int(subject_part[2:])  # Remove "as" prefix
+            session = int(session_part)
+            
         except (IndexError, ValueError):
             continue
             
         if subjects and subject_id not in subjects:
             continue
             
-        # Find available session directories
-        for ses_dir in sub_dir.glob('ses-*'):
-            if not ses_dir.is_dir():
-                continue
-                
-            try:
-                session = int(ses_dir.name.split('-')[1])
-            except (IndexError, ValueError):
-                continue
-                
-            if sessions and session not in sessions:
-                continue
-                
-            # Check if eye events exist
-            eye_events_pattern = f"sub-{subject_id:02d}_ses-{session:02d}_eyetracking.csv"
-            eye_events_file = ses_dir / 'eyetracking' / eye_events_pattern
-            
-            if eye_events_file.exists():
-                combinations.append((subject_id, session))
-            else:
-                logger.debug(f"Eye events file not found: {eye_events_file}")
+        if sessions and session not in sessions:
+            continue
+        
+        # Check if the required eye tracking files exist for AVS Composer
+        legacy_paths = get_legacy_paths(data_path, subject_id, session)
+        events_file = Path(legacy_paths['events'])
+        
+        if events_file.exists():
+            combinations.append((subject_id, session))
+            logger.debug(f"Found valid data for subject {subject_id}, session {session}")
+        else:
+            logger.debug(f"Eye events file not found: {events_file}")
     
     return combinations
 
