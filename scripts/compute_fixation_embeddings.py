@@ -190,16 +190,18 @@ def process_subject_session(subject_id: int, session: int, data_path: str,
         from pyavs.dataloader.eye import load_and_enrich_eye_events
         
         # Load eye tracking events for fixations with recording='scene'
-        eye_events_df = load_and_enrich_eye_events(
-            subject_ids=[subject_id],
-            session_nums=[session],
-            event_types=["fixation"],
-            recording="scene",
-            exclude_last_fixation=True,
+        _, eye_events_df = load_and_enrich_eye_events(
+            subjects=[subject_id],
+            sessions=[session],
             add_cross_event_info=True,
             data_path=data_path,
             preprocessed=True
         )
+        # subsample the fixation events to only those with recording='scene'
+        logger.info(f"removing non-scene recording events. Number of events removed: {len(eye_events_df) - len(eye_events_df[eye_events_df['recording'] == 'scene'])}")
+        eye_events_df = eye_events_df[eye_events_df['recording'] == 'scene']
+        logger.info(f"Removindg non-fixation events. Number of removed events: {len(eye_events_df) - len(eye_events_df[eye_events_df['type'] == 'fixation'])}")
+        eye_events_df = eye_events_df[eye_events_df['type'] == 'fixation']
         
         if eye_events_df.empty:
             results['error_message'] = "No eye tracking data found"
@@ -255,7 +257,7 @@ def process_subject_session(subject_id: int, session: int, data_path: str,
         logger.info(f"Successfully processed subject {subject_id}, session {session}")
         logger.info(f"Created {results['total_crops']} embeddings across {len(layers)} layers")
         
-    except Exception as e:
+    except IndentationError as e:
         results['error_message'] = str(e)
         logger.error(f"Error processing subject {subject_id}, session {session}: {e}")
     

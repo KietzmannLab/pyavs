@@ -264,12 +264,17 @@ def _create_crops_in_memory(
         crop_array = np.array(crop)
         
         # Create metadata
-        subject = fixation.get('subject', 0)
-        session = fixation.get('session', 1)  # Default to session 1 if not provided
-        trial = fixation.get('trial', 0)
-        fix_sequence = fixation.get('fix_sequence', idx)
+        subject = int(fixation.get('subject', -1))
+        session = int(fixation.get('session', -1))
+        trial = int(fixation.get('trial', -1))
+        fix_sequence = int(fixation.get('fix_sequence', -1))
+        trial_num = fixation.get('trial', -1)
+        pos = fix_sequence
+        event_start = int(fixation.get('start_time', -1))   
         
-        crop_id = f"sub{subject:02d}_ses{session:02d}_trial{trial:04d}_fix{fix_sequence:03d}_scene{scene_id}"
+        
+        crop_id = "{}_{}_{}_{}_{}".format(str(subject).zfill(2), str(int(trial_num)).zfill(4), str(int(pos)).zfill(2), str(event_start).zfill(10), str(int(scene_id)).zfill(7))
+               
         
         metadata = {
             'subject': subject,
@@ -280,6 +285,7 @@ def _create_crops_in_memory(
             'fix_x_screen': fix_x_screen,
             'fix_y_screen': fix_y_screen,
             'crop_bounds': (left, top, right, bottom)
+            'crop_id': crop_id
         }
         
         crops_data[crop_id] = (crop_array, metadata)
