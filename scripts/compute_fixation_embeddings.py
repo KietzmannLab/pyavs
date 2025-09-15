@@ -257,7 +257,7 @@ def store_fixation_crops(eye_events_df: pd.DataFrame, subject_id: int, session: 
             
             # Create unique filename (following old codebase pattern)
             start_time = int(fixation['start_time'] * 1000)  # Convert to ms
-            crop_identifier = f"{subject_id:02d}_{fixation['trial']:04d}_{fixation['fix_sequence']:02d}_{start_time:010d}_{scene_id:07d}"
+            crop_identifier = f"{int(subject_id):02d}_{int(fixation['trial']):04d}_{int(fixation['fix_sequence']):02d}_{int(start_time):010d}_{int(scene_id):07d}"
             crop_filename = f"{crop_identifier}.png"
             crop_path = crops_dir / crop_filename
             
@@ -309,7 +309,7 @@ def process_subject_session(subject_id: int, session: int, data_path: str,
         logger.info(f"Loading eye events for subject {subject_id}, session {session}")
         
         # Import the eye tracking dataloader function
-        from pyavs.dataloader.eye import load_and_enrich_eye_events
+        from pyavs.dataloader.eye import load_and_enrich_eye_events, add_cross_event_information, add_fixation_sequence_position
         
         # Load eye tracking events for fixations with recording='scene'
         _, eye_events_df = load_and_enrich_eye_events(
@@ -319,6 +319,7 @@ def process_subject_session(subject_id: int, session: int, data_path: str,
             data_path=data_path,
             preprocessed=True
         )
+        eye_events_df = add_fixation_sequence_position(eye_events_df)
         # subsample the fixation events to only those with recording='scene'
         logger.info(f"removing non-scene recording events. Number of events removed: {len(eye_events_df) - len(eye_events_df[eye_events_df['recording'] == 'scene'])}")
         eye_events_df = eye_events_df[eye_events_df['recording'] == 'scene']
@@ -354,7 +355,7 @@ def process_subject_session(subject_id: int, session: int, data_path: str,
         logger.info(f"Successfully processed subject {subject_id}, session {session}")
         logger.info(f"Created {results['total_crops']} fixation crops")
         
-    except IndentationError as e:
+    except Exception as e:
         results['error_message'] = str(e)
         logger.error(f"Error processing subject {subject_id}, session {session}: {e}")
     

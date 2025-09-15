@@ -284,7 +284,7 @@ def _create_crops_in_memory(
             'scene_id': scene_id,
             'fix_x_screen': fix_x_screen,
             'fix_y_screen': fix_y_screen,
-            'crop_bounds': (left, top, right, bottom)
+            'crop_bounds': (left, top, right, bottom),
             'crop_id': crop_id
         }
         
