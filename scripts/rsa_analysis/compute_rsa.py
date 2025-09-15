@@ -36,20 +36,26 @@ logger = get_logger('scripts.rsa_analysis.meg_rsa_pipeline')
 
 def load_fixation_epochs(subject_id: int, session: int, data_path: str) -> Tuple[np.ndarray, pd.DataFrame, np.ndarray]:
     """Load fixation epochs."""
-    epochs = load_epochs_h5(
+    epochs, metadata, times = load_epochs_h5(
         subject_id=subject_id,
         session=session,
         event_type='fixation_scene',
         data_path=data_path
     )
+
     # if mag and grad in epochs.keys. Merge them
-    if 'mag' in epochs and 'grad' in epochs:
-        epochs = np.concatenate([epochs['mag'], epochs['grad']], axis=0)
+    if 'mag' in epochs.keys() and 'grad' in epochs.keys():
+        epochs = np.concatenate([epochs['mag'], epochs['grad']], axis=1)
         print(f"Merged mag and grad channels: {epochs.shape}")
-    if epochs is None or len(epochs) == 0:
-        raise ValueError(f"No epochs found for subject {subject_id}, session {session}")
-    
-    return epochs, epochs.metadata, epochs.times
+    elif 'mag' in epochs.keys():
+        epochs = epochs['mag']
+        print(f"Using mag channels only: {epochs.shape}")
+    elif 'grad' in epochs.keys():
+        epochs = epochs['grad']
+        print(f"Using grad channels only: {epochs.shape}")
+    else:
+        raise ValueError("No valid channel types found in epochs.")
+    return epochs, metadata, times
 
 
 def load_embeddings(subject_id: int, session: int, data_path: str, 
