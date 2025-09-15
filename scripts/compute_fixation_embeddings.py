@@ -39,7 +39,6 @@ from pyavs.io import load_scene_images
 from pyavs.config import PyAVSConfig
 from pyavs.utils.validation import validate_subject_id, validate_session
 from pyavs.utils.logging import get_logger
-from pyavs import AVSComposer
 
 # Initialize logger
 logger = get_logger('scripts.compute_fixation_embeddings')
@@ -184,36 +183,23 @@ def process_subject_session(subject_id: int, session: int, data_path: str,
         validate_subject_id(subject_id)
         validate_session(session)
         
-        # Load eye tracking data using AVS Composer
+        # Load eye tracking data using direct dataloader
         logger.info(f"Loading eye events for subject {subject_id}, session {session}")
         
-        # Initialize AVS Composer for eye tracking data loading
-        composer = AVSComposer(
-            subject=subject_id,
-            session_num=session,
-            data_path=data_path,
-            output_path=data_path,
-            et_path=data_path,
-            preprocessed=True,
-            recompute_prepro=False,
-            max_block=None,
-            min_block=1,
-            verbose=False,
-            interpolate_bad_channels=False,
-            use_precomputed_ica=False,
-            apply_ica=False
-        )
+        # Import the eye tracking dataloader function
+        from pyavs.dataloader.eye import load_and_enrich_eye_events
         
-        # Get eye tracking annotations for fixations with recording='scene'
-        composer.get_et_annotations(
-            event_type="fixation",
+        # Load eye tracking events for fixations with recording='scene'
+        eye_events_df = load_and_enrich_eye_events(
+            subject_ids=[subject_id],
+            session_nums=[session],
+            event_types=["fixation"],
             recording="scene",
             exclude_last_fixation=True,
             add_cross_event_info=True,
+            data_path=data_path,
             preprocessed=True
         )
-        
-        eye_events_df = composer.et_events
         
         if eye_events_df.empty:
             results['error_message'] = "No eye tracking data found"
