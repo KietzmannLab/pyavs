@@ -26,14 +26,10 @@ from joblib import Parallel, delayed
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 # Try to import pyavs components, handle thingsvision import issues gracefully
-try:
-    from pyavs.scenes.embeddings import extract_embeddings_from_crops, get_available_models, get_default_ecoset_path, create_bids_embeddings_path
-    EMBEDDINGS_AVAILABLE = True
-except ImportError as e:
-    print(f"Warning: Could not import embeddings functions: {e}")
-    print("This is likely due to thingsvision/torchtyping compatibility issues.")
-    print("Please check your environment or install compatible versions.")
-    EMBEDDINGS_AVAILABLE = False
+
+from pyavs.scenes.embeddings import extract_embeddings_from_crops, get_available_models, get_default_ecoset_path, create_bids_embeddings_path
+    
+
 
 from pyavs.utils.validation import validate_subject_id, validate_session
 from pyavs.utils.logging import get_logger
@@ -171,8 +167,6 @@ def compute_embeddings_for_subject(subject_id: int, session: int, crop_size: tup
     dict
         Processing results and statistics
     """
-    if not EMBEDDINGS_AVAILABLE:
-        raise ImportError("Embeddings functionality not available - missing dependencies")
     
     logger.info(f"Processing crops for subject {subject_id}, session {session}, size {crop_size}")
     
@@ -232,6 +226,7 @@ def compute_embeddings_for_subject(subject_id: int, session: int, crop_size: tup
         logger.error(f"Error processing subject {subject_id}, session {session}: {e}")
     
     return results
+
 
 
 def main():
@@ -369,6 +364,7 @@ Examples:
     
     if args.model_name == 'resnet50_ecoset_crop' and args.weights_path is None:
         ecoset_path = get_default_ecoset_path()
+        args.weights_path = ecoset_path
         if ecoset_path:
             logger.info(f"Using default EcoSet weights: {ecoset_path}")
         else:

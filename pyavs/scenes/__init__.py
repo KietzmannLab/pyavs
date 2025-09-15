@@ -19,24 +19,8 @@ from .crops import (
 )
 
 from .embeddings import (
-    extract_crop_embeddings,
-    load_crop_embeddings,
+    extract_embeddings_from_crops,
     get_available_models,
     get_default_ecoset_path,
-    create_embeddings_metadata_csv
+    create_bids_embeddings_path 
 )
-
-__all__ = [
-    'get_fixated_objects',
-    'load_object_masks',
-    'map_fixations_to_objects',
-    'CocoObjectMasker',
-    'FixationObjectChecker',
-    'create_fixation_crops', 
-    'extract_scene_regions',
-    'extract_crop_embeddings',
-    'load_crop_embeddings',
-    'get_available_models',
-    'get_default_ecoset_path',
-    'create_embeddings_metadata_csv'
-]

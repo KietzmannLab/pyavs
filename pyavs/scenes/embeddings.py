@@ -216,8 +216,7 @@ def get_default_ecoset_path() -> Optional[str]:
         Path to EcoSet weights if available, None otherwise
     """
     default_paths = [
-        '/share/klab/datasets/avs/AVS-UTILS/models/ecoset_patches_trained/resnet50/checkpoint_last.pth',
-        '/share/klab/datasets/texture2shape_projects/share/ecoset_patches_trained/adult/checkpoint_epoch_300.pth'
+        '/share/klab/datasets/avs/AVS-UTILS/models/ecoset_patches_trained/resnet50/checkpoint_last.pth'
     ]
     
     for path in default_paths:
