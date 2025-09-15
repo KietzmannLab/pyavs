@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-Store fixation crops from scene images for later processing.
+Compute neural network embeddings from stored fixation crops.
 
-This script extracts and saves individual fixation crop images from scene presentations.
-Crops are stored as individual PNG files following a systematic naming convention.
+This script processes previously stored fixation crop images and computes
+neural network embeddings using various models. It operates on the PNG files
+created by store_fixation_crops.py.
 
 Usage:
-    python compute_fixation_embeddings.py --subjects 1 2 3 --sessions 1 2 --data-path /path/to/data
-    python compute_fixation_embeddings.py --subject 1 --session 1 --crop-size 112 112
-    python compute_fixation_embeddings.py --all-subjects --all-sessions
+    python compute_fixation_embeddings.py --subjects 1 2 3 --sessions 1 2 --crop-size 112 112
+    python compute_fixation_embeddings.py --subject 1 --session 1 --model resnet50_ecoset_crop
+    python compute_fixation_embeddings.py --all-subjects --all-sessions --layers avgpool fc
 
 Author: pyAVS development team
 """
@@ -20,43 +21,35 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 import logging
 from joblib import Parallel, delayed
+import numpy as np
+import pandas as pd
+from PIL import Image
 
 # Add pyavs to path for development
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-# No need for complex embedding dependencies - we're just storing crops
+# Try to import pyavs components, handle thingsvision import issues gracefully
+try:
+    from pyavs.scenes import get_available_models, get_default_ecoset_path
+    EMBEDDINGS_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: Could not import embeddings functions: {e}")
+    print("This is likely due to thingsvision/torchtyping compatibility issues.")
+    print("Please check your environment or install compatible versions.")
+    EMBEDDINGS_AVAILABLE = False
 
 from pyavs.utils.validation import validate_subject_id, validate_session
 from pyavs.utils.logging import get_logger
-from PIL import Image
-import pandas as pd
-import numpy as np
 
 # Initialize logger
 logger = get_logger('scripts.compute_fixation_embeddings')
 
-def setup_output_directory(data_path: str) -> Path:
-    """
-    Set up output directory for embeddings using BIDS structure.
-    
-    Parameters
-    ----------
-    data_path : str
-        Base data path
-        
-    Returns
-    -------
-    Path
-        Path to derivatives directory
-    """
-    derivatives_dir = Path(data_path) / 'derivatives' / 'pyavs'
-    derivatives_dir.mkdir(parents=True, exist_ok=True)
-    return derivatives_dir
 
-def get_subject_sessions(data_path: str, subjects: Optional[List[int]] = None, 
-                        sessions: Optional[List[int]] = None) -> List[tuple]:
+def find_crop_directories(data_path: str, subjects: Optional[List[int]] = None,
+                         sessions: Optional[List[int]] = None,
+                         crop_size: Optional[tuple] = None) -> List[Dict[str, Any]]:
     """
-    Get all available subject-session combinations compatible with AVS Composer.
+    Find available crop directories.
     
     Parameters
     ----------
@@ -66,190 +59,51 @@ def get_subject_sessions(data_path: str, subjects: Optional[List[int]] = None,
         Specific subjects to process
     sessions : list of int, optional
         Specific sessions to process
+    crop_size : tuple, optional
+        Specific crop size to process
         
     Returns
     -------
-    list of tuple
-        List of (subject_id, session) pairs
+    list of dict
+        List of dictionaries with subject, session, crop_size, and path info
     """
-    from pyavs.utils.paths import get_legacy_paths
+    derivatives_dir = Path(data_path) / 'derivatives' / 'pyavs'
     
-    # Check for legacy file structure that AVS Composer expects
-    results_dir = Path(data_path) / 'results'
-    
-    if not results_dir.exists():
-        logger.warning(f"Results directory not found: {results_dir}")
+    if not derivatives_dir.exists():
+        logger.warning(f"Derivatives directory not found: {derivatives_dir}")
         return []
     
     combinations = []
     
-    # Scan for subject-session directories in legacy format (as01_01, as02_01, etc.)
-    for sub_sess_dir in results_dir.glob('as*_*'):
-        if not sub_sess_dir.is_dir():
+    # Find available subject directories
+    for sub_dir in derivatives_dir.glob('sub-*'):
+        if not sub_dir.is_dir():
             continue
             
         try:
-            # Parse directory name (e.g., "as01_01" -> subject_id=1, session=1)
-            parts = sub_sess_dir.name.split('_')
-            if len(parts) != 2:
-                continue
-                
-            subject_part = parts[0]  # e.g., "as01"
-            session_part = parts[1]  # e.g., "01"
-            
-            if not subject_part.startswith('as'):
-                continue
-                
-            subject_id = int(subject_part[2:])  # Remove "as" prefix
-            session = int(session_part)
-            
+            subject_id = int(sub_dir.name.split('-')[1])
         except (IndexError, ValueError):
             continue
             
         if subjects and subject_id not in subjects:
             continue
             
-        if sessions and session not in sessions:
-            continue
-        
-        # Check if the required eye tracking files exist for AVS Composer
-        legacy_paths = get_legacy_paths(data_path, subject_id, session)
-        events_file = Path(legacy_paths['events'])
-        
-        if events_file.exists():
-            combinations.append((subject_id, session))
-            logger.debug(f"Found valid data for subject {subject_id}, session {session}")
-        else:
-            logger.debug(f"Eye events file not found: {events_file}")
-    
-    return combinations
-
-
-def store_fixation_crops(eye_events_df: pd.DataFrame, subject_id: int, session: int, 
-                        data_path: str, crop_size: tuple) -> int:
-    """
-    Store fixation crops as individual image files.
-    
-    Parameters
-    ----------
-    eye_events_df : pd.DataFrame
-        Eye tracking events dataframe with fixation locations
-    subject_id : int
-        Subject ID
-    session : int
-        Session number  
-    data_path : str
-        Base data path
-    crop_size : tuple
-        Size of crops in pixels (width, height)
-        
-    Returns
-    -------
-    int
-        Number of crops created
-    """
-    from pyavs.utils.paths import get_legacy_paths
-    
-    # Set up output directory with crop size in path
-    derivatives_dir = Path(data_path) / 'derivatives' / 'pyavs'
-    subject_dir = derivatives_dir / f'sub-{subject_id:02d}' / f'ses-{session:02d}'
-    crops_dir = subject_dir / 'fixation_crops' / f'{crop_size[0]}x{crop_size[1]}'
-    crops_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Screen parameters (from old codebase)
-    screen_usage = 0.925
-    stim_screen_size_xy = (1024, 768)
-    screen_x_pix = stim_screen_size_xy[0]
-    screen_y_pix = stim_screen_size_xy[1]
-    
-    # Scene path (from old codebase pattern)
-    scene_prefix = "NSD_scenes_MEG_size_adjusted_"
-    scene_suffix = str(screen_usage*100).replace(".", "")
-    
-    # Look for scene images in common locations
-    potential_scene_paths = [
-        os.path.join(data_path, "input", f"{scene_prefix}{scene_suffix}"),
-        os.path.join(data_path, "stimuli", "scenes"),
-        os.path.join(data_path, "input", "mscoco_scenes"),
-        os.path.join(data_path, "mscoco_scenes")
-    ]
-    
-    scene_path = None
-    for path in potential_scene_paths:
-        if os.path.exists(path):
-            scene_path = path
-            break
-    
-    if scene_path is None:
-        raise FileNotFoundError("Could not find scene images directory")
-    
-    logger.info(f"Using scene path: {scene_path}")
-    
-    # Load experiment log to get scene filenames
-    legacy_paths = get_legacy_paths(data_path, subject_id, session)
-    exp_log_path = legacy_paths['experiment_log']
-    
-    if not os.path.exists(exp_log_path):
-        raise FileNotFoundError(f"Experiment log not found: {exp_log_path}")
-    
-    exp_log = pd.read_csv(exp_log_path)
-    
-    total_crops = 0
-    
-    # Group by scene ID to process each scene
-    for scene_id in eye_events_df['sceneID'].unique():
-        scene_fixations = eye_events_df[eye_events_df['sceneID'] == scene_id]
-        
-        # Get scene filename from experiment log
-        scene_fname_matches = exp_log.loc[
-            (exp_log['subject'] == subject_id) & 
-            (exp_log['trial'] >= 0) & 
-            (exp_log['scene_ID'] == scene_id), 
-            'scene_filename'
-        ]
-        
-        if len(scene_fname_matches) == 0:
-            logger.warning(f"No scene file found for scene {scene_id}")
-            continue
-            
-        scene_fname = scene_fname_matches.values[0]
-        scene_file_path = os.path.join(scene_path, scene_fname)
-        
-        if not os.path.exists(scene_file_path):
-            logger.warning(f"Scene file not found: {scene_file_path}")
-            continue
-        
-        # Load and resize scene image
-        im = Image.open(scene_file_path)
-        im_width = im.width
-        im_height = im.height
-        
-        # Scale to presentation size
-        im_scaler = (screen_y_pix * screen_usage) / im_height
-        if np.round(im_scaler, 2) != 1:
-            im_width_rescaled = int(im_width * im_scaler)
-            im_height_rescaled = int(im_height * im_scaler)
-            im_rescaled = im.resize((im_width_rescaled, im_height_rescaled))
-        else:
-            im_rescaled = im
-            im_width_rescaled = im_width
-            im_height_rescaled = im_height
-        
-        # Process each fixation
-        for _, fixation in scene_fixations.iterrows():
-            # Center coordinates around screen center
-            x = fixation['mean_gx'] - screen_x_pix / 2
-            y = fixation['mean_gy'] - screen_y_pix / 2
-            
-            # Calculate crop coordinates
-            left = x + (im_width_rescaled / 2) - (crop_size[0] / 2)
-            top = (im_height_rescaled / 2) - y - (crop_size[1] / 2)
-            right = left + crop_size[0]
-            bottom = top + crop_size[1]
-            
-            # Check boundaries
-            if left < 0 or top < 0 or right > im_width_rescaled or bottom > im_height_rescaled:
-                logger.debug(f"Crop goes beyond boundaries for scene {scene_id}, fixation {fixation['fix_sequence']}")
+        # Find available session directories
+        for ses_dir in sub_dir.glob('ses-*'):
+            if not ses_dir.is_dir():
+                continue
+                
+            try:
+                session = int(ses_dir.name.split('-')[1])
+            except (IndexError, ValueError):
+                continue
+                
+            if sessions and session not in sessions:
+                continue
+                
+            # Find crop size directories
+            crops_base_dir = ses_dir / 'fixation_crops'
+            if not crops_base_dir.exists():
                 continue
             
             # Create crop
@@ -272,7 +126,7 @@ def store_fixation_crops(eye_events_df: pd.DataFrame, subject_id: int, session: 
 def process_subject_session(subject_id: int, session: int, data_path: str, 
                           crop_size: tuple) -> Dict[str, Any]:
     """
-    Process fixation crops for a single subject-session combination.
+    Compute embeddings for all crops in a directory.
     
     Parameters
     ----------
@@ -280,22 +134,41 @@ def process_subject_session(subject_id: int, session: int, data_path: str,
         Subject ID
     session : int
         Session number
-    data_path : str
-        Base data path
     crop_size : tuple
-        Size of crops in pixels (width, height)
+        Crop size (width, height)
+    crops_path : Path
+        Path to directory containing crop PNG files
+    model_name : str
+        Model name for feature extraction
+    layers : list of str
+        Model layers to extract features from
+    batch_size : int
+        Batch size for processing
+    device : str, optional
+        Device to use ('cuda', 'cpu', 'mps')
+    weights_path : str, optional
+        Path to custom model weights
+    data_path : str
+        Base data path for saving outputs
         
     Returns
     -------
     dict
         Processing results and statistics
     """
-    logger.info(f"Processing subject {subject_id}, session {session}")
+    if not EMBEDDINGS_AVAILABLE:
+        raise ImportError("Embeddings functionality not available - missing dependencies")
+    
+    from pyavs.scenes.embeddings import _setup_model, _extract_layer_embeddings, _save_layer_embeddings, _create_bids_embeddings_path
+    
+    logger.info(f"Processing crops for subject {subject_id}, session {session}, size {crop_size}")
     
     results = {
         'subject_id': subject_id,
         'session': session,
+        'crop_size': crop_size,
         'status': 'failed',
+        'embeddings_created': {},
         'total_crops': 0,
         'error_message': None
     }
@@ -329,31 +202,42 @@ def process_subject_session(subject_id: int, session: int, data_path: str,
         if eye_events_df.empty:
             results['error_message'] = "No eye tracking data found"
             return results
-            
-        # Filter for fixation events and recording='scene' (already done by composer)
-        fixations = eye_events_df
-        if len(fixations) == 0:
-            results['error_message'] = "No fixation events found"
-            return results
-            
-        logger.info(f"Found {len(fixations)} fixation events for recording='scene'")
         
-        # Store fixation crops
-        logger.info("Storing fixation crops")
-        total_crops = store_fixation_crops(
-            eye_events_df=fixations,
-            subject_id=subject_id,
-            session=session,
-            data_path=data_path,
-            crop_size=crop_size
-        )
+        # Set up output directory
+        save_dir = _create_bids_embeddings_path(subject_id, session, data_path, model_name)
+        
+        # Extract embeddings for each layer
+        embeddings = {}
+        
+        for layer in layers:
+            logger.info(f"Extracting embeddings from layer: {layer}")
+            
+            layer_embeddings = _extract_layer_embeddings(
+                crops_data, extractor, layer, batch_size
+            )
+            
+            embeddings[layer] = layer_embeddings
+            
+            # Save layer embeddings
+            _save_layer_embeddings(layer_embeddings, layer, save_dir)
+            
+            results['embeddings_created'][layer] = {
+                'n_embeddings': len(layer_embeddings),
+                'embedding_shape': list(layer_embeddings.values())[0].shape if layer_embeddings else None
+            }
+        
+        # Save metadata CSV
+        if embeddings and crops_data:
+            from pyavs.scenes.embeddings import create_embeddings_metadata_csv
+            metadata_path = os.path.join(save_dir, f"sub-{subject_id:02d}_ses-{session:02d}_embeddings_metadata.csv")
+            create_embeddings_metadata_csv(crops_data, embeddings, metadata_path)
         
         # Record results
         results['status'] = 'success'
-        results['total_crops'] = total_crops
-                
+        results['total_crops'] = len(crops_data)
+        
         logger.info(f"Successfully processed subject {subject_id}, session {session}")
-        logger.info(f"Created {results['total_crops']} fixation crops")
+        logger.info(f"Created embeddings for {results['total_crops']} crops across {len(layers)} layers")
         
     except Exception as e:
         results['error_message'] = str(e)
@@ -361,21 +245,25 @@ def process_subject_session(subject_id: int, session: int, data_path: str,
     
     return results
 
+
 def main():
     """Main processing function."""
     parser = argparse.ArgumentParser(
-        description="Store fixation crops from scene images",
+        description="Compute neural network embeddings from stored fixation crops",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
     # Process specific subjects and sessions
     python compute_fixation_embeddings.py --subjects 1 2 3 --sessions 1 2
     
-    # Process single subject-session with custom crop size
-    python compute_fixation_embeddings.py --subject 1 --session 1 --crop-size 224 224
+    # Process single subject-session with custom settings
+    python compute_fixation_embeddings.py --subject 1 --session 1 --model resnet50_ecoset_crop --batch-size 32
     
-    # Process all available data
-    python compute_fixation_embeddings.py --all-subjects --all-sessions
+    # Process all available data with multiple layers
+    python compute_fixation_embeddings.py --all-subjects --all-sessions --layers avgpool fc layer4
+    
+    # Use custom model weights
+    python compute_fixation_embeddings.py --subjects 1 --sessions 1 --weights-path /path/to/weights.pth
         """
     )
     
@@ -396,9 +284,19 @@ Examples:
     session_group.add_argument('--all-sessions', action='store_true',
                               help='Process all available sessions')
     
-    # Crop parameters
-    parser.add_argument('--crop-size', type=int, nargs=2, default=[112, 112], metavar=('WIDTH', 'HEIGHT'),
-                       help='Size of crops in pixels (default: 112 112)')
+    # Model and extraction parameters
+    parser.add_argument('--model', '--model-name', dest='model_name', default='resnet50_ecoset_crop',
+                       help='Model name for feature extraction (default: resnet50_ecoset_crop)')
+    parser.add_argument('--layers', type=str, nargs='+', default=['avgpool'],
+                       help='Model layers to extract features from (default: avgpool)')
+    parser.add_argument('--crop-size', type=int, nargs=2, metavar=('WIDTH', 'HEIGHT'),
+                       help='Specific crop size to process (if not specified, processes all available sizes)')
+    parser.add_argument('--batch-size', type=int, default=64,
+                       help='Batch size for processing (default: 64)')
+    parser.add_argument('--device', choices=['cuda', 'cpu', 'mps'],
+                       help='Device to use (auto-detected if not specified)')
+    parser.add_argument('--weights-path', type=str,
+                       help='Path to custom model weights (uses EcoSet default if not specified)')
     
     # Data and processing
     parser.add_argument('--data-path', type=str,
@@ -408,12 +306,31 @@ Examples:
     parser.add_argument('--verbose', '-v', action='store_true',
                        help='Increase verbosity')
     
+    # Information commands
+    parser.add_argument('--list-models', action='store_true',
+                       help='List available models and exit')
     
     args = parser.parse_args()
     
     # Set up logging
     if args.verbose:
         logging.getLogger('pyavs').setLevel(logging.DEBUG)
+    
+    # Handle information commands
+    if args.list_models:
+        models = get_available_models()
+        print("Available models:")
+        print("\\nVision models (standard pretrained):")
+        for model in models['vision_models']:
+            print(f"  - {model}")
+        print(f"\\nEcoSet models (custom weights):")
+        for model in models['ecoset_models']:
+            print(f"  - {model}")
+        print(f"\\nEcoSet weights path: {models['ecoset_weights_path']}")
+        print(f"\\nAvailable layers by model:")
+        for model, layers in models['layers'].items():
+            print(f"  {model}: {', '.join(layers)}")
+        return
     
     # Get data path
     if args.data_path:
@@ -428,9 +345,6 @@ Examples:
         parser.error(f"Data path does not exist: {data_path}")
     
     logger.info(f"Using data path: {data_path}")
-    
-    # Set up output directory
-    setup_output_directory(data_path)
     
     # Parse subject and session arguments
     if args.subjects:
@@ -447,39 +361,64 @@ Examples:
     else:  # all_sessions
         sessions = None
     
-    # Get subject-session combinations to process
-    combinations = get_subject_sessions(data_path, subjects, sessions)
+    # Get crop size filter
+    crop_size = tuple(args.crop_size) if args.crop_size else None
+    
+    # Find available crop directories
+    combinations = find_crop_directories(data_path, subjects, sessions, crop_size)
     
     if not combinations:
-        logger.error("No subject-session combinations found to process")
+        logger.error("No crop directories found to process")
         return 1
         
-    logger.info(f"Found {len(combinations)} subject-session combinations to process")
-    logger.info(f"Crop size: {args.crop_size[0]}x{args.crop_size[1]} pixels")
+    logger.info(f"Found {len(combinations)} crop directories to process")
+    
+    # Show model information
+    logger.info(f"Using model: {args.model_name}")
+    logger.info(f"Extracting from layers: {args.layers}")
+    
+    if args.model_name == 'resnet50_ecoset_crop' and args.weights_path is None:
+        ecoset_path = get_default_ecoset_path()
+        if ecoset_path:
+            logger.info(f"Using default EcoSet weights: {ecoset_path}")
+        else:
+            logger.warning("Default EcoSet weights not found")
     
     # Process combinations
     if args.n_jobs == 1:
         # Sequential processing
         results = []
-        for i, (subject_id, session) in enumerate(combinations, 1):
-            logger.info(f"Processing {i}/{len(combinations)}: Subject {subject_id}, Session {session}")
-            result = process_subject_session(
-                subject_id=subject_id,
-                session=session,
-                data_path=data_path,
-                crop_size=tuple(args.crop_size)
+        for i, combo in enumerate(combinations, 1):
+            logger.info(f"Processing {i}/{len(combinations)}: Subject {combo['subject_id']}, Session {combo['session']}, Size {combo['crop_size']}")
+            result = compute_embeddings_for_crops(
+                subject_id=combo['subject_id'],
+                session=combo['session'],
+                crop_size=combo['crop_size'],
+                crops_path=combo['crops_path'],
+                model_name=args.model_name,
+                layers=args.layers,
+                batch_size=args.batch_size,
+                device=args.device,
+                weights_path=args.weights_path,
+                data_path=data_path
             )
             results.append(result)
     else:
         # Parallel processing
         logger.info(f"Using {args.n_jobs} parallel jobs")
         results = Parallel(n_jobs=args.n_jobs)(
-            delayed(process_subject_session)(
-                subject_id=subject_id,
-                session=session,
-                data_path=data_path,
-                crop_size=tuple(args.crop_size)
-            ) for subject_id, session in combinations
+            delayed(compute_embeddings_for_crops)(
+                subject_id=combo['subject_id'],
+                session=combo['session'],
+                crop_size=combo['crop_size'],
+                crops_path=combo['crops_path'],
+                model_name=args.model_name,
+                layers=args.layers,
+                batch_size=args.batch_size,
+                device=args.device,
+                weights_path=args.weights_path,
+                data_path=data_path
+            ) for combo in combinations
         )
     
     # Summary statistics
@@ -494,19 +433,21 @@ Examples:
     logger.info(f"Total combinations processed: {len(results)}")
     logger.info(f"Successful: {len(successful)}")
     logger.info(f"Failed: {len(failed)}")
-    logger.info(f"Total fixation crops created: {total_crops}")
+    logger.info(f"Total embeddings created: {total_crops}")
     
     if failed:
-        logger.warning("\nFailed combinations:")
+        logger.warning("\\nFailed combinations:")
         for result in failed:
             logger.warning(f"  Subject {result['subject_id']}, Session {result['session']}: {result['error_message']}")
     
     if successful:
-        logger.info(f"\nFixation crops saved to BIDS structure in: {data_path}/derivatives/pyavs/")
+        logger.info(f"\\nEmbeddings saved to BIDS structure in: {data_path}/derivatives/pyavs/")
         logger.info("Files created:")
-        logger.info("  - sub-XX/ses-YY/fixation_crops/{crop_size}/*.png")
+        logger.info("  - sub-XX/ses-YY/embeddings/{model_name}/{layer}/embeddings.npz")
+        logger.info("  - sub-XX/ses-YY/embeddings/{model_name}/sub-XX_ses-YY_embeddings_metadata.csv")
     
     return 0 if not failed else 1
+
 
 if __name__ == "__main__":
     sys.exit(main())
