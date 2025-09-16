@@ -127,12 +127,15 @@ def match_epochs_to_embeddings(metadata: pd.DataFrame, file_names: List[str]) ->
 
 def group_by_objects(epochs_data: np.ndarray, embeddings: np.ndarray,
                     metadata: pd.DataFrame, data_path: str, object_column: str = 'object_label', ) -> Tuple[np.ndarray, np.ndarray, List[str]]:
-    """Group data by object labels, loading object labels if needed."""
-    
+    """Group data by object labels using complete 80 MSCOCO classes, loading object labels if needed."""
+
+    # Import MSCOCO classes from objects module
+    from pyavs.scenes.objects import MSCOCO_CLASSES
+
     # Check if object labels are present in metadata
     if object_column not in metadata.columns:
         print(f"Object labels not found in metadata. Adding {object_column} column...")
-        
+
         # Add object labels using the objects module
         from pyavs.scenes.objects import get_fixated_objects
 
@@ -148,7 +151,7 @@ def group_by_objects(epochs_data: np.ndarray, embeddings: np.ndarray,
             error_margin_pixels=10
         )
         print(f"Added object labels. Unique objects: {metadata[object_column].value_counts()}")
-    
+
     # Filter out unwanted fixations (object IDs -2 and -1 are none/out-of-scene fixations)
     valid_mask = ~metadata[object_column].isin([-2, -1])
     metadata_filtered = metadata[valid_mask]
@@ -158,105 +161,201 @@ def group_by_objects(epochs_data: np.ndarray, embeddings: np.ndarray,
     logger.info(f"Filtered out {(~valid_mask).sum()} fixations with object IDs -2 or -1")
     logger.info(f"Remaining fixations: {valid_mask.sum()}")
 
-    # Group by object labels
-    unique_objects = metadata_filtered[object_column].dropna().unique()
-    object_labels = sorted([obj for obj in unique_objects if obj not in ['unknown', 'None', 'outside']])
-    
-    if len(object_labels) == 0:
-        raise ValueError("No valid object labels found for grouping")
-
+    # Use the complete ordered list of 80 MSCOCO classes
+    object_labels = MSCOCO_CLASSES.copy()
     n_objects = len(object_labels)
     n_channels, n_times = epochs_data_filtered.shape[1], epochs_data_filtered.shape[2]
     n_features = embeddings_filtered.shape[1]
 
-    grouped_epochs = np.zeros((n_objects, n_channels, n_times))
-    grouped_embeddings = np.zeros((n_objects, n_features))
+    # Initialize arrays with NaN for missing categories
+    grouped_epochs = np.full((n_objects, n_channels, n_times), np.nan)
+    grouped_embeddings = np.full((n_objects, n_features), np.nan)
 
-    print(f"Grouping {len(epochs_data_filtered)} filtered epochs into {n_objects} object categories")
+    # Find available objects in the data
+    available_objects = set(metadata_filtered[object_column].dropna().unique())
+    available_objects = {obj for obj in available_objects if obj not in ['unknown', 'None', 'outside']}
 
+    print(f"Grouping {len(epochs_data_filtered)} filtered epochs into {n_objects} MSCOCO object categories")
+    print(f"Available objects in data: {len(available_objects)}")
+    print(f"Missing objects will have NaN values: {len(object_labels) - len(available_objects & set(object_labels))}")
+
+    objects_with_data = 0
     for i, obj_label in enumerate(object_labels):
         obj_mask = metadata_filtered[object_column] == obj_label
         obj_indices = np.where(obj_mask)[0]
 
         if len(obj_indices) == 0:
-            print(f"Warning: No epochs found for object '{obj_label}'")
+            print(f"  {obj_label}: No data available (will be NaN)")
             continue
 
         grouped_epochs[i] = np.median(epochs_data_filtered[obj_indices], axis=0)
         grouped_embeddings[i] = np.median(embeddings_filtered[obj_indices], axis=0)
+        objects_with_data += 1
         print(f"  {obj_label}: {len(obj_indices)} epochs")
-    
+
+    print(f"Final result: {objects_with_data} objects with data, {n_objects - objects_with_data} objects with NaN")
     return grouped_epochs, grouped_embeddings, object_labels
 
 
 def compute_rdm_timeseries(epochs_data: np.ndarray, distance_metric: str = 'mahalanobis',
                           noise_cov: np.ndarray = None) -> np.ndarray:
-    """Compute time-resolved RDMs using rsatoolbox."""
+    """Compute time-resolved RDMs using rsatoolbox, handling NaN values for missing categories."""
     n_conditions, _, n_times = epochs_data.shape
-    rdm_timeseries = np.zeros((n_times, n_conditions, n_conditions))
-    
+    rdm_timeseries = np.full((n_times, n_conditions, n_conditions), np.nan)
+
+    # Find which conditions have data (not all NaN)
+    valid_conditions = ~np.all(np.all(np.isnan(epochs_data), axis=2), axis=1)
+    valid_indices = np.where(valid_conditions)[0]
+
+    if len(valid_indices) == 0:
+        logger.warning("No valid conditions found for RDM computation")
+        return rdm_timeseries
+
+    logger.info(f"Computing RDM for {len(valid_indices)} valid conditions out of {n_conditions}")
+
     for t in range(n_times):
-        data_t = epochs_data[:, :, t]  # (n_conditions, n_channels)
-        
+        data_t = epochs_data[valid_indices, :, t]  # Only use valid conditions
+
+        # Skip if any data is still NaN at this timepoint
+        if np.any(np.isnan(data_t)):
+            continue
+
         # Create rsatoolbox Dataset
         dataset = rsa.data.Dataset(data_t)
-        
+
         # Compute RDM
-        if distance_metric == 'mahalanobis' and noise_cov is not None:
-            rdm = rsa.rdm.calc_rdm(dataset, method='mahalanobis', noise=noise_cov)
-        else:
-            rdm = rsa.rdm.calc_rdm(dataset, method=distance_metric)
-        
-        rdm_timeseries[t] = rdm.get_matrices()[0]
-    
+        try:
+            if distance_metric == 'mahalanobis' and noise_cov is not None:
+                rdm = rsa.rdm.calc_rdm(dataset, method='mahalanobis', noise=noise_cov)
+            else:
+                rdm = rsa.rdm.calc_rdm(dataset, method=distance_metric)
+
+            # Place results in the correct positions
+            rdm_matrix = rdm.get_matrices()[0]
+            for i, idx_i in enumerate(valid_indices):
+                for j, idx_j in enumerate(valid_indices):
+                    rdm_timeseries[t, idx_i, idx_j] = rdm_matrix[i, j]
+
+        except Exception as e:
+            logger.warning(f"RDM computation failed at timepoint {t}: {e}")
+            continue
+
     return rdm_timeseries
 
 
 def compute_embedding_rdm(embeddings: np.ndarray, distance_metric: str = 'mahalanobis') -> np.ndarray:
-    """Compute RDM for embeddings."""
-    dataset = rsa.data.Dataset(embeddings)
-    rdm = rsa.rdm.calc_rdm(dataset, method=distance_metric)
-    return rdm.get_matrices()[0]
+    """Compute RDM for embeddings, handling NaN values for missing categories."""
+    n_conditions, n_features = embeddings.shape
+    rdm_matrix = np.full((n_conditions, n_conditions), np.nan)
+
+    # Find which conditions have data (not all NaN)
+    valid_conditions = ~np.all(np.isnan(embeddings), axis=1)
+    valid_indices = np.where(valid_conditions)[0]
+
+    if len(valid_indices) == 0:
+        logger.warning("No valid conditions found for embedding RDM computation")
+        return rdm_matrix
+
+    logger.info(f"Computing embedding RDM for {len(valid_indices)} valid conditions out of {n_conditions}")
+
+    # Extract valid embeddings
+    valid_embeddings = embeddings[valid_indices]
+
+    # Create rsatoolbox Dataset
+    dataset = rsa.data.Dataset(valid_embeddings)
+
+    try:
+        rdm = rsa.rdm.calc_rdm(dataset, method=distance_metric)
+        rdm_valid = rdm.get_matrices()[0]
+
+        # Place results in the correct positions
+        for i, idx_i in enumerate(valid_indices):
+            for j, idx_j in enumerate(valid_indices):
+                rdm_matrix[idx_i, idx_j] = rdm_valid[i, j]
+
+    except Exception as e:
+        logger.error(f"Embedding RDM computation failed: {e}")
+
+    return rdm_matrix
 
 
 def compute_rsa_correlation(meg_rdm_timeseries: np.ndarray, embedding_rdm: np.ndarray) -> np.ndarray:
-    """Compute RSA correlation timeseries."""
+    """Compute RSA correlation timeseries, handling NaN values for missing categories."""
     n_times = meg_rdm_timeseries.shape[0]
-    rsa_timeseries = np.zeros(n_times)
-    
+    rsa_timeseries = np.full(n_times, np.nan)
+
+    # Get upper triangular indices
     triu_indices = np.triu_indices_from(embedding_rdm, k=1)
     embedding_rdm_vec = embedding_rdm[triu_indices]
-    
+
+    # Find valid (non-NaN) entries in embedding RDM
+    valid_embedding_mask = ~np.isnan(embedding_rdm_vec)
+
+    if np.sum(valid_embedding_mask) < 2:
+        logger.warning("Too few valid embedding RDM values for correlation computation")
+        return rsa_timeseries
+
+    logger.info(f"Using {np.sum(valid_embedding_mask)} valid RDM entries out of {len(embedding_rdm_vec)} for RSA correlation")
+
     for t in range(n_times):
         meg_rdm_vec = meg_rdm_timeseries[t][triu_indices]
-        corr, _ = spearmanr(meg_rdm_vec, embedding_rdm_vec)
-        rsa_timeseries[t] = corr if not np.isnan(corr) else 0.0
-    
+
+        # Find entries that are valid in both RDMs
+        both_valid_mask = valid_embedding_mask & ~np.isnan(meg_rdm_vec)
+
+        if np.sum(both_valid_mask) < 2:
+            continue  # Not enough valid pairs for correlation
+
+        # Compute correlation only on valid entries
+        valid_meg_vec = meg_rdm_vec[both_valid_mask]
+        valid_emb_vec = embedding_rdm_vec[both_valid_mask]
+
+        try:
+            corr, _ = spearmanr(valid_meg_vec, valid_emb_vec)
+            rsa_timeseries[t] = corr if not np.isnan(corr) else np.nan
+        except Exception as e:
+            logger.warning(f"RSA correlation computation failed at timepoint {t}: {e}")
+            continue
+
     return rsa_timeseries
 
 
 def estimate_noise_covariance_mne(epochs_data: np.ndarray, times: np.ndarray,
                                   sfreq: float = 1000.0) -> np.ndarray:
-    """Estimate noise covariance using MNE-python best practices."""
-    _, n_channels, _ = epochs_data.shape
+    """Estimate noise covariance using MNE-python best practices, handling NaN values."""
+    n_conditions, n_channels, _ = epochs_data.shape
+
+    # Find conditions with valid data (not all NaN)
+    valid_conditions = ~np.all(np.all(np.isnan(epochs_data), axis=2), axis=1)
+    valid_epochs_data = epochs_data[valid_conditions]
+
+    if valid_epochs_data.shape[0] == 0:
+        logger.error("No valid epochs for noise covariance estimation")
+        return np.eye(n_channels)  # Return identity matrix as fallback
+
+    logger.info(f"Estimating noise covariance from {valid_epochs_data.shape[0]} valid epochs")
 
     # Create MNE info structure
     ch_names = [f'CH{i:03d}' for i in range(n_channels)]
     info = mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types='mag')
 
-    # Create MNE EpochsArray
+    # Create MNE EpochsArray with only valid epochs
     print(times)
-    epochs = mne.EpochsArray(epochs_data, info, tmin=times[0])
+    epochs = mne.EpochsArray(valid_epochs_data, info, tmin=times[0])
 
-    # Estimate noise covariance using MNE with shrinkage regularization
-    noise_cov = mne.compute_covariance(
-        epochs,
-        method=['empirical', 'shrunk'],
-        return_estimators=False
-    )
+    try:
+        # Estimate noise covariance using MNE with shrinkage regularization
+        noise_cov = mne.compute_covariance(
+            epochs,
+            method=['empirical', 'shrunk'],
+            return_estimators=False
+        )
 
-    # Return the precision matrix (inverse covariance)
-    return np.linalg.inv(noise_cov.data)
+        # Return the precision matrix (inverse covariance)
+        return np.linalg.inv(noise_cov.data)
+    except Exception as e:
+        logger.error(f"Noise covariance estimation failed: {e}. Using identity matrix.")
+        return np.eye(n_channels)
 
 
 def process_subject_sessions(subject_id: int, sessions: List[int], model_name: str, layer: str,
