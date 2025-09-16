@@ -559,6 +559,181 @@ def plot_rdms_at_timepoint(rsa_data: Dict[str, Any], timepoint_ms: float = 110.0
     return fig
 
 
+def compute_intersubject_noise_ceiling(rsa_data_list: List[Dict[str, Any]], n_bootstrap: int = 1000) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Compute noise ceiling based on inter-subject RDM correlations using RSA toolbox.
+
+    Parameters
+    ----------
+    rsa_data_list : list of dict
+        List of RSA results dictionaries from multiple subjects
+    n_bootstrap : int, default 1000
+        Number of bootstrap samples
+
+    Returns
+    -------
+    tuple
+        (lower_bound, upper_bound) noise ceiling time series
+    """
+    if len(rsa_data_list) < 2:
+        logger.warning("Need at least 2 subjects for noise ceiling calculation")
+        times = rsa_data_list[0]['times']
+        return np.zeros(len(times)), np.ones(len(times))
+
+    # Get common time points
+    times = rsa_data_list[0]['times']
+    n_times = len(times)
+    n_subjects = len(rsa_data_list)
+
+    # Collect all MEG RDM time series
+    all_rdm_timeseries = []
+    for rsa_data in rsa_data_list:
+        all_rdm_timeseries.append(rsa_data['meg_rdm_timeseries'])
+
+    all_rdm_timeseries = np.array(all_rdm_timeseries)  # (n_subjects, n_times, n_conditions, n_conditions)
+
+    lower_bound = np.zeros(n_times)
+    upper_bound = np.zeros(n_times)
+
+    logger.info(f"Computing inter-subject noise ceiling with {n_subjects} subjects and {n_bootstrap} bootstrap samples...")
+
+    for t in range(n_times):
+        # Get RDMs at time t from all subjects
+        rdms_t = all_rdm_timeseries[:, t, :, :]  # (n_subjects, n_conditions, n_conditions)
+
+        try:
+            # Create RDMs object for rsatoolbox
+            rdms = RDMs(rdms_t)
+
+            # Compute noise ceiling using bootstrap
+            nc_lower, nc_upper = boot_noise_ceiling(rdms, n_bootstrap=n_bootstrap)
+            lower_bound[t] = nc_lower
+            upper_bound[t] = nc_upper
+
+        except Exception as e:
+            logger.warning(f"Error computing noise ceiling at time {times[t]:.3f}s: {e}")
+            # Fallback to correlation-based estimate
+            rdm_vectors = []
+            for s in range(n_subjects):
+                rdm_s = rdms_t[s]
+                triu_indices = np.triu_indices_from(rdm_s, k=1)
+                rdm_vectors.append(rdm_s[triu_indices])
+
+            if len(rdm_vectors) > 1:
+                rdm_vectors = np.array(rdm_vectors)
+                # Compute pairwise correlations between subjects
+                correlations = []
+                for i in range(n_subjects):
+                    for j in range(i+1, n_subjects):
+                        corr = np.corrcoef(rdm_vectors[i], rdm_vectors[j])[0, 1]
+                        if not np.isnan(corr):
+                            correlations.append(corr)
+
+                if correlations:
+                    # Use mean correlation as estimate
+                    mean_corr = np.mean(correlations)
+                    lower_bound[t] = max(0, mean_corr - np.std(correlations))
+                    upper_bound[t] = min(1, mean_corr + np.std(correlations))
+                else:
+                    lower_bound[t] = 0
+                    upper_bound[t] = 1
+            else:
+                lower_bound[t] = 0
+                upper_bound[t] = 1
+
+    return lower_bound, upper_bound
+
+
+def plot_grand_average_rsa(rsa_data_list: List[Dict[str, Any]], output_dir: Path,
+                          save_fig: bool = True) -> plt.Figure:
+    """
+    Plot grand average RSA time series with individual subjects and proper noise ceiling.
+
+    Parameters
+    ----------
+    rsa_data_list : list of dict
+        List of RSA results dictionaries
+    output_dir : Path
+        Output directory for plots
+    save_fig : bool, default True
+        Whether to save the figure
+
+    Returns
+    -------
+    plt.Figure
+        Created figure
+    """
+    if not rsa_data_list:
+        raise ValueError("No RSA data provided")
+
+    fig, ax = plt.subplots(figsize=(14, 8))
+
+    # Get common time points
+    times = rsa_data_list[0]['times']
+    n_subjects = len(rsa_data_list)
+
+    # Collect all RSA time series
+    all_rsa_timeseries = []
+    for i, rsa_data in enumerate(rsa_data_list):
+        rsa_timeseries = rsa_data['rsa_timeseries']
+        all_rsa_timeseries.append(rsa_timeseries)
+
+        # Plot individual subject as faint grey line
+        ax.plot(times, rsa_timeseries, color='lightgrey', alpha=0.6, linewidth=1,
+               label='Individual subjects' if i == 0 else '')
+
+    # Compute grand average
+    all_rsa_timeseries = np.array(all_rsa_timeseries)
+    grand_average = np.nanmean(all_rsa_timeseries, axis=0)
+    sem_rsa = np.nanstd(all_rsa_timeseries, axis=0) / np.sqrt(n_subjects)
+
+    # Plot grand average with error bars
+    ax.plot(times, grand_average, 'b-', linewidth=3,
+           label=f'Grand Average (n={n_subjects})')
+    ax.fill_between(times, grand_average - sem_rsa, grand_average + sem_rsa,
+                   alpha=0.3, color='blue')
+
+    # Compute and plot inter-subject noise ceiling
+    logger.info("Computing inter-subject noise ceiling...")
+    nc_lower, nc_upper = compute_intersubject_noise_ceiling(rsa_data_list)
+
+    ax.fill_between(times, nc_lower, nc_upper, alpha=0.2, color='gray',
+                   label='Inter-subject Noise Ceiling')
+    ax.plot(times, nc_lower, 'k--', alpha=0.7, linewidth=1)
+    ax.plot(times, nc_upper, 'k--', alpha=0.7, linewidth=1)
+
+    # Add reference lines
+    ax.axhline(y=0, color='k', linestyle='-', alpha=0.3)
+    ax.axvline(x=0, color='k', linestyle='-', alpha=0.3, label='Fixation onset')
+
+    # Formatting
+    ax.set_xlabel('Time [s]', fontsize=14)
+    ax.set_ylabel('RSA Correlation [r]', fontsize=14)
+
+    # Get model and layer info from first result
+    model_name = rsa_data_list[0]['model_name']
+    layer = rsa_data_list[0]['layer']
+    ax.set_title(f'Grand Average RSA Time Series (n={n_subjects})\nModel: {model_name}, Layer: {layer}',
+                fontsize=16)
+
+    ax.legend(fontsize=12)
+    ax.grid(True, alpha=0.3)
+
+    # Set reasonable y limits
+    y_min = min(0, np.nanmin(grand_average) - 0.05)
+    y_max = max(0.5, np.nanmax(grand_average) + 0.05)
+    ax.set_ylim(y_min, y_max)
+
+    plt.tight_layout()
+
+    if save_fig:
+        filename = f"grand_average_model-{model_name}_layer-{layer}_rsa_timeseries.png"
+        fig.savefig(output_dir / filename, dpi=PLOT_CONFIG['figure_dpi'], bbox_inches='tight')
+        logger.info(f"Saved grand average plot: {filename}")
+
+    return fig
+
+
 def main():
     """Main function for RSA plotting."""
     parser = argparse.ArgumentParser(
@@ -687,10 +862,10 @@ Examples:
         for rsa_data in rsa_data_list:
             plot_single_rsa_timeseries(rsa_data, output_dir, compute_nc=compute_nc)
 
-    # Create group plot if multiple subjects
+    # Always create grand average plot if multiple subjects
     if len(rsa_data_list) > 1:
-        logger.info("Creating group average plot...")
-        plot_group_rsa_timeseries(rsa_data_list, output_dir, compute_nc=compute_nc)
+        logger.info("Creating grand average plot with inter-subject noise ceiling...")
+        plot_grand_average_rsa(rsa_data_list, output_dir)
     elif not args.save_individual:
         # If only one subject and not saving individual, plot it anyway
         plot_single_rsa_timeseries(rsa_data_list[0], output_dir, compute_nc=compute_nc)
