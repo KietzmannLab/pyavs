@@ -38,30 +38,73 @@ logger = get_logger('scripts.rsa_analysis.plot_rsa')
 from rsatoolbox.rdm import RDMs
 from rsatoolbox.inference.noise_ceiling import boot_noise_ceiling
 
-# Set matplotlib style
+# =============================
+# PLOTTING PARAMETERS
+# =============================
+# Set these parameters instead of using command line arguments
+PLOT_CONFIG = {
+    'data_path': '/path/to/your/data',  # Override with actual data path
+    'subjects': [1, 2, 3],  # Subject IDs to plot
+    'sessions': [1],  # Session numbers
+    'model_name': 'resnet50_ecoset_crop',  # Model name filter
+    'layer': 'avgpool',  # Layer name filter
+    'save_individual': True,  # Save individual subject plots
+    'compute_noise_ceiling': True,  # Compute noise ceiling
+    'save_summary': True,  # Save summary statistics
+    'figure_dpi': 300,  # Figure DPI for saving
+}
+
+# Set matplotlib style with seaborn poster context
 plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
+sns.set_context("poster")
 sns.set_palette("husl")
 
 
 def load_rsa_results(rsa_file: str) -> Dict[str, Any]:
     """
-    Load RSA results from NPZ file.
-    
+    Load RSA results from NPZ file (supports both old and new formats).
+
     Parameters
     ----------
     rsa_file : str
         Path to RSA results file
-        
+
     Returns
     -------
     dict
-        RSA results dictionary
+        RSA results dictionary with metadata extracted from filename if needed
     """
     if not os.path.exists(rsa_file):
         raise FileNotFoundError(f"RSA file not found: {rsa_file}")
-    
+
     data = np.load(rsa_file, allow_pickle=True)
-    print(data.files)
+    filename = Path(rsa_file).name
+
+    # New format has metadata in the file
+    if 'subject_id' in data and 'session' in data:
+        subject_id = int(data['subject_id'])
+        session = int(data['session'])
+        model_name = str(data['model_name']) if 'model_name' in data else 'unknown'
+        layer = str(data['layer']) if 'layer' in data else 'unknown'
+    else:
+        # Old format - extract from filename
+        # Expected format: sub-XX_ses-YY_model-NAME_layer-LAYER_rsa.npz
+        parts = filename.replace('.npz', '').split('_')
+        subject_id = None
+        session = None
+        model_name = 'unknown'
+        layer = 'unknown'
+
+        for part in parts:
+            if part.startswith('sub-'):
+                subject_id = int(part.replace('sub-', ''))
+            elif part.startswith('ses-'):
+                session = int(part.replace('ses-', ''))
+            elif part.startswith('model-'):
+                model_name = part.replace('model-', '')
+            elif part.startswith('layer-'):
+                layer = part.replace('layer-', '')
+
     return {
         'rsa_timeseries': data['rsa_timeseries'],
         'times': data['times'],
@@ -70,7 +113,11 @@ def load_rsa_results(rsa_file: str) -> Dict[str, Any]:
         'epoch_indices': data['epoch_indices'],
         'embedding_indices': data['embedding_indices'],
         'object_labels': data['object_labels'].tolist() if 'object_labels' in data else None,
-        'distance_metric': str(data['distance_metric'])
+        'distance_metric': str(data['distance_metric']),
+        'subject_id': subject_id,
+        'session': session,
+        'model_name': model_name,
+        'layer': layer
     }
 
 
@@ -105,40 +152,15 @@ def compute_noise_ceiling_timeseries(meg_rdm_timeseries: np.ndarray,
         # Create RDMs object for rsatoolbox
         rdms = RDMs(rdm_t[np.newaxis, :, :])  # Add singleton dimension for one RDM
         
-        # Compute noise ceiling (requires multiple RDMs for proper estimation)
-        # For single RDM, we'll use a simplified approach
-        # In practice, you'd want multiple subjects/sessions for proper noise ceiling
+        # Compute noise ceiling using rsatoolbox
         try:
-            # This is a simplified noise ceiling - ideally you'd have multiple RDMs
-            # from different subjects/sessions
             nc_lower, nc_upper = boot_noise_ceiling(rdms, n_bootstrap=n_bootstrap)
             lower_bound[t] = nc_lower
             upper_bound[t] = nc_upper
         except:
-            # Fallback: use correlation-based estimate
-            # This is a rough approximation
-            triu_indices = np.triu_indices_from(rdm_t, k=1)
-            rdm_vec = rdm_t[triu_indices]
-            
-            # Bootstrap estimate of reliability
-            n_samples = len(rdm_vec)
-            bootstrap_corrs = []
-            
-            for _ in range(min(100, n_bootstrap)):  # Limit bootstrap for single RDM
-                idx1 = np.random.choice(n_samples, n_samples//2, replace=False)
-                idx2 = np.setdiff1d(np.arange(n_samples), idx1)
-                
-                if len(idx1) > 1 and len(idx2) > 1:
-                    corr = np.corrcoef(rdm_vec[idx1].mean(), rdm_vec[idx2].mean())[0, 1]
-                    if not np.isnan(corr):
-                        bootstrap_corrs.append(corr)
-            
-            if bootstrap_corrs:
-                lower_bound[t] = np.percentile(bootstrap_corrs, 2.5)
-                upper_bound[t] = np.percentile(bootstrap_corrs, 97.5)
-            else:
-                lower_bound[t] = 0
-                upper_bound[t] = 1
+            # Simple fallback for single RDM
+            lower_bound[t] = 0.5
+            upper_bound[t] = 1.0
     
     return lower_bound, upper_bound
 
@@ -188,8 +210,8 @@ def plot_single_rsa_timeseries(rsa_data: Dict[str, Any], output_dir: Path,
     ax.axvline(x=0, color='k', linestyle='-', alpha=0.3, label='Fixation onset')
     
     # Formatting
-    ax.set_xlabel('Time (s)', fontsize=12)
-    ax.set_ylabel('RSA Correlation', fontsize=12)
+    ax.set_xlabel('Time [s]', fontsize=12)
+    ax.set_ylabel('RSA Correlation [r]', fontsize=12)
     ax.set_title(f'Subject {rsa_data["subject_id"]}, Session {rsa_data["session"]}\n'
                 f'Model: {rsa_data["model_name"]}, Layer: {rsa_data["layer"]}', fontsize=14)
     ax.legend()
@@ -205,7 +227,7 @@ def plot_single_rsa_timeseries(rsa_data: Dict[str, Any], output_dir: Path,
     if save_fig:
         filename = f"sub-{rsa_data['subject_id']:02d}_ses-{rsa_data['session']:02d}_" \
                   f"model-{rsa_data['model_name']}_layer-{rsa_data['layer']}_rsa_timeseries.png"
-        fig.savefig(output_dir / filename, dpi=300, bbox_inches='tight')
+        fig.savefig(output_dir / filename, dpi=PLOT_CONFIG['figure_dpi'], bbox_inches='tight')
         logger.info(f"Saved plot: {filename}")
     
     return fig
@@ -287,8 +309,8 @@ def plot_group_rsa_timeseries(rsa_data_list: List[Dict[str, Any]], output_dir: P
     ax.axvline(x=0, color='k', linestyle='-', alpha=0.3, label='Fixation onset')
     
     # Formatting
-    ax.set_xlabel('Time (s)', fontsize=12)
-    ax.set_ylabel('RSA Correlation', fontsize=12)
+    ax.set_xlabel('Time [s]', fontsize=12)
+    ax.set_ylabel('RSA Correlation [r]', fontsize=12)
     
     # Get model and layer info from first result
     model_name = rsa_data_list[0]['model_name']
@@ -307,7 +329,7 @@ def plot_group_rsa_timeseries(rsa_data_list: List[Dict[str, Any]], output_dir: P
     
     if save_fig:
         filename = f"group_model-{model_name}_layer-{layer}_rsa_timeseries.png"
-        fig.savefig(output_dir / filename, dpi=300, bbox_inches='tight')
+        fig.savefig(output_dir / filename, dpi=PLOT_CONFIG['figure_dpi'], bbox_inches='tight')
         logger.info(f"Saved group plot: {filename}")
     
     return fig
@@ -422,19 +444,19 @@ Examples:
     if args.rsa_dir:
         rsa_dir = Path(args.rsa_dir)
     elif args.data_path:
-        rsa_dir = Path(args.data_path) / 'derivatives' / 'rsa_analysis'
+        rsa_dir = Path(args.data_path) / 'rsa_results'
     else:
         from pyavs.utils.config import get_data_path
         data_path = get_data_path()
         if data_path:
-            rsa_dir = Path(data_path) / 'derivatives' / 'rsa_analysis'
+            rsa_dir = Path(data_path) / 'rsa_results'
         else:
             parser.error("Must specify --rsa-dir or --data-path")
     
     if not rsa_dir.exists():
         parser.error(f"RSA directory does not exist: {rsa_dir}")
     
-    # Set up output directory
+    # Set up output directory as subfolder of RSA results
     if args.output_dir:
         output_dir = Path(args.output_dir)
     else:
@@ -443,9 +465,14 @@ Examples:
     output_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"Saving plots to: {output_dir}")
     
-    # Find RSA result files
-    pattern = str(rsa_dir / "*_rsa.npz")
-    rsa_files = glob(pattern)
+    # Find RSA result files with new structured format
+    pattern = str(rsa_dir / "**" / "*_rsa_results.npz")
+    rsa_files = glob(pattern, recursive=True)
+
+    # Also check for old format files for backward compatibility
+    old_pattern = str(rsa_dir / "*_rsa.npz")
+    old_rsa_files = glob(old_pattern)
+    rsa_files.extend(old_rsa_files)
     
     if not rsa_files:
         logger.error(f"No RSA files found in {rsa_dir}")

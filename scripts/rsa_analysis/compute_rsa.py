@@ -11,7 +11,6 @@ import os
 import sys
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
-import logging
 
 import numpy as np
 import pandas as pd
@@ -135,28 +134,20 @@ def group_by_objects(epochs_data: np.ndarray, embeddings: np.ndarray,
         print(f"Object labels not found in metadata. Adding {object_column} column...")
         
         # Add object labels using the objects module
-        try:
-            from pyavs.scenes.objects import get_fixated_objects
-            
-            
-            transformed_annotations_dir = os.path.join(data_path, 'AVS-UTILS' , "avs_scene_annotations", "coco_objects")
-            
-            if os.path.exists(transformed_annotations_dir):
-                # Add object labels to metadata
-                metadata = get_fixated_objects(
-                    events_df=metadata,
-                    transformed_annotations_dir=transformed_annotations_dir,
-                    verbose=True,
-                    error_margin_pixels=10
-                )
-                print(f"Added object labels. Unique objects: {metadata[object_column].value_counts()}")
-            else:
-                print(f"Transformed annotations not found at: {transformed_annotations_dir}")
-                raise FileNotFoundError(f"Cannot find transformed annotations at {transformed_annotations_dir}")
-                
-        except Exception as e:
-            print(f"Failed to add object labels: {e}")
-            raise ValueError(f"Object labels required for grouping but could not be loaded: {e}")
+        from pyavs.scenes.objects import get_fixated_objects
+
+        transformed_annotations_dir = os.path.join(data_path, 'AVS-UTILS', "avs_scene_annotations", "coco_objects")
+
+        if not os.path.exists(transformed_annotations_dir):
+            raise FileNotFoundError(f"Cannot find transformed annotations at {transformed_annotations_dir}")
+
+        metadata = get_fixated_objects(
+            events_df=metadata,
+            transformed_annotations_dir=transformed_annotations_dir,
+            verbose=True,
+            error_margin_pixels=10
+        )
+        print(f"Added object labels. Unique objects: {metadata[object_column].value_counts()}")
     
     # Group by object labels
     unique_objects = metadata[object_column].dropna().unique()
@@ -192,7 +183,7 @@ def group_by_objects(epochs_data: np.ndarray, embeddings: np.ndarray,
 def compute_rdm_timeseries(epochs_data: np.ndarray, distance_metric: str = 'mahalanobis',
                           noise_cov: np.ndarray = None) -> np.ndarray:
     """Compute time-resolved RDMs using rsatoolbox."""
-    n_conditions, n_channels, n_times = epochs_data.shape
+    n_conditions, _, n_times = epochs_data.shape
     rdm_timeseries = np.zeros((n_times, n_conditions, n_conditions))
     
     for t in range(n_times):
@@ -235,18 +226,34 @@ def compute_rsa_correlation(meg_rdm_timeseries: np.ndarray, embedding_rdm: np.nd
     return rsa_timeseries
 
 
-def estimate_noise_covariance(epochs_data: np.ndarray) -> np.ndarray:
-    """Estimate noise covariance from epochs data."""
-    # Reshape to (n_samples, n_channels)
-    n_epochs, n_channels, n_times = epochs_data.shape
-    data_flat = epochs_data.reshape(-1, n_channels)
-    
-    # Estimate covariance and add regularization
-    cov = np.cov(data_flat.T)
-    reg_param = 1e-6 * np.trace(cov) / n_channels
-    cov += reg_param * np.eye(n_channels)
-    
-    return np.linalg.inv(cov)  # Return precision matrix
+def estimate_noise_covariance_mne(epochs_data: np.ndarray, times: np.ndarray,
+                                  sfreq: float = 1000.0) -> np.ndarray:
+    """Estimate noise covariance using MNE-python best practices."""
+    _, n_channels, _ = epochs_data.shape
+
+    # Create MNE info structure
+    ch_names = [f'CH{i:03d}' for i in range(n_channels)]
+    info = mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types='mag')
+
+    # Create MNE EpochsArray
+    epochs = mne.EpochsArray(epochs_data, info, tmin=times[0])
+
+    # Estimate noise covariance using MNE
+    # Use baseline period for noise estimation if available (typically pre-stimulus)
+    baseline = None
+    if times[0] < 0 and np.any(times < 0):
+        baseline = (times[0], 0)
+
+    noise_cov = mne.compute_covariance(
+        epochs,
+        tmin=baseline[0] if baseline else times[0],
+        tmax=baseline[1] if baseline else times[int(len(times)*0.2)],
+        method=['empirical', 'shrunk'],  # Use shrinkage regularization
+        return_estimators=False
+    )
+
+    # Return the precision matrix (inverse covariance)
+    return np.linalg.inv(noise_cov.data)
 
 
 def process_subject_session(subject_id: int, session: int, model_name: str, layer: str,
@@ -276,8 +283,8 @@ def process_subject_session(subject_id: int, session: int, model_name: str, laye
             final_embeddings = matched_embeddings
             object_labels = []
         
-        # Estimate noise covariance for Mahalanobis distance
-        noise_cov = estimate_noise_covariance(final_epochs_data) if distance_metric == 'mahalanobis' else None
+        # Estimate noise covariance for Mahalanobis distance using MNE
+        noise_cov = estimate_noise_covariance_mne(final_epochs_data, times) if distance_metric == 'mahalanobis' else None
         
         # Compute RDMs and RSA
         meg_rdm_timeseries = compute_rdm_timeseries(final_epochs_data, distance_metric, noise_cov)
@@ -286,18 +293,33 @@ def process_subject_session(subject_id: int, session: int, model_name: str, laye
         
         print(np.round(rsa_timeseries, 2))
         print(f"Max RSA correlation: {np.max(rsa_timeseries):.3f} at time {times[np.argmax(rsa_timeseries)]:.3f}s")
-        # Save results
-        output_file = output_dir / f"sub-{subject_id:02d}_ses-{session:02d}_model-{model_name}_layer-{layer}_rsa.npz"
+
+        # Create structured output directory
+        subject_output_dir = output_dir / f"sub-{subject_id:02d}" / f"ses-{session:02d}"
+        subject_output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save results with improved structure and metadata
+        output_file = subject_output_dir / f"model-{model_name}_layer-{layer}_rsa_results.npz"
         np.savez_compressed(
             output_file,
+            # Core RSA results
             rsa_timeseries=rsa_timeseries,
             times=times,
             meg_rdm_timeseries=meg_rdm_timeseries,
             embedding_rdm=embedding_rdm,
+            # Data matching information
             epoch_indices=epoch_indices,
             embedding_indices=embedding_indices,
             object_labels=object_labels,
-            distance_metric=distance_metric
+            # Analysis parameters
+            distance_metric=distance_metric,
+            subject_id=subject_id,
+            session=session,
+            model_name=model_name,
+            layer=layer,
+            use_object_labels=use_object_labels,
+            n_epochs_used=len(epoch_indices),
+            n_objects=len(object_labels) if object_labels else 0
         )
         
         logger.info(f"Saved results to {output_file}")
@@ -333,7 +355,7 @@ def main():
     
     # Setup paths
     data_path = args.data_path
-    output_dir = Path(args.output_dir) if args.output_dir else Path(data_path) / 'derivatives' / 'rsa_analysis'
+    output_dir = Path(args.output_dir) if args.output_dir else Path(data_path) / 'rsa_results'
     output_dir.mkdir(parents=True, exist_ok=True)
     
     # Create subject-session combinations
