@@ -118,7 +118,7 @@ def load_rsa_results(rsa_file: str) -> Dict[str, Any]:
                 model_name = part.replace('model-', '')
             elif part.startswith('layer-'):
                 layer = part.replace('layer-', '')
-
+    #logger.info("Shape of rsa_timeseries: %s", data['meg_rdm_timeseries'].shape, "Subject ID:", subject_id, "Session(s):", sessions, "Model:", model_name, "Layer:", layer)
     return {
         'rsa_timeseries': data['rsa_timeseries'],
         'times': data['times'],
@@ -169,7 +169,7 @@ def compute_noise_ceiling_timeseries(meg_rdm_timeseries: np.ndarray,
         
         # Compute noise ceiling using rsatoolbox
         try:
-            nc_lower, nc_upper = boot_noise_ceiling(rdms, n_bootstrap=n_bootstrap)
+            nc_lower, nc_upper = boot_noise_ceiling(rdms, method='spearman')
             lower_bound[t] = nc_lower
             upper_bound[t] = nc_upper
         except:
@@ -223,10 +223,10 @@ def plot_single_rsa_timeseries(rsa_data: Dict[str, Any], output_dir: Path,
     # Add zero line
     ax.axhline(y=0, color='k', linestyle='-', alpha=0.3)
     ax.axvline(x=0, color='k', linestyle='-', alpha=0.3, label='Fixation onset')
-    
+    ax.set_xlim(-0.2, 0.5)
     # Formatting
-    ax.set_xlabel('Time [s]', fontsize=12)
-    ax.set_ylabel('RSA Correlation [r]', fontsize=12)
+    ax.set_xlabel('time [s]')
+    ax.set_ylabel("RDM similarity [spearman's rho]")
     # Create session info string
     sessions_str = ""
     if rsa_data.get("sessions") and len(rsa_data["sessions"]) > 1:
@@ -235,7 +235,7 @@ def plot_single_rsa_timeseries(rsa_data: Dict[str, Any], output_dir: Path,
         sessions_str = f', Session {rsa_data["session"]}'
 
     ax.set_title(f'Subject {rsa_data["subject_id"]}{sessions_str}\n'
-                f'Model: {rsa_data["model_name"]}, Layer: {rsa_data["layer"]}', fontsize=14)
+                f'Model: {rsa_data["model_name"]}, Layer: {rsa_data["layer"]}')
     ax.legend()
     ax.grid(True, alpha=0.3)
     
@@ -337,10 +337,10 @@ def plot_group_rsa_timeseries(rsa_data_list: List[Dict[str, Any]], output_dir: P
     # Add reference lines
     ax.axhline(y=0, color='k', linestyle='-', alpha=0.3)
     ax.axvline(x=0, color='k', linestyle='-', alpha=0.3, label='Fixation onset')
-    
+    ax.set_xlim(-0.2, 0.5)
     # Formatting
-    ax.set_xlabel('Time [s]', fontsize=12)
-    ax.set_ylabel('RSA Correlation [r]', fontsize=12)
+    ax.set_xlabel('time [s]')
+    ax.set_ylabel("RDM similarity [spearman's rho]")
     
     # Get model and layer info from first result
     model_name = rsa_data_list[0]['model_name']
@@ -348,11 +348,12 @@ def plot_group_rsa_timeseries(rsa_data_list: List[Dict[str, Any]], output_dir: P
     ax.set_title(f'Group RSA Time Series\nModel: {model_name}, Layer: {layer}', fontsize=14)
     
     ax.legend()
-    ax.grid(True, alpha=0.3)
+    #ax.grid(True, alpha=0.3)
+    sns.despine()
     
     # Set reasonable y limits
     y_min = min(0, np.nanmin(mean_rsa) - 0.05)
-    y_max = max(0.5, np.nanmax(mean_rsa) + 0.05)
+    y_max = max(0.5, np.nanmax(mean_rsa) + 0.2)
     ax.set_ylim(y_min, y_max)
     
     plt.tight_layout()
@@ -589,7 +590,7 @@ def compute_intersubject_noise_ceiling(rsa_data_list: List[Dict[str, Any]], n_bo
     all_rdm_timeseries = []
     for rsa_data in rsa_data_list:
         all_rdm_timeseries.append(rsa_data['meg_rdm_timeseries'])
-
+    
     all_rdm_timeseries = np.array(all_rdm_timeseries)  # (n_subjects, n_times, n_conditions, n_conditions)
 
     lower_bound = np.zeros(n_times)
@@ -606,7 +607,7 @@ def compute_intersubject_noise_ceiling(rsa_data_list: List[Dict[str, Any]], n_bo
             rdms = RDMs(rdms_t)
 
             # Compute noise ceiling using bootstrap
-            nc_lower, nc_upper = boot_noise_ceiling(rdms, n_bootstrap=n_bootstrap)
+            nc_lower, nc_upper = boot_noise_ceiling(rdms,method='spearman')
             lower_bound[t] = nc_lower
             upper_bound[t] = nc_upper
 
