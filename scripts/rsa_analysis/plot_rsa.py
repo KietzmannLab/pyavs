@@ -451,47 +451,72 @@ def plot_rdms_at_timepoint(rsa_data: Dict[str, Any], timepoint_ms: float = 110.0
 
     # Get RDM at timepoint
     meg_rdm = meg_rdm_timeseries[time_idx]
+    n_objects = meg_rdm.shape[0]
 
-    # Create figure with subplots
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+    # Create figure with subplots - make it larger and square
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 8))
 
     # Plot MEG RDM
-    im1 = ax1.imshow(meg_rdm, cmap='viridis', aspect='auto')
+    im1 = ax1.imshow(meg_rdm, cmap='RdYlBu_r', aspect='equal')
     ax1.set_title(f'MEG RDM at {actual_time_ms:.1f} ms\nSubject {rsa_data["subject_id"]}',
-                  fontsize=14)
-    ax1.set_xlabel('Object Index')
-    ax1.set_ylabel('Object Index')
+                  fontsize=16, pad=20)
 
     # Add colorbar for MEG RDM
-    cbar1 = plt.colorbar(im1, ax=ax1, shrink=0.8)
-    cbar1.set_label('Distance', rotation=270, labelpad=20)
+    cbar1 = plt.colorbar(im1, ax=ax1, shrink=0.7)
+    cbar1.set_label('Distance', rotation=270, labelpad=20, fontsize=14)
 
-    # Add object labels if available
-    if object_labels and len(object_labels) == meg_rdm.shape[0]:
-        # Rotate labels for better readability
-        ax1.set_xticks(range(len(object_labels)))
-        ax1.set_yticks(range(len(object_labels)))
-        ax1.set_xticklabels(object_labels, rotation=45, ha='right')
-        ax1.set_yticklabels(object_labels)
+    # Handle object labels intelligently
+    if object_labels and len(object_labels) == n_objects:
+        # Only show labels if there aren't too many
+        if n_objects <= 20:
+            # Show all labels with better formatting
+            ax1.set_xticks(range(n_objects))
+            ax1.set_yticks(range(n_objects))
+            ax1.set_xticklabels(object_labels, rotation=90, ha='center', fontsize=10)
+            ax1.set_yticklabels(object_labels, fontsize=10)
+        else:
+            # Show only every nth label to avoid overcrowding
+            step = max(1, n_objects // 10)  # Show max 10 labels
+            indices = range(0, n_objects, step)
+            ax1.set_xticks(indices)
+            ax1.set_yticks(indices)
+            ax1.set_xticklabels([object_labels[i] for i in indices],
+                               rotation=90, ha='center', fontsize=10)
+            ax1.set_yticklabels([object_labels[i] for i in indices], fontsize=10)
+    else:
+        # No labels - just show indices
+        ax1.set_xlabel('Object Index', fontsize=12)
+        ax1.set_ylabel('Object Index', fontsize=12)
 
     # Plot embedding RDM
-    im2 = ax2.imshow(embedding_rdm, cmap='viridis', aspect='auto')
+    im2 = ax2.imshow(embedding_rdm, cmap='RdYlBu_r', aspect='equal')
     ax2.set_title(f'Embedding RDM\nModel: {rsa_data["model_name"]}, Layer: {rsa_data["layer"]}',
-                  fontsize=14)
-    ax2.set_xlabel('Object Index')
-    ax2.set_ylabel('Object Index')
+                  fontsize=16, pad=20)
 
     # Add colorbar for embedding RDM
-    cbar2 = plt.colorbar(im2, ax=ax2, shrink=0.8)
-    cbar2.set_label('Distance', rotation=270, labelpad=20)
+    cbar2 = plt.colorbar(im2, ax=ax2, shrink=0.7)
+    cbar2.set_label('Distance', rotation=270, labelpad=20, fontsize=14)
 
-    # Add object labels if available
+    # Handle object labels for embedding RDM
     if object_labels and len(object_labels) == embedding_rdm.shape[0]:
-        ax2.set_xticks(range(len(object_labels)))
-        ax2.set_yticks(range(len(object_labels)))
-        ax2.set_xticklabels(object_labels, rotation=45, ha='right')
-        ax2.set_yticklabels(object_labels)
+        if n_objects <= 20:
+            ax2.set_xticks(range(n_objects))
+            ax2.set_yticks(range(n_objects))
+            ax2.set_xticklabels(object_labels, rotation=90, ha='center', fontsize=10)
+            ax2.set_yticklabels(object_labels, fontsize=10)
+        else:
+            step = max(1, n_objects // 10)
+            indices = range(0, n_objects, step)
+            ax2.set_xticks(indices)
+            ax2.set_yticks(indices)
+            ax2.set_xticklabels([object_labels[i] for i in indices],
+                               rotation=90, ha='center', fontsize=10)
+            ax2.set_yticklabels([object_labels[i] for i in indices], fontsize=10)
+    else:
+        ax2.set_xlabel('Object Index', fontsize=12)
+        ax2.set_ylabel('Object Index', fontsize=12)
 
+    # Adjust layout
     plt.tight_layout()
 
     if save_fig and output_dir:

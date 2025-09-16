@@ -150,32 +150,41 @@ def group_by_objects(epochs_data: np.ndarray, embeddings: np.ndarray,
         )
         print(f"Added object labels. Unique objects: {metadata[object_column].value_counts()}")
     
+    # Filter out unwanted fixations (object IDs -2 and -1 are none/out-of-scene fixations)
+    valid_mask = ~metadata[object_column].isin([-2, -1])
+    metadata_filtered = metadata[valid_mask]
+    epochs_data_filtered = epochs_data[valid_mask]
+    embeddings_filtered = embeddings[valid_mask]
+
+    logger.info(f"Filtered out {(~valid_mask).sum()} fixations with object IDs -2 or -1")
+    logger.info(f"Remaining fixations: {valid_mask.sum()}")
+
     # Group by object labels
-    unique_objects = metadata[object_column].dropna().unique()
+    unique_objects = metadata_filtered[object_column].dropna().unique()
     object_labels = sorted([obj for obj in unique_objects if obj not in ['unknown', 'None', 'outside']])
     
     if len(object_labels) == 0:
         raise ValueError("No valid object labels found for grouping")
-    
+
     n_objects = len(object_labels)
-    n_channels, n_times = epochs_data.shape[1], epochs_data.shape[2]
-    n_features = embeddings.shape[1]
-    
+    n_channels, n_times = epochs_data_filtered.shape[1], epochs_data_filtered.shape[2]
+    n_features = embeddings_filtered.shape[1]
+
     grouped_epochs = np.zeros((n_objects, n_channels, n_times))
     grouped_embeddings = np.zeros((n_objects, n_features))
-    
-    print(f"Grouping {len(epochs_data)} epochs into {n_objects} object categories")
-    
+
+    print(f"Grouping {len(epochs_data_filtered)} filtered epochs into {n_objects} object categories")
+
     for i, obj_label in enumerate(object_labels):
-        obj_mask = metadata[object_column] == obj_label
+        obj_mask = metadata_filtered[object_column] == obj_label
         obj_indices = np.where(obj_mask)[0]
-        
+
         if len(obj_indices) == 0:
             print(f"Warning: No epochs found for object '{obj_label}'")
             continue
-            
-        grouped_epochs[i] = np.median(epochs_data[obj_indices], axis=0)
-        grouped_embeddings[i] = np.median(embeddings[obj_indices], axis=0)
+
+        grouped_epochs[i] = np.median(epochs_data_filtered[obj_indices], axis=0)
+        grouped_embeddings[i] = np.median(embeddings_filtered[obj_indices], axis=0)
         print(f"  {obj_label}: {len(obj_indices)} epochs")
     
     return grouped_epochs, grouped_embeddings, object_labels
@@ -300,8 +309,19 @@ def process_subject_sessions(subject_id: int, sessions: List[int], model_name: s
             final_epochs_data, final_embeddings, object_labels = group_by_objects(
                 combined_epochs_data, combined_embeddings, combined_metadata, data_path=data_path)
         else:
-            final_epochs_data = combined_epochs_data
-            final_embeddings = combined_embeddings
+            # Even when not grouping by objects, we should still filter out -2 and -1 object IDs
+            # Check if object_label column exists in metadata
+            object_column = 'object_label'
+            if object_column in combined_metadata.columns:
+                valid_mask = ~combined_metadata[object_column].isin([-2, -1])
+                final_epochs_data = combined_epochs_data[valid_mask]
+                final_embeddings = combined_embeddings[valid_mask]
+                logger.info(f"Filtered out {(~valid_mask).sum()} fixations with object IDs -2 or -1 (no grouping)")
+                logger.info(f"Remaining fixations: {valid_mask.sum()}")
+            else:
+                final_epochs_data = combined_epochs_data
+                final_embeddings = combined_embeddings
+                logger.warning("No object_label column found - cannot filter out unwanted fixations")
             object_labels = []
 
         logger.info(f"Final data shape: epochs {final_epochs_data.shape}, embeddings {final_embeddings.shape}")
