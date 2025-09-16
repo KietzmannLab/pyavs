@@ -35,12 +35,13 @@ logger = get_logger('scripts.rsa_analysis.meg_rsa_pipeline')
 
 def load_fixation_epochs(subject_id: int, session: int, data_path: str) -> Tuple[np.ndarray, pd.DataFrame, np.ndarray]:
     """Load fixation epochs."""
-    epochs, _, times = load_epochs_h5(
+    epochs, _, meta_h5 = load_epochs_h5(
         subject_id=subject_id,
         session=session,
         event_type='fixation_scene',
         data_path=data_path
     )
+    times = meta_h5['times'][:]
     metadata =load_metadata_csv(
         subject_id=subject_id,
         session=session,
@@ -173,8 +174,8 @@ def group_by_objects(epochs_data: np.ndarray, embeddings: np.ndarray,
             print(f"Warning: No epochs found for object '{obj_label}'")
             continue
             
-        grouped_epochs[i] = np.mean(epochs_data[obj_indices], axis=0)
-        grouped_embeddings[i] = np.mean(embeddings[obj_indices], axis=0)
+        grouped_epochs[i] = np.median(epochs_data[obj_indices], axis=0)
+        grouped_embeddings[i] = np.median(embeddings[obj_indices], axis=0)
         print(f"  {obj_label}: {len(obj_indices)} epochs")
     
     return grouped_epochs, grouped_embeddings, object_labels
@@ -236,18 +237,16 @@ def estimate_noise_covariance_mne(epochs_data: np.ndarray, times: np.ndarray,
     info = mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types='mag')
 
     # Create MNE EpochsArray
+    print(times)
     epochs = mne.EpochsArray(epochs_data, info, tmin=times[0])
 
     # Estimate noise covariance using MNE
     # Use baseline period for noise estimation if available (typically pre-stimulus)
     baseline = None
-    if times[0] < 0 and np.any(times < 0):
-        baseline = (times[0], 0)
+    
 
     noise_cov = mne.compute_covariance(
         epochs,
-        tmin=baseline[0] if baseline else times[0],
-        tmax=baseline[1] if baseline else times[int(len(times)*0.2)],
         method=['empirical', 'shrunk'],  # Use shrinkage regularization
         return_estimators=False
     )
@@ -282,18 +281,16 @@ def process_subject_session(subject_id: int, session: int, model_name: str, laye
             final_epochs_data = matched_epochs_data
             final_embeddings = matched_embeddings
             object_labels = []
-        
+        logger.info(f"Final data shape: epochs {final_epochs_data.shape}, embeddings {final_embeddings.shape}")
         # Estimate noise covariance for Mahalanobis distance using MNE
         noise_cov = estimate_noise_covariance_mne(final_epochs_data, times) if distance_metric == 'mahalanobis' else None
-        
+        logger.info(f"Estimated noise covariance shape: {noise_cov.shape if noise_cov is not None else 'N/A'}")
         # Compute RDMs and RSA
         meg_rdm_timeseries = compute_rdm_timeseries(final_epochs_data, distance_metric, noise_cov)
         embedding_rdm = compute_embedding_rdm(final_embeddings, distance_metric)
         rsa_timeseries = compute_rsa_correlation(meg_rdm_timeseries, embedding_rdm)
         
-        print(np.round(rsa_timeseries, 2))
-        print(f"Max RSA correlation: {np.max(rsa_timeseries):.3f} at time {times[np.argmax(rsa_timeseries)]:.3f}s")
-
+        logger.info(f"Computed RSA timeseries with shape: {rsa_timeseries.shape}")
         # Create structured output directory
         subject_output_dir = output_dir / f"sub-{subject_id:02d}" / f"ses-{session:02d}"
         subject_output_dir.mkdir(parents=True, exist_ok=True)
@@ -326,7 +323,7 @@ def process_subject_session(subject_id: int, session: int, model_name: str, laye
         return {'status': 'success', 'subject_id': subject_id, 'session': session, 
                 'n_epochs': len(epoch_indices), 'n_objects': len(object_labels)}
         
-    except Exception as e:
+    except IndentationError as e:
         logger.error(f"Error processing sub-{subject_id:02d}_ses-{session:02d}: {e}")
         return {'status': 'failed', 'subject_id': subject_id, 'session': session, 'error': str(e)}
 
