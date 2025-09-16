@@ -764,3 +764,139 @@ def map_fixations_to_objects(fixations_df: pd.DataFrame,
     return result_df
 
 
+# RSA Analysis Category Dictionary
+RSA_CATEGORIES = {
+    # ANIMATE
+    'animate': {
+        'human': ['person'],
+        'mammal_large': ['bear', 'cow', 'elephant', 'giraffe', 'horse', 'zebra'],
+        'mammal_small': ['cat', 'dog', 'sheep'],
+        'bird': ['bird']
+    },
+
+    # INANIMATE
+    'inanimate': {
+        # Transportation
+        'vehicle_air': ['airplane'],
+        'vehicle_ground': ['bicycle', 'bus', 'car', 'motorcycle', 'skateboard', 'train', 'truck'],
+        'vehicle_water': ['boat', 'surfboard'],
+
+        # Food & Kitchen
+        'food_natural': ['apple', 'banana', 'broccoli', 'carrot', 'orange'],
+        'food_prepared': ['cake', 'donut', 'hot dog', 'pizza', 'sandwich'],
+        'kitchenware': ['bottle', 'bowl', 'cup', 'fork', 'knife', 'spoon', 'wine glass'],
+        'appliances': ['microwave', 'oven', 'refrigerator', 'toaster'],
+
+        # Furniture & Indoor
+        'furniture': ['bed', 'bench', 'chair', 'couch', 'dining table'],
+        'household_items': ['clock', 'potted plant', 'sink', 'toilet', 'tv', 'vase'],
+
+        # Technology & Electronics
+        'electronics': ['cell phone', 'keyboard', 'laptop', 'mouse', 'remote'],
+        'tools_appliances': ['hair drier', 'scissors', 'toothbrush'],
+
+        # Personal Items & Accessories
+        'bags_accessories': ['backpack', 'handbag', 'suitcase', 'tie', 'umbrella'],
+
+        # Sports & Recreation
+        'sports_equipment': ['baseball bat', 'baseball glove', 'frisbee', 'kite', 'skis',
+                           'snowboard', 'sports ball', 'tennis racket'],
+
+        # Books & Media
+        'media': ['book'],
+
+        # Urban/Public Objects
+        'urban_infrastructure': ['fire hydrant', 'parking meter', 'stop sign', 'traffic light'],
+
+        # Toys
+        'toys': ['teddy bear']
+    }
+}
+
+# Create flattened lookup dictionary
+_CATEGORY_LOOKUP = {}
+for main_category, subcategories in RSA_CATEGORIES.items():
+    for subcategory, items in subcategories.items():
+        for item in items:
+            _CATEGORY_LOOKUP[item] = {
+                'main_category': main_category,
+                'subcategory': subcategory,
+                'hierarchical': f"{main_category}_{subcategory}"
+            }
+
+
+def categorize_objects(object_names: List[str], level: str = 'subcategory') -> List[str]:
+    """
+    Categorize object names into broader categories for RSA analysis.
+
+    Parameters
+    ----------
+    object_names : list of str
+        List of object names to categorize
+    level : str, optional
+        Categorization level: 'main_category', 'subcategory', or 'hierarchical'
+        Default: 'subcategory'
+
+    Returns
+    -------
+    list of str
+        List of category names for each object
+
+    Examples
+    --------
+    >>> categorize_objects(['person', 'car', 'dog'], level='main_category')
+    ['animate', 'inanimate', 'animate']
+
+    >>> categorize_objects(['person', 'car', 'dog'], level='subcategory')
+    ['human', 'vehicle_ground', 'mammal_small']
+    """
+    categories = []
+    for obj_name in object_names:
+        if obj_name in _CATEGORY_LOOKUP:
+            categories.append(_CATEGORY_LOOKUP[obj_name][level])
+        else:
+            categories.append('unknown')
+
+    return categories
+
+
+def sort_objects_by_category(object_names: List[str], level: str = 'subcategory') -> Tuple[List[str], List[int]]:
+    """
+    Sort objects by their categories and return sorted objects with indices.
+
+    Parameters
+    ----------
+    object_names : list of str
+        List of object names to sort
+    level : str, optional
+        Categorization level for sorting: 'main_category', 'subcategory', or 'hierarchical'
+        Default: 'subcategory'
+
+    Returns
+    -------
+    tuple
+        (sorted_objects, sort_indices) where sort_indices maps new positions to original positions
+
+    Examples
+    --------
+    >>> objects = ['car', 'person', 'dog']
+    >>> sorted_objs, indices = sort_objects_by_category(objects)
+    >>> print(sorted_objs)  # ['person', 'dog', 'car'] (animate first, then inanimate)
+    >>> print(indices)      # [1, 2, 0] (person was at index 1, dog at 2, car at 0)
+    """
+    # Get categories for all objects
+    categories = categorize_objects(object_names, level=level)
+
+    # Create tuples of (category, object_name, original_index)
+    obj_tuples = [(cat, obj, i) for i, (cat, obj) in enumerate(zip(categories, object_names))]
+
+    # Sort by category name (this will group similar categories together)
+    obj_tuples.sort(key=lambda x: x[0])
+
+    # Extract sorted objects and indices
+    sorted_objects = [obj for _, obj, _ in obj_tuples]
+    sort_indices = [orig_idx for _, _, orig_idx in obj_tuples]
+
+    return sorted_objects, sort_indices
+
+

@@ -54,6 +54,7 @@ PLOT_CONFIG = {
     'figure_dpi': 300,  # Figure DPI for saving
     'plot_rdms': True,  # Plot RDMs at specific timepoint
     'rdm_timepoint_ms': 110.0,  # Timepoint in ms for RDM plotting
+    'categorize_level': 'subcategory',  # Level for object categorization in RDMs
 }
 
 # Set matplotlib style with seaborn poster context
@@ -419,9 +420,10 @@ def create_summary_dataframe(rsa_data_list: List[Dict[str, Any]]) -> pd.DataFram
 
 
 def plot_rdms_at_timepoint(rsa_data: Dict[str, Any], timepoint_ms: float = 110.0,
-                          output_dir: Path = None, save_fig: bool = True) -> plt.Figure:
+                          output_dir: Path = None, save_fig: bool = True,
+                          categorize_level: str = 'subcategory') -> plt.Figure:
     """
-    Plot MEG and embedding RDMs at a specific timepoint.
+    Plot MEG and embedding RDMs at a specific timepoint with categorized sorting.
 
     Parameters
     ----------
@@ -433,6 +435,8 @@ def plot_rdms_at_timepoint(rsa_data: Dict[str, Any], timepoint_ms: float = 110.0
         Output directory for plots
     save_fig : bool, default True
         Whether to save the figure
+    categorize_level : str, default 'subcategory'
+        Level for object categorization: 'main_category', 'subcategory', or 'hierarchical'
 
     Returns
     -------
@@ -453,6 +457,25 @@ def plot_rdms_at_timepoint(rsa_data: Dict[str, Any], timepoint_ms: float = 110.0
     meg_rdm = meg_rdm_timeseries[time_idx]
     n_objects = meg_rdm.shape[0]
 
+    # Sort objects by category if labels are available
+    if object_labels and len(object_labels) == n_objects:
+        # Import categorization functions
+        from pyavs.scenes.objects import sort_objects_by_category, categorize_objects
+
+        # Sort objects by category
+        sorted_objects, sort_indices = sort_objects_by_category(object_labels, level=categorize_level)
+
+        # Reorder RDMs according to categorization
+        meg_rdm = meg_rdm[np.ix_(sort_indices, sort_indices)]
+        embedding_rdm = embedding_rdm[np.ix_(sort_indices, sort_indices)]
+
+        # Get category labels for display
+        category_labels = categorize_objects(sorted_objects, level=categorize_level)
+        display_labels = category_labels
+    else:
+        sorted_objects = object_labels
+        display_labels = object_labels
+
     # Create figure with subplots - make it larger and square
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 8))
 
@@ -465,24 +488,24 @@ def plot_rdms_at_timepoint(rsa_data: Dict[str, Any], timepoint_ms: float = 110.0
     cbar1 = plt.colorbar(im1, ax=ax1, shrink=0.7)
     cbar1.set_label('Distance', rotation=270, labelpad=20, fontsize=14)
 
-    # Handle object labels intelligently
-    if object_labels and len(object_labels) == n_objects:
+    # Handle category labels intelligently
+    if display_labels and len(display_labels) == n_objects:
         # Only show labels if there aren't too many
         if n_objects <= 20:
-            # Show all labels with better formatting
+            # Show all category labels with better formatting
             ax1.set_xticks(range(n_objects))
             ax1.set_yticks(range(n_objects))
-            ax1.set_xticklabels(object_labels, rotation=90, ha='center', fontsize=10)
-            ax1.set_yticklabels(object_labels, fontsize=10)
+            ax1.set_xticklabels(display_labels, rotation=90, ha='center', fontsize=10)
+            ax1.set_yticklabels(display_labels, fontsize=10)
         else:
             # Show only every nth label to avoid overcrowding
             step = max(1, n_objects // 10)  # Show max 10 labels
             indices = range(0, n_objects, step)
             ax1.set_xticks(indices)
             ax1.set_yticks(indices)
-            ax1.set_xticklabels([object_labels[i] for i in indices],
+            ax1.set_xticklabels([display_labels[i] for i in indices],
                                rotation=90, ha='center', fontsize=10)
-            ax1.set_yticklabels([object_labels[i] for i in indices], fontsize=10)
+            ax1.set_yticklabels([display_labels[i] for i in indices], fontsize=10)
     else:
         # No labels - just show indices
         ax1.set_xlabel('Object Index', fontsize=12)
@@ -497,21 +520,21 @@ def plot_rdms_at_timepoint(rsa_data: Dict[str, Any], timepoint_ms: float = 110.0
     cbar2 = plt.colorbar(im2, ax=ax2, shrink=0.7)
     cbar2.set_label('Distance', rotation=270, labelpad=20, fontsize=14)
 
-    # Handle object labels for embedding RDM
-    if object_labels and len(object_labels) == embedding_rdm.shape[0]:
+    # Handle category labels for embedding RDM
+    if display_labels and len(display_labels) == embedding_rdm.shape[0]:
         if n_objects <= 20:
             ax2.set_xticks(range(n_objects))
             ax2.set_yticks(range(n_objects))
-            ax2.set_xticklabels(object_labels, rotation=90, ha='center', fontsize=10)
-            ax2.set_yticklabels(object_labels, fontsize=10)
+            ax2.set_xticklabels(display_labels, rotation=90, ha='center', fontsize=10)
+            ax2.set_yticklabels(display_labels, fontsize=10)
         else:
             step = max(1, n_objects // 10)
             indices = range(0, n_objects, step)
             ax2.set_xticks(indices)
             ax2.set_yticks(indices)
-            ax2.set_xticklabels([object_labels[i] for i in indices],
+            ax2.set_xticklabels([display_labels[i] for i in indices],
                                rotation=90, ha='center', fontsize=10)
-            ax2.set_yticklabels([object_labels[i] for i in indices], fontsize=10)
+            ax2.set_yticklabels([display_labels[i] for i in indices], fontsize=10)
     else:
         ax2.set_xlabel('Object Index', fontsize=12)
         ax2.set_ylabel('Object Index', fontsize=12)
@@ -675,9 +698,11 @@ Examples:
     # Create RDM plots if requested
     if args.plot_rdms or PLOT_CONFIG.get('plot_rdms', False):
         timepoint_ms = args.rdm_timepoint if hasattr(args, 'rdm_timepoint') else PLOT_CONFIG.get('rdm_timepoint_ms', 110.0)
-        logger.info(f"Creating RDM plots at {timepoint_ms} ms...")
+        categorize_level = PLOT_CONFIG.get('categorize_level', 'subcategory')
+        logger.info(f"Creating RDM plots at {timepoint_ms} ms with {categorize_level} categorization...")
         for rsa_data in rsa_data_list:
-            plot_rdms_at_timepoint(rsa_data, timepoint_ms=timepoint_ms, output_dir=output_dir)
+            plot_rdms_at_timepoint(rsa_data, timepoint_ms=timepoint_ms, output_dir=output_dir,
+                                 categorize_level=categorize_level)
     
     # Create and save summary statistics
     if args.save_summary:
