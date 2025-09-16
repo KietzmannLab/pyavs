@@ -120,8 +120,7 @@ def match_epochs_to_embeddings(metadata: pd.DataFrame, file_names: List[str]) ->
             embedding_idx = match.index[0]
             epoch_indices.append(epoch_idx)
             embedding_indices.append(embedding_idx)
-        else:
-            logger.warning(f"No embedding match for epoch {epoch_idx} with metadata {row.to_dict()}")
+    logger.warning(f"Number of epochs without matching embeddings: {len(metadata) - len(epoch_indices)}")
     logger.info(f"Matched {len(epoch_indices)} epochs to embeddings")
     return np.array(epoch_indices), np.array(embedding_indices)
 
@@ -394,7 +393,7 @@ def main():
     
     # Set analysis parameters here
     USE_OBJECT_LABELS = True
-    DISTANCE_METRIC = 'mahalanobis'  # Default to Mahalanobis
+    DISTANCE_METRIC = 'correlation'  # Default to Mahalanobis
     
     # Setup paths
     data_path = args.data_path
