@@ -52,6 +52,8 @@ PLOT_CONFIG = {
     'compute_noise_ceiling': True,  # Compute noise ceiling
     'save_summary': True,  # Save summary statistics
     'figure_dpi': 300,  # Figure DPI for saving
+    'plot_rdms': True,  # Plot RDMs at specific timepoint
+    'rdm_timepoint_ms': 110.0,  # Timepoint in ms for RDM plotting
 }
 
 # Set matplotlib style with seaborn poster context
@@ -81,9 +83,18 @@ def load_rsa_results(rsa_file: str) -> Dict[str, Any]:
     filename = Path(rsa_file).name
 
     # New format has metadata in the file
-    if 'subject_id' in data and 'session' in data:
+    if 'subject_id' in data:
         subject_id = int(data['subject_id'])
-        session = int(data['session'])
+        # Handle both single session (legacy) and multiple sessions (new format)
+        if 'sessions' in data:
+            sessions = list(data['sessions'])
+            session = sessions[0] if len(sessions) == 1 else None  # For backward compatibility
+        elif 'session' in data:
+            session = int(data['session'])
+            sessions = [session]
+        else:
+            session = None
+            sessions = []
         model_name = str(data['model_name']) if 'model_name' in data else 'unknown'
         layer = str(data['layer']) if 'layer' in data else 'unknown'
     else:
@@ -92,6 +103,7 @@ def load_rsa_results(rsa_file: str) -> Dict[str, Any]:
         parts = filename.replace('.npz', '').split('_')
         subject_id = None
         session = None
+        sessions = []
         model_name = 'unknown'
         layer = 'unknown'
 
@@ -100,6 +112,7 @@ def load_rsa_results(rsa_file: str) -> Dict[str, Any]:
                 subject_id = int(part.replace('sub-', ''))
             elif part.startswith('ses-'):
                 session = int(part.replace('ses-', ''))
+                sessions = [session]
             elif part.startswith('model-'):
                 model_name = part.replace('model-', '')
             elif part.startswith('layer-'):
@@ -115,7 +128,8 @@ def load_rsa_results(rsa_file: str) -> Dict[str, Any]:
         'object_labels': data['object_labels'].tolist() if 'object_labels' in data else None,
         'distance_metric': str(data['distance_metric']),
         'subject_id': subject_id,
-        'session': session,
+        'session': session,  # For backward compatibility
+        'sessions': sessions,  # New format with multiple sessions
         'model_name': model_name,
         'layer': layer
     }
@@ -212,7 +226,14 @@ def plot_single_rsa_timeseries(rsa_data: Dict[str, Any], output_dir: Path,
     # Formatting
     ax.set_xlabel('Time [s]', fontsize=12)
     ax.set_ylabel('RSA Correlation [r]', fontsize=12)
-    ax.set_title(f'Subject {rsa_data["subject_id"]}, Session {rsa_data["session"]}\n'
+    # Create session info string
+    sessions_str = ""
+    if rsa_data.get("sessions") and len(rsa_data["sessions"]) > 1:
+        sessions_str = f', Sessions {rsa_data["sessions"]}'
+    elif rsa_data.get("session"):
+        sessions_str = f', Session {rsa_data["session"]}'
+
+    ax.set_title(f'Subject {rsa_data["subject_id"]}{sessions_str}\n'
                 f'Model: {rsa_data["model_name"]}, Layer: {rsa_data["layer"]}', fontsize=14)
     ax.legend()
     ax.grid(True, alpha=0.3)
@@ -225,7 +246,15 @@ def plot_single_rsa_timeseries(rsa_data: Dict[str, Any], output_dir: Path,
     plt.tight_layout()
     
     if save_fig:
-        filename = f"sub-{rsa_data['subject_id']:02d}_ses-{rsa_data['session']:02d}_" \
+        # Create filename based on available session info
+        if rsa_data.get("sessions") and len(rsa_data["sessions"]) > 1:
+            sessions_str = f"ses-{'_'.join(map(str, rsa_data['sessions']))}"
+        elif rsa_data.get("session"):
+            sessions_str = f"ses-{rsa_data['session']:02d}"
+        else:
+            sessions_str = "all-ses"
+
+        filename = f"sub-{rsa_data['subject_id']:02d}_{sessions_str}_" \
                   f"model-{rsa_data['model_name']}_layer-{rsa_data['layer']}_rsa_timeseries.png"
         fig.savefig(output_dir / filename, dpi=PLOT_CONFIG['figure_dpi'], bbox_inches='tight')
         logger.info(f"Saved plot: {filename}")
@@ -375,7 +404,7 @@ def create_summary_dataframe(rsa_data_list: List[Dict[str, Any]]) -> pd.DataFram
         
         summary_data.append({
             'subject_id': rsa_data['subject_id'],
-            'session': rsa_data['session'],
+            'sessions': rsa_data.get('sessions', [rsa_data.get('session')] if rsa_data.get('session') else []),
             'model_name': rsa_data['model_name'],
             'layer': rsa_data['layer'],
             'peak_rsa': peak_rsa,
@@ -387,6 +416,99 @@ def create_summary_dataframe(rsa_data_list: List[Dict[str, Any]]) -> pd.DataFram
         })
     
     return pd.DataFrame(summary_data)
+
+
+def plot_rdms_at_timepoint(rsa_data: Dict[str, Any], timepoint_ms: float = 110.0,
+                          output_dir: Path = None, save_fig: bool = True) -> plt.Figure:
+    """
+    Plot MEG and embedding RDMs at a specific timepoint.
+
+    Parameters
+    ----------
+    rsa_data : dict
+        RSA results dictionary
+    timepoint_ms : float, default 110.0
+        Timepoint in milliseconds to plot RDMs
+    output_dir : Path, optional
+        Output directory for plots
+    save_fig : bool, default True
+        Whether to save the figure
+
+    Returns
+    -------
+    plt.Figure
+        Created figure
+    """
+    times = rsa_data['times']
+    meg_rdm_timeseries = rsa_data['meg_rdm_timeseries']
+    embedding_rdm = rsa_data['embedding_rdm']
+    object_labels = rsa_data.get('object_labels', [])
+
+    # Find closest timepoint
+    timepoint_s = timepoint_ms / 1000.0
+    time_idx = np.argmin(np.abs(times - timepoint_s))
+    actual_time_ms = times[time_idx] * 1000
+
+    # Get RDM at timepoint
+    meg_rdm = meg_rdm_timeseries[time_idx]
+
+    # Create figure with subplots
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+
+    # Plot MEG RDM
+    im1 = ax1.imshow(meg_rdm, cmap='viridis', aspect='auto')
+    ax1.set_title(f'MEG RDM at {actual_time_ms:.1f} ms\nSubject {rsa_data["subject_id"]}',
+                  fontsize=14)
+    ax1.set_xlabel('Object Index')
+    ax1.set_ylabel('Object Index')
+
+    # Add colorbar for MEG RDM
+    cbar1 = plt.colorbar(im1, ax=ax1, shrink=0.8)
+    cbar1.set_label('Distance', rotation=270, labelpad=20)
+
+    # Add object labels if available
+    if object_labels and len(object_labels) == meg_rdm.shape[0]:
+        # Rotate labels for better readability
+        ax1.set_xticks(range(len(object_labels)))
+        ax1.set_yticks(range(len(object_labels)))
+        ax1.set_xticklabels(object_labels, rotation=45, ha='right')
+        ax1.set_yticklabels(object_labels)
+
+    # Plot embedding RDM
+    im2 = ax2.imshow(embedding_rdm, cmap='viridis', aspect='auto')
+    ax2.set_title(f'Embedding RDM\nModel: {rsa_data["model_name"]}, Layer: {rsa_data["layer"]}',
+                  fontsize=14)
+    ax2.set_xlabel('Object Index')
+    ax2.set_ylabel('Object Index')
+
+    # Add colorbar for embedding RDM
+    cbar2 = plt.colorbar(im2, ax=ax2, shrink=0.8)
+    cbar2.set_label('Distance', rotation=270, labelpad=20)
+
+    # Add object labels if available
+    if object_labels and len(object_labels) == embedding_rdm.shape[0]:
+        ax2.set_xticks(range(len(object_labels)))
+        ax2.set_yticks(range(len(object_labels)))
+        ax2.set_xticklabels(object_labels, rotation=45, ha='right')
+        ax2.set_yticklabels(object_labels)
+
+    plt.tight_layout()
+
+    if save_fig and output_dir:
+        # Create filename based on available session info
+        if rsa_data.get("sessions") and len(rsa_data["sessions"]) > 1:
+            sessions_str = f"ses-{'_'.join(map(str, rsa_data['sessions']))}"
+        elif rsa_data.get("session"):
+            sessions_str = f"ses-{rsa_data['session']:02d}"
+        else:
+            sessions_str = "all-ses"
+
+        filename = f"sub-{rsa_data['subject_id']:02d}_{sessions_str}_" \
+                  f"model-{rsa_data['model_name']}_layer-{rsa_data['layer']}_rdms_{actual_time_ms:.0f}ms.png"
+        fig.savefig(output_dir / filename, dpi=PLOT_CONFIG['figure_dpi'], bbox_inches='tight')
+        logger.info(f"Saved RDM plot: {filename}")
+
+    return fig
 
 
 def main():
@@ -423,12 +545,16 @@ Examples:
     
     # Plot options
     parser.add_argument('--output-dir', type=str, help='Output directory for plots')
-    parser.add_argument('--save-individual', action='store_true', 
+    parser.add_argument('--save-individual', action='store_true',
                        help='Save individual subject plots')
     parser.add_argument('--no-noise-ceiling', action='store_true',
                        help='Skip noise ceiling computation')
     parser.add_argument('--save-summary', action='store_true',
                        help='Save summary statistics CSV')
+    parser.add_argument('--plot-rdms', action='store_true',
+                       help='Plot RDMs at specific timepoint')
+    parser.add_argument('--rdm-timepoint', type=float, default=110.0,
+                       help='Timepoint in ms for RDM plotting (default: 110.0)')
     parser.add_argument('--verbose', '-v', action='store_true', help='Increase verbosity')
     
     args = parser.parse_args()
@@ -465,14 +591,19 @@ Examples:
     output_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"Saving plots to: {output_dir}")
     
-    # Find RSA result files with new structured format
-    pattern = str(rsa_dir / "**" / "*_rsa_results.npz")
-    rsa_files = glob(pattern, recursive=True)
+    # Find RSA result files with new per-subject structure
+    pattern = str(rsa_dir / "sub-*" / "*_rsa_results.npz")
+    rsa_files = glob(pattern)
 
     # Also check for old format files for backward compatibility
     old_pattern = str(rsa_dir / "*_rsa.npz")
     old_rsa_files = glob(old_pattern)
     rsa_files.extend(old_rsa_files)
+
+    # Also check for legacy session-based structure
+    legacy_pattern = str(rsa_dir / "sub-*" / "ses-*" / "*_rsa_results.npz")
+    legacy_rsa_files = glob(legacy_pattern)
+    rsa_files.extend(legacy_rsa_files)
     
     if not rsa_files:
         logger.error(f"No RSA files found in {rsa_dir}")
@@ -507,7 +638,7 @@ Examples:
         logger.info("Creating individual subject plots...")
         for rsa_data in rsa_data_list:
             plot_single_rsa_timeseries(rsa_data, output_dir, compute_nc=compute_nc)
-    
+
     # Create group plot if multiple subjects
     if len(rsa_data_list) > 1:
         logger.info("Creating group average plot...")
@@ -515,6 +646,13 @@ Examples:
     elif not args.save_individual:
         # If only one subject and not saving individual, plot it anyway
         plot_single_rsa_timeseries(rsa_data_list[0], output_dir, compute_nc=compute_nc)
+
+    # Create RDM plots if requested
+    if args.plot_rdms or PLOT_CONFIG.get('plot_rdms', False):
+        timepoint_ms = args.rdm_timepoint if hasattr(args, 'rdm_timepoint') else PLOT_CONFIG.get('rdm_timepoint_ms', 110.0)
+        logger.info(f"Creating RDM plots at {timepoint_ms} ms...")
+        for rsa_data in rsa_data_list:
+            plot_rdms_at_timepoint(rsa_data, timepoint_ms=timepoint_ms, output_dir=output_dir)
     
     # Create and save summary statistics
     if args.save_summary:

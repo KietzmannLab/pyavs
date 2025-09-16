@@ -240,14 +240,10 @@ def estimate_noise_covariance_mne(epochs_data: np.ndarray, times: np.ndarray,
     print(times)
     epochs = mne.EpochsArray(epochs_data, info, tmin=times[0])
 
-    # Estimate noise covariance using MNE
-    # Use baseline period for noise estimation if available (typically pre-stimulus)
-    baseline = None
-    
-
+    # Estimate noise covariance using MNE with shrinkage regularization
     noise_cov = mne.compute_covariance(
         epochs,
-        method=['empirical', 'shrunk'],  # Use shrinkage regularization
+        method=['empirical', 'shrunk'],
         return_estimators=False
     )
 
@@ -255,44 +251,74 @@ def estimate_noise_covariance_mne(epochs_data: np.ndarray, times: np.ndarray,
     return np.linalg.inv(noise_cov.data)
 
 
-def process_subject_session(subject_id: int, session: int, model_name: str, layer: str,
-                           data_path: str, output_dir: Path, use_object_labels: bool = True,
-                           distance_metric: str = 'mahalanobis') -> Dict[str, Any]:
-    """Process a single subject-session combination."""
+def process_subject_sessions(subject_id: int, sessions: List[int], model_name: str, layer: str,
+                            data_path: str, output_dir: Path, use_object_labels: bool = True,
+                            distance_metric: str = 'mahalanobis') -> Dict[str, Any]:
+    """Process all sessions for a subject and aggregate results."""
     try:
-        logger.info(f"Processing sub-{subject_id:02d}_ses-{session:02d}")
-        
-        # Load data
-        epochs_data, metadata, times = load_fixation_epochs(subject_id, session, data_path)
-        embeddings, file_names = load_embeddings(subject_id, session, data_path, model_name, layer)
-        
-        # Match epochs to embeddings
-        epoch_indices, embedding_indices = match_epochs_to_embeddings(metadata, file_names)
-        matched_epochs_data = epochs_data[epoch_indices]
-        matched_embeddings = embeddings[embedding_indices]
-        matched_metadata = metadata.iloc[epoch_indices]
-        
+        logger.info(f"Processing sub-{subject_id:02d} across {len(sessions)} sessions")
+
+        all_epochs_data = []
+        all_embeddings = []
+        all_metadata = []
+        times = None
+        total_epochs = 0
+
+        # Load and combine data across all sessions
+        for session in sessions:
+            logger.info(f"Loading data for sub-{subject_id:02d}_ses-{session:02d}")
+
+            # Load data for this session
+            epochs_data, metadata, session_times = load_fixation_epochs(subject_id, session, data_path)
+            embeddings, file_names = load_embeddings(subject_id, session, data_path, model_name, layer)
+
+            # Match epochs to embeddings
+            epoch_indices, embedding_indices = match_epochs_to_embeddings(metadata, file_names)
+            matched_epochs_data = epochs_data[epoch_indices]
+            matched_embeddings = embeddings[embedding_indices]
+            matched_metadata = metadata.iloc[epoch_indices]
+
+            # Store data for aggregation
+            all_epochs_data.append(matched_epochs_data)
+            all_embeddings.append(matched_embeddings)
+            all_metadata.append(matched_metadata)
+            total_epochs += len(epoch_indices)
+
+            # Use times from first session (assuming all sessions have same time structure)
+            if times is None:
+                times = session_times
+
+        # Concatenate all sessions
+        combined_epochs_data = np.concatenate(all_epochs_data, axis=0)
+        combined_embeddings = np.concatenate(all_embeddings, axis=0)
+        combined_metadata = pd.concat(all_metadata, axis=0, ignore_index=True)
+
+        logger.info(f"Combined data shape: epochs {combined_epochs_data.shape}, embeddings {combined_embeddings.shape}")
+
         # Group by objects if requested
         if use_object_labels:
             final_epochs_data, final_embeddings, object_labels = group_by_objects(
-                matched_epochs_data, matched_embeddings, matched_metadata, data_path=data_path)
-            
+                combined_epochs_data, combined_embeddings, combined_metadata, data_path=data_path)
         else:
-            final_epochs_data = matched_epochs_data
-            final_embeddings = matched_embeddings
+            final_epochs_data = combined_epochs_data
+            final_embeddings = combined_embeddings
             object_labels = []
+
         logger.info(f"Final data shape: epochs {final_epochs_data.shape}, embeddings {final_embeddings.shape}")
+
         # Estimate noise covariance for Mahalanobis distance using MNE
         noise_cov = estimate_noise_covariance_mne(final_epochs_data, times) if distance_metric == 'mahalanobis' else None
         logger.info(f"Estimated noise covariance shape: {noise_cov.shape if noise_cov is not None else 'N/A'}")
+
         # Compute RDMs and RSA
         meg_rdm_timeseries = compute_rdm_timeseries(final_epochs_data, distance_metric, noise_cov)
         embedding_rdm = compute_embedding_rdm(final_embeddings, distance_metric)
         rsa_timeseries = compute_rsa_correlation(meg_rdm_timeseries, embedding_rdm)
-        
+
         logger.info(f"Computed RSA timeseries with shape: {rsa_timeseries.shape}")
-        # Create structured output directory
-        subject_output_dir = output_dir / f"sub-{subject_id:02d}" / f"ses-{session:02d}"
+
+        # Create structured output directory (per subject only)
+        subject_output_dir = output_dir / f"sub-{subject_id:02d}"
         subject_output_dir.mkdir(parents=True, exist_ok=True)
 
         # Save results with improved structure and metadata
@@ -305,27 +331,27 @@ def process_subject_session(subject_id: int, session: int, model_name: str, laye
             meg_rdm_timeseries=meg_rdm_timeseries,
             embedding_rdm=embedding_rdm,
             # Data matching information
-            epoch_indices=epoch_indices,
-            embedding_indices=embedding_indices,
+            epoch_indices=np.arange(total_epochs),  # All epochs were used after aggregation
+            embedding_indices=np.arange(total_epochs),
             object_labels=object_labels,
             # Analysis parameters
             distance_metric=distance_metric,
             subject_id=subject_id,
-            session=session,
+            sessions=sessions,  # Store all sessions that were aggregated
             model_name=model_name,
             layer=layer,
             use_object_labels=use_object_labels,
-            n_epochs_used=len(epoch_indices),
+            n_epochs_used=total_epochs,
             n_objects=len(object_labels) if object_labels else 0
         )
+
+        logger.info(f"Saved aggregated results to {output_file}")
+        return {'status': 'success', 'subject_id': subject_id, 'sessions': sessions,
+                'n_epochs': total_epochs, 'n_objects': len(object_labels) if object_labels else 0}
         
-        logger.info(f"Saved results to {output_file}")
-        return {'status': 'success', 'subject_id': subject_id, 'session': session, 
-                'n_epochs': len(epoch_indices), 'n_objects': len(object_labels)}
-        
-    except IndentationError as e:
-        logger.error(f"Error processing sub-{subject_id:02d}_ses-{session:02d}: {e}")
-        return {'status': 'failed', 'subject_id': subject_id, 'session': session, 'error': str(e)}
+    except Exception as e:
+        logger.error(f"Error processing sub-{subject_id:02d} across sessions {sessions}: {e}")
+        return {'status': 'failed', 'subject_id': subject_id, 'sessions': sessions, 'error': str(e)}
 
 
 def main():
@@ -354,40 +380,37 @@ def main():
     data_path = args.data_path
     output_dir = Path(args.output_dir) if args.output_dir else Path(data_path) / 'rsa_results'
     output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Create subject-session combinations
-    combinations = [(s, sess) for s in args.subjects for sess in args.sessions]
-    
-    logger.info(f"Processing {len(combinations)} subject-session combinations")
+
+    logger.info(f"Processing {len(args.subjects)} subjects across sessions {args.sessions}")
     logger.info(f"Using {DISTANCE_METRIC} distance with object grouping: {USE_OBJECT_LABELS}")
-    
-    # Process data
+
+    # Process data per subject (aggregating across all sessions)
     if args.n_jobs == 1:
         results = []
-        for subject_id, session in combinations:
-            result = process_subject_session(
-                subject_id, session, args.model, args.layer, data_path, output_dir,
+        for subject_id in args.subjects:
+            result = process_subject_sessions(
+                subject_id, args.sessions, args.model, args.layer, data_path, output_dir,
                 USE_OBJECT_LABELS, DISTANCE_METRIC
             )
             results.append(result)
     else:
         results = Parallel(n_jobs=args.n_jobs)(
-            delayed(process_subject_session)(
-                subject_id, session, args.model, args.layer, data_path, output_dir,
+            delayed(process_subject_sessions)(
+                subject_id, args.sessions, args.model, args.layer, data_path, output_dir,
                 USE_OBJECT_LABELS, DISTANCE_METRIC
-            ) for subject_id, session in combinations
+            ) for subject_id in args.subjects
         )
     
     # Summary
     successful = [r for r in results if r['status'] == 'success']
     failed = [r for r in results if r['status'] == 'failed']
-    
-    print(f"\nCompleted: {len(successful)}/{len(results)} successful")
+
+    print(f"\nCompleted: {len(successful)}/{len(results)} subjects successful")
     print(f"Total epochs: {sum(r.get('n_epochs', 0) for r in successful)}")
-    
+
     if failed:
-        print(f"Failed: {[f'sub-{r["subject_id"]:02d}_ses-{r["session"]:02d}' for r in failed]}")
-    
+        print(f"Failed subjects: {[f'sub-{r["subject_id"]:02d}' for r in failed]}")
+
     return 0 if not failed else 1
 
 
