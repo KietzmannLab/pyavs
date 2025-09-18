@@ -61,23 +61,16 @@ def load_fixation_epochs(subject_id: int, session: int, data_path: str) -> Tuple
     if 'mag' in epochs.keys() and 'grad' in epochs.keys():
         epochs_data = np.concatenate([epochs['mag'], epochs['grad']], axis=1)
         print(f"Merged mag and grad channels: {epochs_data.shape}")
-        # Channel types for MNE info
-        n_mag = epochs['mag'].shape[1]
-        n_grad = epochs['grad'].shape[1]
-        ch_types = ['mag'] * n_mag + ['grad'] * n_grad
     elif 'mag' in epochs.keys():
         epochs_data = epochs['mag']
         print(f"Using mag channels only: {epochs_data.shape}")
-        ch_types = ['mag'] * epochs_data.shape[1]
     elif 'grad' in epochs.keys():
         epochs_data = epochs['grad']
         print(f"Using grad channels only: {epochs_data.shape}")
-        ch_types = ['grad'] * epochs_data.shape[1]
     else:
         raise ValueError("No valid channel types found in epochs.")
 
     # Apply per-channel median scaling using MNE
-    n_channels = epochs_data.shape[1]
 
     # mne_epochs = mne.EpochsArray(epochs_data, info, tmin=times[0], verbose=False)
 
@@ -381,7 +374,8 @@ def create_mne_epochs_from_results(r_values: np.ndarray, times: np.ndarray,
 
 
 def process_subject_sessions(subject_id: int, sessions: List[int], model_name: str, layer: str,
-                            data_path: str, output_dir: Path, n_jobs: int = -1) -> Dict[str, Any]:
+                            data_path: str, output_dir: Path, n_jobs: int = -1,
+                            time_window: Tuple[float, float] = None, decimate: int = 1) -> Dict[str, Any]:
     """Process all sessions for a subject and run encoding analysis."""
     try:
         logger.info(f"Processing sub-{subject_id:02d} across {len(sessions)} sessions")
@@ -422,6 +416,32 @@ def process_subject_sessions(subject_id: int, sessions: List[int], model_name: s
         combined_metadata = pd.concat(all_metadata, axis=0, ignore_index=True)
 
         logger.info(f"Combined data shape: epochs {combined_epochs_data.shape}, embeddings {combined_embeddings.shape}")
+
+        # Apply time subsampling if requested
+        if time_window is not None or decimate > 1:
+            print("Applying time subsampling...")
+
+            # Apply time window selection
+            if time_window is not None:
+                tmin, tmax = time_window  # in milliseconds
+                tmin_s, tmax_s = tmin/1000, tmax/1000  # convert to seconds
+                time_mask = (times >= tmin_s) & (times <= tmax_s)
+
+                if not np.any(time_mask):
+                    raise ValueError(f"No timepoints found in window {time_window} ms")
+
+                times = times[time_mask]
+                combined_epochs_data = combined_epochs_data[:, :, time_mask]
+                print(f"Time window [{tmin}, {tmax}] ms: {np.sum(time_mask)} timepoints selected")
+
+            # Apply decimation
+            if decimate > 1:
+                decimation_indices = np.arange(0, len(times), decimate)
+                times = times[decimation_indices]
+                combined_epochs_data = combined_epochs_data[:, :, decimation_indices]
+                print(f"Decimation factor {decimate}: {len(decimation_indices)} timepoints remaining")
+
+            print(f"Final time range: {times[0]*1000:.0f} to {times[-1]*1000:.0f} ms")
 
         # Clip outliers in MEG data
         final_epochs_data, final_embeddings, final_metadata = clip_outliers_and_filter(
@@ -496,7 +516,11 @@ def main():
     parser.add_argument('--model', default='resnet50_ecoset_crop', help='Model name')
     parser.add_argument('--layer', default='layer2', help='Model layer')
 
-    # Encoding parameters (RidgeCV will automatically select optimal alpha)
+    # Time subsampling options
+    parser.add_argument('--time-window', nargs=2, type=float, metavar=('TMIN', 'TMAX'),
+                       help='Time window in milliseconds (e.g., -200 500)')
+    parser.add_argument('--decimate', type=int, default=1,
+                       help='Decimation factor: keep every Nth timepoint (default: 1)')
 
     # Optional parameters
     parser.add_argument('--output-dir', help='Output directory')
@@ -525,13 +549,20 @@ def main():
     results = []
 
     print(f"\nProcessing {len(args.subjects)} subjects...")
+    if args.time_window:
+        print(f"Time window: {args.time_window[0]} to {args.time_window[1]} ms")
+    if args.decimate > 1:
+        print(f"Decimation: every {args.decimate} timepoints")
+
     subject_pbar = tqdm(args.subjects, desc="Subjects", unit="subject", ncols=80)
 
     for subject_id in subject_pbar:
         subject_pbar.set_description(f"Subject {subject_id:02d}")
 
         result = process_subject_sessions(
-            subject_id, args.sessions, args.model, args.layer, data_path, output_dir, args.n_jobs
+            subject_id, args.sessions, args.model, args.layer, data_path, output_dir, args.n_jobs,
+            time_window=tuple(args.time_window) if args.time_window else None,
+            decimate=args.decimate
         )
         results.append(result)
 
