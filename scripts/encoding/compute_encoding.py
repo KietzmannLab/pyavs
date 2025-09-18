@@ -22,8 +22,10 @@ import h5py
 from sklearn.linear_model import RidgeCV
 from sklearn.model_selection import GroupShuffleSplit
 from sklearn.preprocessing import RobustScaler
+from sklearn.decomposition import PCA
 from sklearn.metrics import r2_score
 from scipy.stats import pearsonr
+from tqdm import tqdm
 
 try:
     import mne
@@ -40,7 +42,7 @@ logger = get_logger('scripts.encoding.compute_encoding')
 
 
 def load_fixation_epochs(subject_id: int, session: int, data_path: str) -> Tuple[np.ndarray, pd.DataFrame, np.ndarray]:
-    """Load fixation epochs."""
+    """Load fixation epochs with per-channel, per-session median scaling."""
     epochs, _, meta_h5 = load_epochs_h5(
         subject_id=subject_id,
         session=session,
@@ -57,18 +59,43 @@ def load_fixation_epochs(subject_id: int, session: int, data_path: str) -> Tuple
 
     # Merge mag and grad channels if available
     if 'mag' in epochs.keys() and 'grad' in epochs.keys():
-        epochs = np.concatenate([epochs['mag'], epochs['grad']], axis=1)
-        print(f"Merged mag and grad channels: {epochs.shape}")
+        epochs_data = np.concatenate([epochs['mag'], epochs['grad']], axis=1)
+        print(f"Merged mag and grad channels: {epochs_data.shape}")
+        # Channel types for MNE info
+        n_mag = epochs['mag'].shape[1]
+        n_grad = epochs['grad'].shape[1]
+        ch_types = ['mag'] * n_mag + ['grad'] * n_grad
     elif 'mag' in epochs.keys():
-        epochs = epochs['mag']
-        print(f"Using mag channels only: {epochs.shape}")
+        epochs_data = epochs['mag']
+        print(f"Using mag channels only: {epochs_data.shape}")
+        ch_types = ['mag'] * epochs_data.shape[1]
     elif 'grad' in epochs.keys():
-        epochs = epochs['grad']
-        print(f"Using grad channels only: {epochs.shape}")
+        epochs_data = epochs['grad']
+        print(f"Using grad channels only: {epochs_data.shape}")
+        ch_types = ['grad'] * epochs_data.shape[1]
     else:
         raise ValueError("No valid channel types found in epochs.")
 
-    return epochs, metadata, times
+    # Apply per-channel median scaling using MNE
+    n_channels = epochs_data.shape[1]
+
+    # mne_epochs = mne.EpochsArray(epochs_data, info, tmin=times[0], verbose=False)
+
+    # Apply median scaling per channel
+    scaler = mne.decoding.Scaler(scalings='median', with_std=True)
+    mne_epochs_scaled = scaler.fit_transform(epochs_data)
+
+    # Extract scaled data - ensure we get numpy array
+    if hasattr(mne_epochs_scaled, 'get_data'):
+        epochs_scaled = mne_epochs_scaled.get_data()
+    else:
+        epochs_scaled = mne_epochs_scaled
+
+    print(f"Applied median scaling per channel for sub-{subject_id:02d}_ses-{session:02d}")
+    print(f"  Original data range: [{np.min(epochs_data):.2e}, {np.max(epochs_data):.2e}]")
+    print(f"  Scaled data range: [{np.min(epochs_scaled):.2e}, {np.max(epochs_scaled):.2e}]")
+
+    return epochs_scaled, metadata, times
 
 
 def load_embeddings(subject_id: int, session: int, data_path: str,
@@ -131,8 +158,6 @@ def clip_outliers_and_filter(epochs_data: np.ndarray, embeddings: np.ndarray,
                             metadata: pd.DataFrame, outlier_percentiles: Tuple[float, float] = (1, 99)) -> Tuple[np.ndarray, np.ndarray, pd.DataFrame]:
     """Clip outliers in MEG data and return filtered data."""
 
-    n_epochs_original = epochs_data.shape[0]
-
     # Compute outlier thresholds across all channels and timepoints
     lower_percentile, upper_percentile = outlier_percentiles
     lower_bound = np.percentile(epochs_data, lower_percentile)
@@ -183,22 +208,78 @@ def create_scene_aware_split(metadata: pd.DataFrame, test_size: float = 0.2) -> 
     return train_idx, test_idx
 
 
+def fit_single_channel_timepoint(ch: int, t: int, X_train_scaled: np.ndarray, X_test_scaled: np.ndarray,
+                                epochs_train: np.ndarray, epochs_test: np.ndarray,
+                                alphas: np.ndarray) -> Dict[str, Any]:
+    """Fit encoding model for a single channel-timepoint combination."""
+
+    # Extract MEG data for this channel and timepoint
+    y_train = epochs_train[:, ch, t]
+    y_test = epochs_test[:, ch, t]
+
+    # Standardize MEG data using RobustScaler (fit on train, apply to test)
+    y_scaler = RobustScaler()
+    y_train_scaled = y_scaler.fit_transform(y_train.reshape(-1, 1)).ravel()
+    y_test_scaled = y_scaler.transform(y_test.reshape(-1, 1)).ravel()
+
+    # Fit RidgeCV with internal cross-validation for alpha selection
+    model = RidgeCV(alphas=alphas, cv=3)  # 3-fold CV for alpha selection
+    model.fit(X_train_scaled, y_train_scaled)
+
+    # Predict on test set
+    y_pred = model.predict(X_test_scaled)
+
+    # Compute correlation and R²
+    if len(np.unique(y_test_scaled)) > 1 and len(np.unique(y_pred)) > 1:
+        r_score, _ = pearsonr(y_test_scaled, y_pred)
+        r2_score_val = r2_score(y_test_scaled, y_pred)
+    else:
+        r_score, r2_score_val = 0.0, 0.0
+
+    return {
+        'channel': ch,
+        'timepoint': t,
+        'r_score': r_score if not np.isnan(r_score) else 0.0,
+        'r2_score': r2_score_val if not np.isnan(r2_score_val) else 0.0,
+        'best_alpha': model.alpha_,
+        'n_train': len(y_train),
+        'n_test': len(y_test)
+    }
+
+
+class TqdmParallel(Parallel):
+    """Joblib Parallel with tqdm progress bar."""
+    def __init__(self, *args, **kwargs):
+        self._tqdm = kwargs.pop('tqdm', None)
+        super().__init__(*args, **kwargs)
+
+    def __call__(self, *args, **kwargs):
+        with tqdm(disable=self._tqdm is None, **self._tqdm) as self._pbar:
+            return super().__call__(*args, **kwargs)
+
+    def print_progress(self):
+        if self._tqdm is not None:
+            self._pbar.update()
+
+
 def fit_encoding_model_ridgecv(epochs_data: np.ndarray, embeddings: np.ndarray,
-                              metadata: pd.DataFrame, alphas: np.ndarray = None) -> Tuple[np.ndarray, pd.DataFrame]:
-    """Fit encoding model using RidgeCV with a single train-test split."""
+                              metadata: pd.DataFrame, alphas: np.ndarray = None,
+                              n_jobs: int = -1) -> Tuple[np.ndarray, pd.DataFrame]:
+    """Fit encoding model using RidgeCV with parallel processing over channels and timepoints."""
 
     n_epochs, n_channels, n_times = epochs_data.shape
     n_features = embeddings.shape[1]
 
     # Default alpha range for RidgeCV
     if alphas is None:
-        alphas = np.logspace(-3, 3, 20)  # 20 alpha values from 0.001 to 1000
+        alphas = np.logspace(-3, 3, 25)  # 20 alpha values from 0.001 to 1000
 
     logger.info(f"Fitting RidgeCV encoding model: {n_epochs} epochs, {n_channels} channels, "
                f"{n_times} timepoints, {n_features} features")
     logger.info(f"Using {len(alphas)} alpha values from {alphas.min():.3f} to {alphas.max():.3f}")
 
     # Create scene-aware train-test split
+    print("Creating train-test split...")
     train_idx, test_idx = create_scene_aware_split(metadata, test_size=0.2)
 
     # Split data
@@ -206,68 +287,76 @@ def fit_encoding_model_ridgecv(epochs_data: np.ndarray, embeddings: np.ndarray,
     epochs_train, epochs_test = epochs_data[train_idx], epochs_data[test_idx]
 
     # Standardize embeddings using RobustScaler (fit on train, apply to test)
+    print("Standardizing features...")
     X_scaler = RobustScaler()
     X_train_scaled = X_scaler.fit_transform(X_train)
     X_test_scaled = X_scaler.transform(X_test)
 
-    # Initialize results arrays
+    # Apply PCA for dimensionality reduction (90% variance)
+    print("Applying PCA for dimensionality reduction...")
+    pca = PCA(n_components=0.90, random_state=42)  # Keep 90% of variance
+    X_train_pca = pca.fit_transform(X_train_scaled)
+    X_test_pca = pca.transform(X_test_scaled)
+
+    n_components = pca.n_components_
+    explained_var = pca.explained_variance_ratio_.sum()
+    print(f"PCA: Reduced {n_features} features to {n_components} components")
+    print(f"Explained variance: {explained_var:.3f} ({explained_var*100:.1f}%)")
+
+    # Create all channel-timepoint combinations
+    channel_timepoint_combinations = [(ch, t) for ch in range(n_channels) for t in range(n_times)]
+    total_combinations = len(channel_timepoint_combinations)
+
+    print(f"Running encoding analysis on {total_combinations:,} channel-timepoint combinations...")
+    print(f"Using {n_jobs if n_jobs > 0 else 'all available'} CPU cores")
+
+    # Parallel processing over all channel-timepoint combinations with progress bar
+    results_list = TqdmParallel(
+        n_jobs=n_jobs,
+        tqdm={
+            'desc': 'Fitting encoding models',
+            'total': total_combinations,
+            'unit': 'combinations',
+            'ncols': 100,
+            'bar_format': '{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]'
+        }
+    )(
+        delayed(fit_single_channel_timepoint)(
+            ch, t, X_train_pca, X_test_pca, epochs_train, epochs_test, alphas
+        ) for ch, t in channel_timepoint_combinations
+    )
+
+    # Reconstruct results arrays
+    print("Reconstructing results...")
     r_values = np.zeros((n_channels, n_times))
     r2_values = np.zeros((n_channels, n_times))
     best_alphas = np.zeros((n_channels, n_times))
 
-    # Results DataFrame for detailed analysis
-    results_list = []
-
-    # Process each timepoint and channel
-    for t in range(n_times):
-        if t % 50 == 0:
-            logger.info(f"Processing timepoint {t+1}/{n_times}")
-
-        for ch in range(n_channels):
-            # Extract MEG data for this channel and timepoint
-            y_train = epochs_train[:, ch, t]
-            y_test = epochs_test[:, ch, t]
-
-            # Standardize MEG data using RobustScaler (fit on train, apply to test)
-            y_scaler = RobustScaler()
-            y_train_scaled = y_scaler.fit_transform(y_train.reshape(-1, 1)).ravel()
-            y_test_scaled = y_scaler.transform(y_test.reshape(-1, 1)).ravel()
-
-            # Fit RidgeCV with internal cross-validation for alpha selection
-            model = RidgeCV(alphas=alphas, cv=5)  # 5-fold CV for alpha selection
-            model.fit(X_train_scaled, y_train_scaled)
-
-            # Predict on test set
-            y_pred = model.predict(X_test_scaled)
-
-            # Compute correlation and R²
-            if len(np.unique(y_test_scaled)) > 1 and len(np.unique(y_pred)) > 1:
-                r_score, _ = pearsonr(y_test_scaled, y_pred)
-                r2_score_val = r2_score(y_test_scaled, y_pred)
-            else:
-                r_score, r2_score_val = 0.0, 0.0
-
-            # Store results
-            r_values[ch, t] = r_score if not np.isnan(r_score) else 0.0
-            r2_values[ch, t] = r2_score_val if not np.isnan(r2_score_val) else 0.0
-            best_alphas[ch, t] = model.alpha_
-
-            # Store detailed results
-            results_list.append({
-                'channel': ch,
-                'timepoint': t,
-                'r_score': r_score if not np.isnan(r_score) else 0.0,
-                'r2_score': r2_score_val if not np.isnan(r2_score_val) else 0.0,
-                'best_alpha': model.alpha_,
-                'n_train': len(y_train),
-                'n_test': len(y_test)
-            })
+    for result in results_list:
+        ch, t = result['channel'], result['timepoint']
+        r_values[ch, t] = result['r_score']
+        r2_values[ch, t] = result['r2_score']
+        best_alphas[ch, t] = result['best_alpha']
 
     # Create results DataFrame
     results_df = pd.DataFrame(results_list)
 
-    logger.info(f"Encoding analysis complete. Max R = {np.max(r_values):.3f}")
-    logger.info(f"Alpha range used: {best_alphas.min():.3f} to {best_alphas.max():.3f}")
+    # Summary statistics
+    max_r = np.max(r_values)
+    mean_r = np.mean(r_values)
+    median_r = np.median(r_values)
+    positive_r_count = np.sum(r_values > 0)
+    positive_r_percentage = (positive_r_count / total_combinations) * 100
+
+    print(f"\nEncoding analysis complete!")
+    print(f"Results summary:")
+    print(f"   - Max R: {max_r:.3f}")
+    print(f"   - Mean R: {mean_r:.3f}")
+    print(f"   - Median R: {median_r:.3f}")
+    print(f"   - Positive correlations: {positive_r_count:,} ({positive_r_percentage:.1f}%)")
+    print(f"   - Alpha range used: {best_alphas.min():.3f} to {best_alphas.max():.3f}")
+
+    logger.info(f"Encoding analysis complete. Max R = {max_r:.3f}, Mean R = {mean_r:.3f}")
 
     return r_values, results_df
 
@@ -292,7 +381,7 @@ def create_mne_epochs_from_results(r_values: np.ndarray, times: np.ndarray,
 
 
 def process_subject_sessions(subject_id: int, sessions: List[int], model_name: str, layer: str,
-                            data_path: str, output_dir: Path) -> Dict[str, Any]:
+                            data_path: str, output_dir: Path, n_jobs: int = -1) -> Dict[str, Any]:
     """Process all sessions for a subject and run encoding analysis."""
     try:
         logger.info(f"Processing sub-{subject_id:02d} across {len(sessions)} sessions")
@@ -343,7 +432,7 @@ def process_subject_sessions(subject_id: int, sessions: List[int], model_name: s
 
         # Run encoding analysis
         r_values, results_df = fit_encoding_model_ridgecv(
-            final_epochs_data, final_embeddings, final_metadata
+            final_epochs_data, final_embeddings, final_metadata, n_jobs=n_jobs
         )
 
         # Create MNE epochs object for visualization
@@ -390,7 +479,7 @@ def process_subject_sessions(subject_id: int, sessions: List[int], model_name: s
             'mean_r': float(np.mean(r_values))
         }
 
-    except Exception as e:
+    except IndentationError as e:
         logger.error(f"Error processing sub-{subject_id:02d} across sessions {sessions}: {e}")
         return {'status': 'failed', 'subject_id': subject_id, 'sessions': sessions, 'error': str(e)}
 
@@ -411,7 +500,7 @@ def main():
 
     # Optional parameters
     parser.add_argument('--output-dir', help='Output directory')
-    parser.add_argument('--n-jobs', type=int, default=1, help='Number of parallel jobs')
+    parser.add_argument('--n-jobs', type=int, default=-1, help='Number of parallel jobs')
 
     args = parser.parse_args()
 
@@ -420,38 +509,79 @@ def main():
     output_dir = Path(args.output_dir) if args.output_dir else Path(data_path) / 'encoding_results'
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    print(f"\nPyAVS Encoding Analysis Pipeline")
+    print(f"Configuration:")
+    print(f"   - Subjects: {args.subjects}")
+    print(f"   - Sessions: {args.sessions}")
+    print(f"   - Model: {args.model}")
+    print(f"   - Layer: {args.layer}")
+    print(f"   - Parallel jobs: {args.n_jobs if args.n_jobs > 0 else 'all available'}")
+    print(f"   - Output directory: {output_dir}")
+
     logger.info(f"Processing {len(args.subjects)} subjects across sessions {args.sessions}")
     logger.info("Using RidgeCV with automatic alpha selection")
 
-    # Process data per subject (aggregating across all sessions)
-    if args.n_jobs == 1:
-        results = []
-        for subject_id in args.subjects:
-            result = process_subject_sessions(
-                subject_id, args.sessions, args.model, args.layer, data_path, output_dir
-            )
-            results.append(result)
-    else:
-        results = Parallel(n_jobs=args.n_jobs)(
-            delayed(process_subject_sessions)(
-                subject_id, args.sessions, args.model, args.layer, data_path, output_dir
-            ) for subject_id in args.subjects
+    # Process data per subject sequentially (parallelization happens within each subject)
+    results = []
+
+    print(f"\nProcessing {len(args.subjects)} subjects...")
+    subject_pbar = tqdm(args.subjects, desc="Subjects", unit="subject", ncols=80)
+
+    for subject_id in subject_pbar:
+        subject_pbar.set_description(f"Subject {subject_id:02d}")
+
+        result = process_subject_sessions(
+            subject_id, args.sessions, args.model, args.layer, data_path, output_dir, args.n_jobs
         )
+        results.append(result)
+
+        # Update progress bar with result info
+        if result['status'] == 'success':
+            max_r = result.get('max_r', 0)
+            subject_pbar.set_postfix_str(f"Success - Max R: {max_r:.3f}")
+        else:
+            subject_pbar.set_postfix_str(f"Failed")
+
+    subject_pbar.close()
 
     # Summary
     successful = [r for r in results if r['status'] == 'success']
     failed = [r for r in results if r['status'] == 'failed']
 
-    print(f"\nCompleted: {len(successful)}/{len(results)} subjects successful")
+    print(f"\nPipeline Complete!")
+    print(f"Summary:")
+    print(f"   - Successful subjects: {len(successful)}/{len(results)}")
+
     if successful:
         max_r_values = [r['max_r'] for r in successful]
         mean_r_values = [r['mean_r'] for r in successful]
-        print(f"Max R across subjects: {np.max(max_r_values):.3f}")
-        print(f"Mean R across subjects: {np.mean(mean_r_values):.3f}")
+        total_epochs = sum(r.get('n_epochs', 0) for r in successful)
+
+        print(f"   - Overall best R: {np.max(max_r_values):.3f}")
+        print(f"   - Average max R: {np.mean(max_r_values):.3f} ± {np.std(max_r_values):.3f}")
+        print(f"   - Average mean R: {np.mean(mean_r_values):.3f} ± {np.std(mean_r_values):.3f}")
+        print(f"   - Total epochs processed: {total_epochs:,}")
+
+        # Per-subject breakdown
+        print(f"\nPer-subject results:")
+        for r in successful:
+            sub_id = r['subject_id']
+            max_r = r['max_r']
+            mean_r = r['mean_r']
+            n_epochs = r.get('n_epochs', 0)
+            print(f"   - Sub-{sub_id:02d}: Max R = {max_r:.3f}, Mean R = {mean_r:.3f}, Epochs = {n_epochs:,}")
 
     if failed:
         failed_subjects = [f"sub-{r['subject_id']:02d}" for r in failed]
-        print(f"Failed subjects: {failed_subjects}")
+        print(f"\nFailed subjects: {failed_subjects}")
+        for r in failed:
+            sub_id = r['subject_id']
+            error = r.get('error', 'Unknown error')
+            print(f"   - Sub-{sub_id:02d}: {error}")
+    else:
+        print(f"\nAll subjects completed successfully!")
+
+    print(f"\nResults saved to: {output_dir}")
 
     return 0 if not failed else 1
 
