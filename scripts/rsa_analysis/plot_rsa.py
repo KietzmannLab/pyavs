@@ -43,9 +43,6 @@ from rsatoolbox.inference.noise_ceiling import boot_noise_ceiling
 # =============================
 # Set these parameters instead of using command line arguments
 PLOT_CONFIG = {
-    'data_path': '/path/to/your/data',  # Override with actual data path
-    'subjects': [1, 2, 3],  # Subject IDs to plot
-    'sessions': [1],  # Session numbers
     'model_name': 'resnet50_ecoset_crop',  # Model name filter
     'layer': 'avgpool',  # Layer name filter
     'save_individual': True,  # Save individual subject plots
@@ -58,9 +55,8 @@ PLOT_CONFIG = {
 }
 
 # Set matplotlib style with seaborn poster context
-plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
 sns.set_context("poster")
-sns.set_palette("husl")
+
 
 
 def load_rsa_results(rsa_file: str) -> Dict[str, Any]:
@@ -360,8 +356,9 @@ def plot_group_rsa_timeseries(rsa_data_list: List[Dict[str, Any]], output_dir: P
     
     if save_fig:
         filename = f"group_model-{model_name}_layer-{layer}_rsa_timeseries.png"
+        
         fig.savefig(output_dir / filename, dpi=PLOT_CONFIG['figure_dpi'], bbox_inches='tight')
-        logger.info(f"Saved group plot: {filename}")
+        logger.info(f"Saved group plot: {output_dir / filename}")
     
     return fig
 
@@ -603,9 +600,12 @@ def compute_intersubject_noise_ceiling(rsa_data_list: List[Dict[str, Any]], n_bo
         rdms_t = all_rdm_timeseries[:, t, :, :]  # (n_subjects, n_conditions, n_conditions)
 
         try:
+            # set nans to zero
+            rdms_t = np.nan_to_num(rdms_t, nan=0.0)
             # Create RDMs object for rsatoolbox
             rdms = RDMs(rdms_t)
-
+            # set nans to zero
+            
             # Compute noise ceiling using bootstrap
             nc_lower, nc_upper = boot_noise_ceiling(rdms,method='spearman')
             lower_bound[t] = nc_lower
@@ -666,70 +666,78 @@ def plot_grand_average_rsa(rsa_data_list: List[Dict[str, Any]], output_dir: Path
     """
     if not rsa_data_list:
         raise ValueError("No RSA data provided")
-
-    fig, ax = plt.subplots(figsize=(14, 8))
+    # context poster
+    sns.set_context("poster")
+    fig, ax = plt.subplots(figsize=(10, 8))
 
     # Get common time points
     times = rsa_data_list[0]['times']
     n_subjects = len(rsa_data_list)
-
+    
+   
     # Collect all RSA time series
     all_rsa_timeseries = []
+
+    # apply a boxcar smoothing (causal) of window size 5
     for i, rsa_data in enumerate(rsa_data_list):
         rsa_timeseries = rsa_data['rsa_timeseries']
-        all_rsa_timeseries.append(rsa_timeseries)
-
-        # Plot individual subject as faint grey line
-        ax.plot(times, rsa_timeseries, color='lightgrey', alpha=0.6, linewidth=1,
-               label='Individual subjects' if i == 0 else '')
-
+        window_size = 10
+        boxcar = np.ones(window_size) / window_size
+        smoothed_rsa = np.convolve(rsa_timeseries, boxcar, mode='same')
+        all_rsa_timeseries.append(smoothed_rsa)
+        #replace 
+        rsa_data_list[i]['rsa_timeseries']= smoothed_rsa
+        # # Plot individual subject as faint grey line
+        # ax.plot(times, smoothed_rsa, color='lightgrey', alpha=0.6, linewidth=1,
+        #        label='Individual subjects' if i == 0 else '')
     # Compute grand average
-    all_rsa_timeseries = np.array(all_rsa_timeseries)
-    grand_average = np.nanmean(all_rsa_timeseries, axis=0)
-    sem_rsa = np.nanstd(all_rsa_timeseries, axis=0) / np.sqrt(n_subjects)
+    # make this a df to plot with seaborn
 
-    # Plot grand average with error bars
-    ax.plot(times, grand_average, 'b-', linewidth=3,
-           label=f'Grand Average (n={n_subjects})')
-    ax.fill_between(times, grand_average - sem_rsa, grand_average + sem_rsa,
-                   alpha=0.3, color='blue')
+    df_rsa = pd.DataFrame(all_rsa_timeseries).T
+    df_rsa['time'] = times
+    df_melted = df_rsa.melt(id_vars='time', var_name='subject', value_name='rsa')
+    
+    sns.lineplot(data=df_melted, x='time', y='rsa', errorbar=("ci",95), ax=ax, 
+                 color='steelblue', label=f'grand average (n = {len(rsa_data_list)})')
 
     # Compute and plot inter-subject noise ceiling
     logger.info("Computing inter-subject noise ceiling...")
     nc_lower, nc_upper = compute_intersubject_noise_ceiling(rsa_data_list)
 
     ax.fill_between(times, nc_lower, nc_upper, alpha=0.2, color='gray',
-                   label='Inter-subject Noise Ceiling')
-    ax.plot(times, nc_lower, 'k--', alpha=0.7, linewidth=1)
-    ax.plot(times, nc_upper, 'k--', alpha=0.7, linewidth=1)
+                   label='inter-subject noise ceiling')
+
 
     # Add reference lines
-    ax.axhline(y=0, color='k', linestyle='-', alpha=0.3)
-    ax.axvline(x=0, color='k', linestyle='-', alpha=0.3, label='Fixation onset')
+    #ax.axhline(y=0, color='k', linestyle='-', alpha=0.3)
+    ax.axvline(x=0, color='k', linestyle='--', alpha=0.3, label='fixation onset')
 
     # Formatting
-    ax.set_xlabel('Time [s]', fontsize=14)
-    ax.set_ylabel('RSA Correlation [r]', fontsize=14)
+    ax.set_xlabel('time [s]')
+    ax.set_ylabel("RDM similarity [spearman's rho]")
+    ax.set_xlim(-0.2, 0.5)
 
     # Get model and layer info from first result
     model_name = rsa_data_list[0]['model_name']
     layer = rsa_data_list[0]['layer']
-    ax.set_title(f'Grand Average RSA Time Series (n={n_subjects})\nModel: {model_name}, Layer: {layer}',
-                fontsize=16)
+   
 
-    ax.legend(fontsize=12)
-    ax.grid(True, alpha=0.3)
+   
 
     # Set reasonable y limits
-    y_min = min(0, np.nanmin(grand_average) - 0.05)
-    y_max = max(0.5, np.nanmax(grand_average) + 0.05)
+    y_min = max(0.1, np.nanmin(df_melted['rsa']) - 0.05)
+    y_max = max(0.6, np.nanmax(df_melted['rsa']) + 0.2)
     ax.set_ylim(y_min, y_max)
-
+    # despine for cleaner look
+    sns.despine()
+    # no grid
+    ax.grid(False)
+    ax.legend()
     plt.tight_layout()
 
     if save_fig:
-        filename = f"grand_average_model-{model_name}_layer-{layer}_rsa_timeseries.png"
-        fig.savefig(output_dir / filename, dpi=PLOT_CONFIG['figure_dpi'], bbox_inches='tight')
+        filename = f"grand_average_model-{model_name}_layer-{layer}_rsa_timeseries.pdf"
+        fig.savefig(output_dir / filename, dpi=PLOT_CONFIG['figure_dpi'])
         logger.info(f"Saved grand average plot: {filename}")
 
     return fig

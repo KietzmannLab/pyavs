@@ -482,11 +482,11 @@ def main():
     
     # Model parameters
     parser.add_argument('--model', default='resnet50_ecoset_crop', help='Model name')
-    parser.add_argument('--layer', default='avgpool', help='Model layer')
+    parser.add_argument('--layer', default='layer2', help='Model layer')
     
     # Optional parameters
     parser.add_argument('--output-dir', help='Output directory')
-    parser.add_argument('--n-jobs', type=int, default=10, help='Number of parallel jobs')
+    parser.add_argument('--n-jobs', type=int, default=-2, help='Number of parallel jobs')
     
     args = parser.parse_args()
     
