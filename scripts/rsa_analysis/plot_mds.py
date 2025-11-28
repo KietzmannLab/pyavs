@@ -43,13 +43,13 @@ sns.set_style("whitegrid")
 
 # MDS PLOTTING PARAMETERS
 MDS_CONFIG = {
-    'default_timepoint_ms': 120.0,  # Default timepoint in milliseconds
+    'default_timepoint_ms': 140.0,  # Default timepoint in milliseconds
     'categorize_level': 'main_category',  # 'main_category' or 'subcategory'
     'figure_dpi': 300,
     'random_state': 42,  # For reproducible MDS
     'n_init': 10,  # Number of MDS initializations
     'max_iter': 300,  # Maximum MDS iterations
-    'icon_size': 0.08,  # Icon zoom factor (size relative to axes)
+    'icon_size': 0.4,  # Icon zoom factor (size relative to axes)
     'use_icons': True,  # Whether to use icons instead of scatter points
     'scatter_size_fallback': 200,  # Size for scatter points when no icon available
 }
@@ -318,19 +318,19 @@ def plot_mds_at_timepoint(rsa_data: Dict[str, Any], timepoint_ms: float = 120.0,
                 add_icon_to_plot(ax, coords_2d[i, 0], coords_2d[i, 1],
                                icon_img, zoom=MDS_CONFIG['icon_size'])
                 objects_with_icons.append(label)
-            else:
-                # Fall back to scatter point
-                category = categories[i]
-                color = color_map[category]
-                ax.scatter(coords_2d[i, 0], coords_2d[i, 1],
-                          c=[color], s=MDS_CONFIG['scatter_size_fallback'],
-                          alpha=0.7, edgecolors='black', linewidth=1.5)
-                objects_without_icons.append(label)
+            # else:
+            #     # Fall back to scatter point
+            #     category = categories[i]
+            #     color = color_map[category]
+            #     ax.scatter(coords_2d[i, 0], coords_2d[i, 1],
+            #               c=[color], s=MDS_CONFIG['scatter_size_fallback'],
+            #               alpha=0.7, edgecolors='black', linewidth=1.5)
+            #     objects_without_icons.append(label)
 
-                # Add text label for objects without icons
-                ax.annotate(label, (coords_2d[i, 0], coords_2d[i, 1]),
-                           xytext=(5, 5), textcoords='offset points',
-                           fontsize=9, alpha=0.8, fontweight='bold')
+            #     # Add text label for objects without icons
+            #     ax.annotate(label, (coords_2d[i, 0], coords_2d[i, 1]),
+            #                xytext=(5, 5), textcoords='offset points',
+            #                fontsize=9, alpha=0.8, fontweight='bold')
 
         logger.info(f"Displayed {len(objects_with_icons)} icons, {len(objects_without_icons)} scatter points")
 
@@ -352,22 +352,25 @@ def plot_mds_at_timepoint(rsa_data: Dict[str, Any], timepoint_ms: float = 120.0,
                            fontsize=8, alpha=0.7)
 
     # Formatting
-    ax.set_xlabel('MDS Dimension 1', fontsize=14)
-    ax.set_ylabel('MDS Dimension 2', fontsize=14)
+    ax.set_xlabel('MDS Dimension 1')
+    ax.set_ylabel('MDS Dimension 2')
 
-    sessions_str = f", Sessions {rsa_data['sessions']}" if len(rsa_data['sessions']) > 1 else \
-                   f", Session {rsa_data['sessions'][0]}" if rsa_data['sessions'] else ""
-    ax.set_title(f'MEG RDM MDS Projection at {actual_time_ms:.0f} ms\n'
-                f'Subject {rsa_data["subject_id"]}{sessions_str}',
-                fontsize=16, pad=20)
+    # sessions_str = f", Sessions {rsa_data['sessions']}" if len(rsa_data['sessions']) > 1 else \
+    #                f", Session {rsa_data['sessions'][0]}" if rsa_data['sessions'] else ""
+    # ax.set_title(f'MEG RDM MDS Projection at {actual_time_ms:.0f} ms\n'
+    #             f'Subject {rsa_data["subject_id"]}{sessions_str}',
+    #             fontsize=16, pad=20)
 
     # Legend
-    ax.legend(loc='best', frameon=True, fontsize=12, title='Category')
-    ax.grid(True, alpha=0.3)
+    #ax.legend(loc='best', frameon=True, fontsize=12, title='Category')
+    #ax.grid(True, alpha=0.3)
     sns.despine()
+    #set lims
+    ax.set_xlim(np.min(coords_2d[:,0])*0.5, np.max(coords_2d[:,0])*0.5)
+    ax.set_ylim(np.min(coords_2d[:,1])*0.5, np.max(coords_2d[:,1])*0.5)
 
     # Equal aspect ratio for better visualization
-    ax.set_aspect('equal', adjustable='box')
+    #ax.set_aspect('equal', adjustable='box')
 
     plt.tight_layout()
 
@@ -663,16 +666,16 @@ def main():
     )
 
     # Input specification
-    parser.add_argument('--rsa-dir', type=str, help='Directory containing RSA results')
-    parser.add_argument('--data-path', type=str, help='Base data path')
+    parser.add_argument('--rsa-dir', type=str, help='Directory containing RSA results', default="/share/klab/psulewski/psulewski/pyavs/rsa")
+    parser.add_argument('--data-path', type=str, help='Base data path', default="/share/klab/datasets/avs/")
 
     # Subject selection
-    parser.add_argument('--subjects', type=int, nargs='+', help='Subject IDs to plot')
-    parser.add_argument('--single-subject', type=int, help='Single subject ID')
+    parser.add_argument('--subjects', type=int, nargs='+', help='Subject IDs to plot', default=[1,2,3,4,5])
+    parser.add_argument('--single-subject', type=int, help='Single subject ID', default=None)
 
     # Model filtering
-    parser.add_argument('--model', dest='model_name', help='Filter by model name')
-    parser.add_argument('--layer', help='Filter by layer name')
+    parser.add_argument('--model', dest='model_name', help='Filter by model name', default="resnet50_ecoset_crop")
+    parser.add_argument('--layer', help='Filter by layer name', default="avgpool")
 
     # Timepoint specification
     parser.add_argument('--timepoint', '--timepoint-ms', dest='timepoint_ms', type=float,
@@ -682,7 +685,7 @@ def main():
                        help='Multiple timepoints in ms for subplot visualization')
 
     # Plot options
-    parser.add_argument('--output-dir', type=str, help='Output directory for plots')
+    parser.add_argument('--output-dir', type=str, help='Output directory for plots', default="/share/klab/psulewski/psulewski/pyavs/rsa")
     parser.add_argument('--categorize-level', choices=['main_category', 'subcategory'],
                        default=MDS_CONFIG['categorize_level'],
                        help='Object categorization level')
