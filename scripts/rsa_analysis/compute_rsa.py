@@ -320,6 +320,62 @@ def compute_rsa_correlation(meg_rdm_timeseries: np.ndarray, embedding_rdm: np.nd
     return rsa_timeseries
 
 
+def compute_within_subject_consistency(meg_rdm_sessions: List[np.ndarray]) -> np.ndarray:
+    """
+    Compute within-subject consistency from pairwise session correlations.
+
+    Args:
+        meg_rdm_sessions: List of MEG RDM timeseries, one per session
+                         Each array has shape (n_times, n_objects, n_objects)
+
+    Returns:
+        consistency_timeseries: Array of shape (n_times,) with mean pairwise correlations
+    """
+    if len(meg_rdm_sessions) < 2:
+        logger.warning("Need at least 2 sessions for consistency computation")
+        return None
+
+    n_times = meg_rdm_sessions[0].shape[0]
+    n_sessions = len(meg_rdm_sessions)
+    consistency_timeseries = np.full(n_times, np.nan)
+
+    # Get upper triangular indices (same for all sessions)
+    triu_indices = np.triu_indices(meg_rdm_sessions[0].shape[1], k=1)
+
+    logger.info(f"Computing within-subject consistency from {n_sessions} sessions")
+
+    # For each timepoint, compute pairwise session correlations
+    for t in range(n_times):
+        pairwise_corrs = []
+
+        # Compare all pairs of sessions
+        for i in range(n_sessions):
+            for j in range(i + 1, n_sessions):
+                rdm_i_vec = meg_rdm_sessions[i][t][triu_indices]
+                rdm_j_vec = meg_rdm_sessions[j][t][triu_indices]
+
+                # Find valid entries in both RDMs
+                valid_mask = ~np.isnan(rdm_i_vec) & ~np.isnan(rdm_j_vec)
+
+                if np.sum(valid_mask) < 2:
+                    continue  # Not enough valid pairs
+
+                try:
+                    corr, _ = spearmanr(rdm_i_vec[valid_mask], rdm_j_vec[valid_mask])
+                    if not np.isnan(corr):
+                        pairwise_corrs.append(corr)
+                except Exception as e:
+                    logger.warning(f"Session correlation failed at timepoint {t} for sessions {i}-{j}: {e}")
+                    continue
+
+        # Take mean of all pairwise correlations
+        if len(pairwise_corrs) > 0:
+            consistency_timeseries[t] = np.mean(pairwise_corrs)
+
+    logger.info(f"Computed consistency timeseries with {np.sum(~np.isnan(consistency_timeseries))} valid timepoints")
+    return consistency_timeseries
+
+
 def estimate_noise_covariance_mne(epochs_data: np.ndarray, times: np.ndarray,
                                   sfreq: float = 1000.0) -> np.ndarray:
     """Estimate noise covariance using MNE-python best practices, handling NaN values."""
@@ -358,16 +414,18 @@ def estimate_noise_covariance_mne(epochs_data: np.ndarray, times: np.ndarray,
         return np.eye(n_channels)
 
 
-def process_subject_sessions(subject_id: int, sessions: List[int], model_name: str, layer: str,
+def process_subject_sessions(subject_id: int, sessions: List[int],
+                            model_specs: List[Tuple[str, str]],  # List of (model_name, layer) tuples
                             data_path: str, output_dir: Path, use_object_labels: bool = True,
                             distance_metric: str = 'mahalanobis') -> Dict[str, Any]:
-    """Process all sessions for a subject and aggregate results."""
+    """Process all sessions for a subject and aggregate results with multiple network models."""
     try:
-        logger.info(f"Processing sub-{subject_id:02d} across {len(sessions)} sessions")
+        logger.info(f"Processing sub-{subject_id:02d} across {len(sessions)} sessions with {len(model_specs)} models")
 
         all_epochs_data = []
-        all_embeddings = []
+        all_embeddings_dict = {f"{model}_{layer}": [] for model, layer in model_specs}  # Store embeddings for each model
         all_metadata = []
+        session_meg_rdms = []  # Store per-session RDMs for consistency computation
         times = None
         total_epochs = 0
 
@@ -375,19 +433,32 @@ def process_subject_sessions(subject_id: int, sessions: List[int], model_name: s
         for session in sessions:
             logger.info(f"Loading data for sub-{subject_id:02d}_ses-{session:02d}")
 
-            # Load data for this session
+            # Load MEG data for this session
             epochs_data, metadata, session_times = load_fixation_epochs(subject_id, session, data_path)
-            embeddings, file_names = load_embeddings(subject_id, session, data_path, model_name, layer)
+
+            # Load embeddings for each model/layer
+            session_embeddings_dict = {}
+            for model_name, layer in model_specs:
+                embeddings, file_names = load_embeddings(subject_id, session, data_path, model_name, layer)
+                model_key = f"{model_name}_{layer}"
+                session_embeddings_dict[model_key] = (embeddings, file_names)
+
+            # Use the first model's file_names for matching (they should all be the same)
+            first_model_key = f"{model_specs[0][0]}_{model_specs[0][1]}"
+            _, file_names = session_embeddings_dict[first_model_key]
 
             # Match epochs to embeddings
             epoch_indices, embedding_indices = match_epochs_to_embeddings(metadata, file_names)
             matched_epochs_data = epochs_data[epoch_indices]
-            matched_embeddings = embeddings[embedding_indices]
             matched_metadata = metadata.iloc[epoch_indices]
+
+            # Store matched embeddings for each model
+            for model_key, (embeddings, _) in session_embeddings_dict.items():
+                matched_embeddings = embeddings[embedding_indices]
+                all_embeddings_dict[model_key].append(matched_embeddings)
 
             # Store data for aggregation
             all_epochs_data.append(matched_epochs_data)
-            all_embeddings.append(matched_embeddings)
             all_metadata.append(matched_metadata)
             total_epochs += len(epoch_indices)
 
@@ -397,75 +468,172 @@ def process_subject_sessions(subject_id: int, sessions: List[int], model_name: s
 
         # Concatenate all sessions
         combined_epochs_data = np.concatenate(all_epochs_data, axis=0)
-        combined_embeddings = np.concatenate(all_embeddings, axis=0)
+        combined_embeddings_dict = {
+            model_key: np.concatenate(emb_list, axis=0)
+            for model_key, emb_list in all_embeddings_dict.items()
+        }
         combined_metadata = pd.concat(all_metadata, axis=0, ignore_index=True)
 
-        logger.info(f"Combined data shape: epochs {combined_epochs_data.shape}, embeddings {combined_embeddings.shape}")
+        logger.info(f"Combined data shape: epochs {combined_epochs_data.shape}")
+        for model_key, emb in combined_embeddings_dict.items():
+            logger.info(f"  {model_key} embeddings: {emb.shape}")
 
-        # Group by objects if requested
+        # Process each session individually for consistency computation
+        if len(sessions) >= 2:
+            logger.info("Computing per-session RDMs for consistency estimation")
+            first_model_key = f"{model_specs[0][0]}_{model_specs[0][1]}"
+            for session_idx, (session_epochs, session_metadata) in enumerate(zip(all_epochs_data, all_metadata)):
+                # Group this session's data by objects (use first model's embeddings for grouping)
+                if use_object_labels:
+                    session_epochs_grouped, _, _ = group_by_objects(
+                        session_epochs, all_embeddings_dict[first_model_key][session_idx],
+                        session_metadata, data_path=data_path)
+                else:
+                    session_epochs_grouped = session_epochs
+
+                # Compute session-level MEG RDM
+                session_noise_cov = estimate_noise_covariance_mne(session_epochs_grouped, times) if distance_metric == 'mahalanobis' else None
+                session_meg_rdm = compute_rdm_timeseries(session_epochs_grouped, distance_metric, session_noise_cov)
+                session_meg_rdms.append(session_meg_rdm)
+                logger.info(f"Session {sessions[session_idx]}: RDM shape {session_meg_rdm.shape}")
+
+        # Group by objects if requested (for aggregated analysis)
+        # Process embeddings for each model
+        final_embeddings_dict = {}
         if use_object_labels:
-            final_epochs_data, final_embeddings, object_labels = group_by_objects(
-                combined_epochs_data, combined_embeddings, combined_metadata, data_path=data_path)
+            # Use first model for grouping epochs (they all use the same fixations)
+            first_model_key = f"{model_specs[0][0]}_{model_specs[0][1]}"
+            final_epochs_data, _, object_labels = group_by_objects(
+                combined_epochs_data, combined_embeddings_dict[first_model_key],
+                combined_metadata, data_path=data_path)
+
+            # Group embeddings for all models
+            for model_key, embeddings in combined_embeddings_dict.items():
+                _, grouped_embeddings, _ = group_by_objects(
+                    combined_epochs_data, embeddings, combined_metadata, data_path=data_path)
+                final_embeddings_dict[model_key] = grouped_embeddings
         else:
             # Even when not grouping by objects, we should still filter out -2 and -1 object IDs
-            # Check if object_label column exists in metadata
             object_column = 'object_label'
             if object_column in combined_metadata.columns:
                 valid_mask = ~combined_metadata[object_column].isin([-2, -1])
                 final_epochs_data = combined_epochs_data[valid_mask]
-                final_embeddings = combined_embeddings[valid_mask]
+                for model_key, embeddings in combined_embeddings_dict.items():
+                    final_embeddings_dict[model_key] = embeddings[valid_mask]
                 logger.info(f"Filtered out {(~valid_mask).sum()} fixations with object IDs -2 or -1 (no grouping)")
                 logger.info(f"Remaining fixations: {valid_mask.sum()}")
             else:
                 final_epochs_data = combined_epochs_data
-                final_embeddings = combined_embeddings
+                final_embeddings_dict = combined_embeddings_dict.copy()
                 logger.warning("No object_label column found - cannot filter out unwanted fixations")
             object_labels = []
 
-        logger.info(f"Final data shape: epochs {final_epochs_data.shape}, embeddings {final_embeddings.shape}")
+        logger.info(f"Final data shape: epochs {final_epochs_data.shape}")
+        for model_key, emb in final_embeddings_dict.items():
+            logger.info(f"  {model_key} final embeddings: {emb.shape}")
 
         # Estimate noise covariance for Mahalanobis distance using MNE
         noise_cov = estimate_noise_covariance_mne(final_epochs_data, times) if distance_metric == 'mahalanobis' else None
         logger.info(f"Estimated noise covariance shape: {noise_cov.shape if noise_cov is not None else 'N/A'}")
 
-        # Compute RDMs and RSA
+        # Compute MEG RDM (once, since it's the same for all models)
         meg_rdm_timeseries = compute_rdm_timeseries(final_epochs_data, distance_metric, noise_cov)
-        embedding_rdm = compute_embedding_rdm(final_embeddings, distance_metric)
-        rsa_timeseries = compute_rsa_correlation(meg_rdm_timeseries, embedding_rdm)
 
-        logger.info(f"Computed RSA timeseries with shape: {rsa_timeseries.shape}")
+        # Compute embedding RDMs and RSA for each model
+        embedding_rdms = {}
+        rsa_timeseries_dict = {}
+        for model_key, final_embeddings in final_embeddings_dict.items():
+            embedding_rdm = compute_embedding_rdm(final_embeddings, distance_metric)
+            rsa_timeseries = compute_rsa_correlation(meg_rdm_timeseries, embedding_rdm)
+            embedding_rdms[model_key] = embedding_rdm
+            rsa_timeseries_dict[model_key] = rsa_timeseries
+            logger.info(f"Computed RSA for {model_key}: {rsa_timeseries.shape}")
+
+        # Compute within-subject consistency if we have multiple sessions
+        consistency_timeseries = None
+        if len(session_meg_rdms) >= 2:
+            consistency_timeseries = compute_within_subject_consistency(session_meg_rdms)
+            logger.info(f"Computed within-subject consistency timeseries")
 
         # Create structured output directory (per subject only)
         subject_output_dir = output_dir / f"sub-{subject_id:02d}"
         subject_output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Save results with improved structure and metadata
-        output_file = subject_output_dir / f"model-{model_name}_layer-{layer}_rsa_results.npz"
-        np.savez_compressed(
-            output_file,
-            # Core RSA results
-            rsa_timeseries=rsa_timeseries,
-            times=times,
-            meg_rdm_timeseries=meg_rdm_timeseries,
-            embedding_rdm=embedding_rdm,
-            # Data matching information
-            epoch_indices=np.arange(total_epochs),  # All epochs were used after aggregation
-            embedding_indices=np.arange(total_epochs),
-            object_labels=object_labels,
-            # Analysis parameters
-            distance_metric=distance_metric,
-            subject_id=subject_id,
-            sessions=sessions,  # Store all sessions that were aggregated
-            model_name=model_name,
-            layer=layer,
-            use_object_labels=use_object_labels,
-            n_epochs_used=total_epochs,
-            n_objects=len(object_labels) if object_labels else 0
-        )
+        # If only one model, save with traditional filename
+        if len(model_specs) == 1:
+            model_name, layer = model_specs[0]
+            model_key = f"{model_name}_{layer}"
+            output_file = subject_output_dir / f"model-{model_name}_layer-{layer}_rsa_results.npz"
 
-        logger.info(f"Saved aggregated results to {output_file}")
+            # Build save dictionary
+            save_dict = {
+                # Core RSA results
+                'rsa_timeseries': rsa_timeseries_dict[model_key],
+                'times': times,
+                'meg_rdm_timeseries': meg_rdm_timeseries,
+                'embedding_rdm': embedding_rdms[model_key],
+                # Data matching information
+                'epoch_indices': np.arange(total_epochs),
+                'embedding_indices': np.arange(total_epochs),
+                'object_labels': object_labels,
+                # Analysis parameters
+                'distance_metric': distance_metric,
+                'subject_id': subject_id,
+                'sessions': sessions,
+                'model_name': model_name,
+                'layer': layer,
+                'use_object_labels': use_object_labels,
+                'n_epochs_used': total_epochs,
+                'n_objects': len(object_labels) if object_labels else 0
+            }
+
+            # Add consistency if computed
+            if consistency_timeseries is not None:
+                save_dict['consistency_timeseries'] = consistency_timeseries
+                logger.info("Saving within-subject consistency timeseries")
+
+            np.savez_compressed(output_file, **save_dict)
+            logger.info(f"Saved aggregated results to {output_file}")
+
+        # If multiple models, save with multi-model filename
+        else:
+            model_names_str = "_".join([f"{m}-{l}" for m, l in model_specs])
+            output_file = subject_output_dir / f"multi_model_rsa_results.npz"
+
+            # Build save dictionary with arrays for each model
+            save_dict = {
+                # Core results (shared across models)
+                'times': times,
+                'meg_rdm_timeseries': meg_rdm_timeseries,
+                'object_labels': object_labels,
+                # Analysis parameters
+                'distance_metric': distance_metric,
+                'subject_id': subject_id,
+                'sessions': sessions,
+                'use_object_labels': use_object_labels,
+                'n_epochs_used': total_epochs,
+                'n_objects': len(object_labels) if object_labels else 0,
+                # Model specifications
+                'model_specs': np.array(model_specs, dtype=object),
+            }
+
+            # Add per-model results
+            for idx, (model_name, layer) in enumerate(model_specs):
+                model_key = f"{model_name}_{layer}"
+                save_dict[f'rsa_timeseries_{model_key}'] = rsa_timeseries_dict[model_key]
+                save_dict[f'embedding_rdm_{model_key}'] = embedding_rdms[model_key]
+
+            # Add consistency if computed
+            if consistency_timeseries is not None:
+                save_dict['consistency_timeseries'] = consistency_timeseries
+                logger.info("Saving within-subject consistency timeseries")
+
+            np.savez_compressed(output_file, **save_dict)
+            logger.info(f"Saved multi-model results to {output_file}")
+
         return {'status': 'success', 'subject_id': subject_id, 'sessions': sessions,
-                'n_epochs': total_epochs, 'n_objects': len(object_labels) if object_labels else 0}
+                'n_epochs': total_epochs, 'n_objects': len(object_labels) if object_labels else 0,
+                'n_models': len(model_specs)}
         
     except Exception as e:
         logger.error(f"Error processing sub-{subject_id:02d} across sessions {sessions}: {e}")
@@ -473,33 +641,45 @@ def process_subject_sessions(subject_id: int, sessions: List[int], model_name: s
 
 
 def main():
-    parser = argparse.ArgumentParser(description="MEG RSA Pipeline")
-    
+    parser = argparse.ArgumentParser(description="MEG RSA Pipeline with Multi-Model Support")
+
     # Required arguments
     parser.add_argument('--data-path', required=True, help='Data directory path')
     parser.add_argument('--subjects', type=int, nargs='+', required=True, help='Subject IDs')
     parser.add_argument('--sessions', type=int, nargs='+', default=[1], help='Session numbers')
-    
-    # Model parameters
-    parser.add_argument('--model', default='resnet50_ecoset_crop', help='Model name')
-    parser.add_argument('--layer', default='layer2', help='Model layer')
-    
+
+    # Model parameters (can specify multiple models)
+    parser.add_argument('--models', type=str, nargs='+',
+                       default=['resnet50_ecoset_crop'],
+                       help='Model names (can specify multiple)')
+    parser.add_argument('--layers', type=str, nargs='+',
+                       default=['layer2'],
+                       help='Model layers (must match number of models)')
+
     # Optional parameters
     parser.add_argument('--output-dir', help='Output directory')
     parser.add_argument('--n-jobs', type=int, default=-2, help='Number of parallel jobs')
-    
+
     args = parser.parse_args()
-    
+
+    # Validate model/layer pairing
+    if len(args.models) != len(args.layers):
+        raise ValueError(f"Number of models ({len(args.models)}) must match number of layers ({len(args.layers)})")
+
+    # Create model specifications
+    model_specs = list(zip(args.models, args.layers))
+
     # Set analysis parameters here
     USE_OBJECT_LABELS = True
-    DISTANCE_METRIC = 'correlation'  # Default to Mahalanobis
-    
+    DISTANCE_METRIC = 'correlation'
+
     # Setup paths
     data_path = args.data_path
     output_dir = Path(args.output_dir) if args.output_dir else Path(data_path) / 'rsa_results'
     output_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info(f"Processing {len(args.subjects)} subjects across sessions {args.sessions}")
+    logger.info(f"Using {len(model_specs)} models: {model_specs}")
     logger.info(f"Using {DISTANCE_METRIC} distance with object grouping: {USE_OBJECT_LABELS}")
 
     # Process data per subject (aggregating across all sessions)
@@ -507,24 +687,25 @@ def main():
         results = []
         for subject_id in args.subjects:
             result = process_subject_sessions(
-                subject_id, args.sessions, args.model, args.layer, data_path, output_dir,
+                subject_id, args.sessions, model_specs, data_path, output_dir,
                 USE_OBJECT_LABELS, DISTANCE_METRIC
             )
             results.append(result)
     else:
         results = Parallel(n_jobs=args.n_jobs)(
             delayed(process_subject_sessions)(
-                subject_id, args.sessions, args.model, args.layer, data_path, output_dir,
+                subject_id, args.sessions, model_specs, data_path, output_dir,
                 USE_OBJECT_LABELS, DISTANCE_METRIC
             ) for subject_id in args.subjects
         )
-    
+
     # Summary
     successful = [r for r in results if r['status'] == 'success']
     failed = [r for r in results if r['status'] == 'failed']
 
     print(f"\nCompleted: {len(successful)}/{len(results)} subjects successful")
     print(f"Total epochs: {sum(r.get('n_epochs', 0) for r in successful)}")
+    print(f"Models processed: {len(model_specs)}")
 
     if failed:
         print(f"Failed subjects: {[f'sub-{r["subject_id"]:02d}' for r in failed]}")

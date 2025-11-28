@@ -26,6 +26,7 @@ from sklearn.decomposition import PCA
 from sklearn.metrics import r2_score
 from scipy.stats import pearsonr
 from tqdm import tqdm
+# debug here
 
 try:
     import mne
@@ -148,6 +149,7 @@ def match_epochs_to_embeddings(metadata: pd.DataFrame, file_names: List[str]) ->
 
 
 def clip_outliers_and_filter(epochs_data: np.ndarray, embeddings: np.ndarray,
+                            metadata: pd.DataFrame, outlier_percentiles: Tuple[float, float] = (0.05, 99.5)) -> Tuple[np.ndarray, np.ndarray, pd.DataFrame]:
                             metadata: pd.DataFrame, outlier_percentiles: Tuple[float, float] = (0.05, 99.5)) -> Tuple[np.ndarray, np.ndarray, pd.DataFrame]:
     """Clip outliers in MEG data and return filtered data."""
 
@@ -287,7 +289,7 @@ def fit_encoding_model_ridgecv(epochs_data: np.ndarray, embeddings: np.ndarray,
 
     # Apply PCA for dimensionality reduction (90% variance)
     print("Applying PCA for dimensionality reduction...")
-    pca = PCA(n_components=0.75, random_state=42) 
+    pca = PCA(n_components=0.90, random_state=42)  # Keep 90% of variance
     X_train_pca = pca.fit_transform(X_train_scaled)
     X_test_pca = pca.transform(X_test_scaled)
 
@@ -528,7 +530,7 @@ def main():
     # Time subsampling options
     parser.add_argument('--time-window', nargs=2, type=float, metavar=('TMIN', 'TMAX'), default=(-200, 500),
                        help='Time window in milliseconds (e.g., -200 500)')
-    parser.add_argument('--decimate', type=int, default=1,
+    parser.add_argument('--decimate', type=int, default=4,
                        help='Decimation factor: keep every Nth timepoint (default: 1)')
 
     # Optional parameters

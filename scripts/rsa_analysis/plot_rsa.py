@@ -115,7 +115,7 @@ def load_rsa_results(rsa_file: str) -> Dict[str, Any]:
             elif part.startswith('layer-'):
                 layer = part.replace('layer-', '')
     #logger.info("Shape of rsa_timeseries: %s", data['meg_rdm_timeseries'].shape, "Subject ID:", subject_id, "Session(s):", sessions, "Model:", model_name, "Layer:", layer)
-    return {
+    result = {
         'rsa_timeseries': data['rsa_timeseries'],
         'times': data['times'],
         'meg_rdm_timeseries': data['meg_rdm_timeseries'],
@@ -130,6 +130,12 @@ def load_rsa_results(rsa_file: str) -> Dict[str, Any]:
         'model_name': model_name,
         'layer': layer
     }
+
+    # Add consistency timeseries if available
+    if 'consistency_timeseries' in data:
+        result['consistency_timeseries'] = data['consistency_timeseries']
+
+    return result
 
 
 def compute_noise_ceiling_timeseries(meg_rdm_timeseries: np.ndarray, 
@@ -176,40 +182,49 @@ def compute_noise_ceiling_timeseries(meg_rdm_timeseries: np.ndarray,
     return lower_bound, upper_bound
 
 
-def plot_single_rsa_timeseries(rsa_data: Dict[str, Any], output_dir: Path, 
+def plot_single_rsa_timeseries(rsa_data: Dict[str, Any], output_dir: Path,
                               compute_nc: bool = True, save_fig: bool = True) -> plt.Figure:
     """
-    Plot RSA time series for a single subject/session.
-    
+    Plot RSA time series for a single subject/session with consistency.
+
     Parameters
     ----------
     rsa_data : dict
-        RSA results dictionary
+        RSA results dictionary (must contain 'consistency_timeseries' if available)
     output_dir : Path
         Output directory for plots
     compute_nc : bool, default True
         Whether to compute and plot noise ceiling
     save_fig : bool, default True
         Whether to save the figure
-        
+
     Returns
     -------
     plt.Figure
         Created figure
     """
     fig, ax = plt.subplots(figsize=(12, 6))
-    
+
     times = rsa_data['times']
     rsa_timeseries = rsa_data['rsa_timeseries']
-    
+
     # Plot RSA time series
     ax.plot(times, rsa_timeseries, 'b-', linewidth=2, label='MEG-ANN RSA')
-    
+
+    # Plot within-subject consistency if available
+    if 'consistency_timeseries' in rsa_data and rsa_data['consistency_timeseries'] is not None:
+        consistency = rsa_data['consistency_timeseries']
+        # Create a shaded region from 0 to consistency value
+        ax.fill_between(times, 0, consistency, alpha=0.2, color='green',
+                       label='Within-subject consistency')
+        ax.plot(times, consistency, 'g--', alpha=0.7, linewidth=1.5)
+        logger.info("Plotted within-subject consistency")
+
     # Compute and plot noise ceiling if requested
     if compute_nc:
         try:
             nc_lower, nc_upper = compute_noise_ceiling_timeseries(rsa_data['meg_rdm_timeseries'])
-            ax.fill_between(times, nc_lower, nc_upper, alpha=0.3, color='gray', 
+            ax.fill_between(times, nc_lower, nc_upper, alpha=0.3, color='gray',
                           label='Noise Ceiling')
             ax.plot(times, nc_lower, 'k--', alpha=0.7, linewidth=1)
             ax.plot(times, nc_upper, 'k--', alpha=0.7, linewidth=1)
@@ -675,8 +690,9 @@ def plot_grand_average_rsa(rsa_data_list: List[Dict[str, Any]], output_dir: Path
     n_subjects = len(rsa_data_list)
     
    
-    # Collect all RSA time series
+    # Collect all RSA time series and consistency
     all_rsa_timeseries = []
+    all_consistency_timeseries = []
 
     # apply a boxcar smoothing (causal) of window size 5
     for i, rsa_data in enumerate(rsa_data_list):
@@ -685,11 +701,32 @@ def plot_grand_average_rsa(rsa_data_list: List[Dict[str, Any]], output_dir: Path
         boxcar = np.ones(window_size) / window_size
         smoothed_rsa = np.convolve(rsa_timeseries, boxcar, mode='same')
         all_rsa_timeseries.append(smoothed_rsa)
-        #replace 
+        #replace
         rsa_data_list[i]['rsa_timeseries']= smoothed_rsa
+
+        # Collect consistency if available
+        if 'consistency_timeseries' in rsa_data and rsa_data['consistency_timeseries'] is not None:
+            smoothed_consistency = np.convolve(rsa_data['consistency_timeseries'], boxcar, mode='same')
+            all_consistency_timeseries.append(smoothed_consistency)
         # # Plot individual subject as faint grey line
         # ax.plot(times, smoothed_rsa, color='lightgrey', alpha=0.6, linewidth=1,
         #        label='Individual subjects' if i == 0 else '')
+
+    # Plot group-level consistency if available
+    if len(all_consistency_timeseries) >= 2:
+        all_consistency = np.array(all_consistency_timeseries)
+        mean_consistency = np.nanmean(all_consistency, axis=0)
+        sem_consistency = np.nanstd(all_consistency, axis=0) / np.sqrt(len(all_consistency))
+
+        # Plot consistency as shaded region
+        ax.fill_between(times, 0, mean_consistency, alpha=0.2, color='green',
+                       label='Within-subject consistency')
+        ax.plot(times, mean_consistency, 'g--', alpha=0.7, linewidth=1.5)
+        # Add SEM shading
+        ax.fill_between(times, mean_consistency - sem_consistency,
+                       mean_consistency + sem_consistency, alpha=0.1, color='green')
+        logger.info("Plotted group-level within-subject consistency")
+
     # Compute grand average
     # make this a df to plot with seaborn
 
@@ -740,6 +777,242 @@ def plot_grand_average_rsa(rsa_data_list: List[Dict[str, Any]], output_dir: Path
         filename = f"grand_average_model-{model_name}_layer-{layer}_rsa_timeseries.pdf"
         fig.savefig(output_dir / filename, dpi=PLOT_CONFIG['figure_dpi'])
         logger.info(f"Saved grand average plot: {filename}")
+
+    return fig
+
+
+def load_multi_network_results(rsa_file: str) -> Dict[str, Any]:
+    """
+    Load multi-network RSA results from NPZ file.
+
+    Parameters
+    ----------
+    rsa_file : str
+        Path to multi-network RSA results file
+
+    Returns
+    -------
+    dict
+        Multi-network RSA results with all models
+    """
+    if not os.path.exists(rsa_file):
+        raise FileNotFoundError(f"RSA file not found: {rsa_file}")
+
+    data = np.load(rsa_file, allow_pickle=True)
+
+    # Check if this is a multi-network file
+    if 'model_specs' not in data:
+        # Single model file - convert to multi-network format
+        return {
+            'times': data['times'],
+            'meg_rdm_timeseries': data['meg_rdm_timeseries'],
+            'subject_id': int(data['subject_id']),
+            'sessions': list(data['sessions']) if 'sessions' in data else [],
+            'model_specs': [(str(data['model_name']), str(data['layer']))],
+            'rsa_timeseries': {f"{data['model_name']}_{data['layer']}": data['rsa_timeseries']},
+            'embedding_rdm': {f"{data['model_name']}_{data['layer']}": data['embedding_rdm']},
+            'consistency_timeseries': data['consistency_timeseries'] if 'consistency_timeseries' in data else None
+        }
+
+    # Multi-network file
+    model_specs = [tuple(spec) for spec in data['model_specs']]
+    rsa_timeseries_dict = {}
+    embedding_rdm_dict = {}
+
+    for model_name, layer in model_specs:
+        model_key = f"{model_name}_{layer}"
+        rsa_timeseries_dict[model_key] = data[f'rsa_timeseries_{model_key}']
+        embedding_rdm_dict[model_key] = data[f'embedding_rdm_{model_key}']
+
+    return {
+        'times': data['times'],
+        'meg_rdm_timeseries': data['meg_rdm_timeseries'],
+        'subject_id': int(data['subject_id']),
+        'sessions': list(data['sessions']) if 'sessions' in data else [],
+        'model_specs': model_specs,
+        'rsa_timeseries': rsa_timeseries_dict,
+        'embedding_rdm': embedding_rdm_dict,
+        'consistency_timeseries': data['consistency_timeseries'] if 'consistency_timeseries' in data else None
+    }
+
+
+def plot_multi_network_rsa(multi_network_data: Dict[str, Any], output_dir: Path,
+                           save_fig: bool = True) -> plt.Figure:
+    """
+    Plot RSA timeseries for multiple network models on the same plot.
+
+    Parameters
+    ----------
+    multi_network_data : dict
+        Multi-network RSA results dictionary
+    output_dir : Path
+        Output directory for plots
+    save_fig : bool, default True
+        Whether to save the figure
+
+    Returns
+    -------
+    plt.Figure
+        Created figure
+    """
+    sns.set_context("poster")
+    fig, ax = plt.subplots(figsize=(12, 8))
+
+    times = multi_network_data['times']
+    model_specs = multi_network_data['model_specs']
+    rsa_timeseries_dict = multi_network_data['rsa_timeseries']
+
+    # Define colors for different models
+    colors = plt.cm.tab10(np.linspace(0, 1, len(model_specs)))
+
+    # Plot each network's RSA timeseries
+    for (model_name, layer), color in zip(model_specs, colors):
+        model_key = f"{model_name}_{layer}"
+        rsa_timeseries = rsa_timeseries_dict[model_key]
+
+        # Apply smoothing
+        window_size = 10
+        boxcar = np.ones(window_size) / window_size
+        smoothed_rsa = np.convolve(rsa_timeseries, boxcar, mode='same')
+
+        ax.plot(times, smoothed_rsa, linewidth=2.5, color=color,
+               label=f'{model_name} ({layer})')
+
+    # Plot consistency if available
+    if multi_network_data['consistency_timeseries'] is not None:
+        consistency = multi_network_data['consistency_timeseries']
+        window_size = 10
+        boxcar = np.ones(window_size) / window_size
+        smoothed_consistency = np.convolve(consistency, boxcar, mode='same')
+
+        ax.fill_between(times, 0, smoothed_consistency, alpha=0.15, color='gray',
+                       label='Within-subject consistency')
+        ax.plot(times, smoothed_consistency, 'k--', alpha=0.5, linewidth=1.5)
+
+    # Add reference lines
+    ax.axvline(x=0, color='k', linestyle='--', alpha=0.3, label='Fixation onset')
+
+    # Formatting
+    ax.set_xlabel('Time [s]')
+    ax.set_ylabel("RDM similarity [Spearman's rho]")
+    ax.set_xlim(-0.2, 0.5)
+
+    # Title
+    subject_id = multi_network_data['subject_id']
+    sessions = multi_network_data['sessions']
+    sessions_str = f", Sessions {sessions}" if len(sessions) > 1 else f", Session {sessions[0]}" if sessions else ""
+    ax.set_title(f'Multi-Network RSA Comparison\nSubject {subject_id}{sessions_str}',
+                fontsize=16)
+
+    # Legend
+    ax.legend(loc='best', frameon=True, fontsize=10)
+    sns.despine()
+    ax.grid(False)
+
+    # Set reasonable y limits
+    all_rsa = np.concatenate([rsa for rsa in rsa_timeseries_dict.values()])
+    y_min = max(0.0, np.nanmin(all_rsa) - 0.05)
+    y_max = max(0.6, np.nanmax(all_rsa) + 0.1)
+    ax.set_ylim(y_min, y_max)
+
+    plt.tight_layout()
+
+    if save_fig:
+        filename = f"sub-{subject_id:02d}_multi_network_rsa_comparison.pdf"
+        fig.savefig(output_dir / filename, dpi=PLOT_CONFIG['figure_dpi'])
+        logger.info(f"Saved multi-network plot: {filename}")
+
+    return fig
+
+
+def plot_multi_network_grand_average(multi_network_data_list: List[Dict[str, Any]],
+                                     output_dir: Path, save_fig: bool = True) -> plt.Figure:
+    """
+    Plot grand average RSA timeseries for multiple networks across subjects.
+
+    Parameters
+    ----------
+    multi_network_data_list : list of dict
+        List of multi-network RSA results from multiple subjects
+    output_dir : Path
+        Output directory for plots
+    save_fig : bool, default True
+        Whether to save the figure
+
+    Returns
+    -------
+    plt.Figure
+        Created figure
+    """
+    sns.set_context("poster")
+    fig, ax = plt.subplots(figsize=(12, 8))
+
+    times = multi_network_data_list[0]['times']
+    model_specs = multi_network_data_list[0]['model_specs']
+
+    # Define colors
+    colors = plt.cm.tab10(np.linspace(0, 1, len(model_specs)))
+
+    # Collect RSA timeseries for each network across subjects
+    for (model_name, layer), color in zip(model_specs, colors):
+        model_key = f"{model_name}_{layer}"
+        all_rsa = []
+
+        for data in multi_network_data_list:
+            rsa_timeseries = data['rsa_timeseries'][model_key]
+            # Apply smoothing
+            window_size = 10
+            boxcar = np.ones(window_size) / window_size
+            smoothed_rsa = np.convolve(rsa_timeseries, boxcar, mode='same')
+            all_rsa.append(smoothed_rsa)
+
+        # Compute statistics
+        all_rsa = np.array(all_rsa)
+        mean_rsa = np.nanmean(all_rsa, axis=0)
+        sem_rsa = np.nanstd(all_rsa, axis=0) / np.sqrt(len(all_rsa))
+
+        # Plot
+        ax.plot(times, mean_rsa, linewidth=2.5, color=color,
+               label=f'{model_name} ({layer})')
+        ax.fill_between(times, mean_rsa - sem_rsa, mean_rsa + sem_rsa,
+                       alpha=0.2, color=color)
+
+    # Plot group consistency if available
+    all_consistency = []
+    for data in multi_network_data_list:
+        if data['consistency_timeseries'] is not None:
+            window_size = 10
+            boxcar = np.ones(window_size) / window_size
+            smoothed = np.convolve(data['consistency_timeseries'], boxcar, mode='same')
+            all_consistency.append(smoothed)
+
+    if len(all_consistency) >= 2:
+        all_consistency = np.array(all_consistency)
+        mean_consistency = np.nanmean(all_consistency, axis=0)
+        ax.fill_between(times, 0, mean_consistency, alpha=0.15, color='gray',
+                       label='Within-subject consistency')
+        ax.plot(times, mean_consistency, 'k--', alpha=0.5, linewidth=1.5)
+
+    # Add reference lines
+    ax.axvline(x=0, color='k', linestyle='--', alpha=0.3, label='Fixation onset')
+
+    # Formatting
+    ax.set_xlabel('Time [s]')
+    ax.set_ylabel("RDM similarity [Spearman's rho]")
+    ax.set_xlim(-0.2, 0.5)
+    ax.set_title(f'Multi-Network Grand Average RSA (n={len(multi_network_data_list)})',
+                fontsize=16)
+
+    ax.legend(loc='best', frameon=True, fontsize=10)
+    sns.despine()
+    ax.grid(False)
+
+    plt.tight_layout()
+
+    if save_fig:
+        filename = f"grand_average_multi_network_rsa_comparison.pdf"
+        fig.savefig(output_dir / filename, dpi=PLOT_CONFIG['figure_dpi'])
+        logger.info(f"Saved multi-network grand average plot: {filename}")
 
     return fig
 

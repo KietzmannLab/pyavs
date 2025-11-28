@@ -1,0 +1,80 @@
+person: CANDIDATES -> ['hot-tub-person']
+bicycle: EXACT -> bicycle
+car: EXACT -> car
+motorcycle: NO MATCH
+airplane: NO MATCH
+bus: EXACT -> bus
+train: NO MATCH
+truck: NO MATCH
+boat: NO MATCH
+traffic light: CANDIDATES -> ['bolt-lightning', 'highlighter']
+fire hydrant: CANDIDATES -> ['dumpster-fire', 'fire-alt', 'fire-burner', 'fire-extinguisher', 'fire-flame-curved', 'fire-flame-simple', 'fire', 'house-fire']
+stop sign: CANDIDATES -> ['circle-stop']
+parking meter: NO MATCH
+bench: NO MATCH
+bird: NO MATCH
+cat: EXACT -> cat
+dog: EXACT -> dog
+horse: EXACT -> horse
+sheep: NO MATCH
+cow: EXACT -> cow
+elephant: NO MATCH
+bear: NO MATCH
+zebra: NO MATCH
+giraffe: NO MATCH
+backpack: NO MATCH
+umbrella: NO MATCH
+handbag: NO MATCH
+tie: NO MATCH
+suitcase: CANDIDATES -> ['cart-flatbed-suitcase']
+frisbee: NO MATCH
+skis: NO MATCH
+snowboard: NO MATCH
+sports ball: CANDIDATES -> ['baseball-ball', 'baseball-bat-ball', 'baseball', 'basketball-ball', 'basketball', 'bowling-ball', 'broom-ball', 'cloud-meatball']
+kite: NO MATCH
+baseball bat: CANDIDATES -> ['baseball-ball', 'baseball-bat-ball', 'baseball']
+baseball glove: CANDIDATES -> ['baseball-ball', 'baseball-bat-ball', 'baseball']
+skateboard: NO MATCH
+surfboard: NO MATCH
+tennis racket: CANDIDATES -> ['arrow-right-from-bracket', 'arrow-right-to-bracket', 'arrow-up-from-bracket']
+bottle: CANDIDATES -> ['bottle-droplet', 'bottle-water']
+wine glass: CANDIDATES -> ['champagne-glasses', 'glass-cheers', 'glass-martini-alt', 'glass-martini', 'glass-water-droplet', 'glass-water', 'glass-whiskey', 'glasses']
+cup: NO MATCH
+fork: CANDIDATES -> ['code-fork']
+knife: NO MATCH
+spoon: NO MATCH
+bowl: CANDIDATES -> ['bowl-food', 'bowl-rice', 'bowling-ball']
+banana: NO MATCH
+apple: CANDIDATES -> ['apple-alt', 'apple-whole']
+sandwich: NO MATCH
+orange: NO MATCH
+broccoli: NO MATCH
+carrot: EXACT -> carrot
+hot dog: EXACT -> hotdog
+pizza: NO MATCH
+donut: NO MATCH
+cake: EXACT -> cake
+chair: EXACT -> chair
+couch: EXACT -> couch
+potted plant: NO MATCH
+bed: EXACT -> bed
+dining table: NO MATCH
+toilet: NO MATCH
+tv: NO MATCH
+laptop: CANDIDATES -> ['house-laptop']
+mouse: CANDIDATES -> ['computer-mouse']
+remote: NO MATCH
+keyboard: NO MATCH
+cell phone: CANDIDATES -> ['blender-phone', 'headphones-alt', 'headphones-simple', 'headphones']
+microwave: NO MATCH
+oven: NO MATCH
+toaster: NO MATCH
+sink: NO MATCH
+refrigerator: NO MATCH
+book: EXACT -> book
+clock: EXACT -> clock
+vase: NO MATCH
+scissors: CANDIDATES -> ['hand-scissors']
+teddy bear: NO MATCH
+hair drier: CANDIDATES -> ['chair', 'crosshairs']
+toothbrush: NO MATCH
