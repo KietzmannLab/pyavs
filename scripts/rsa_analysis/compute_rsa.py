@@ -320,60 +320,63 @@ def compute_rsa_correlation(meg_rdm_timeseries: np.ndarray, embedding_rdm: np.nd
     return rsa_timeseries
 
 
-def compute_within_subject_consistency(meg_rdm_sessions: List[np.ndarray]) -> np.ndarray:
+def compute_shuffled_baseline(meg_rdm_timeseries: np.ndarray, embedding_rdm: np.ndarray,
+                              n_permutations: int = 1000) -> np.ndarray:
     """
-    Compute within-subject consistency from pairwise session correlations.
+    Compute shuffled labels baseline for RSA by permuting object labels.
 
     Args:
-        meg_rdm_sessions: List of MEG RDM timeseries, one per session
-                         Each array has shape (n_times, n_objects, n_objects)
+        meg_rdm_timeseries: MEG RDM timeseries of shape (n_times, n_objects, n_objects)
+        embedding_rdm: Embedding RDM of shape (n_objects, n_objects)
+        n_permutations: Number of permutations for baseline (default: 1000)
 
     Returns:
-        consistency_timeseries: Array of shape (n_times,) with mean pairwise correlations
+        baseline_timeseries: Array of shape (n_permutations, n_times) with shuffled RSA correlations
     """
-    if len(meg_rdm_sessions) < 2:
-        logger.warning("Need at least 2 sessions for consistency computation")
-        return None
+    n_times = meg_rdm_timeseries.shape[0]
+    n_objects = meg_rdm_timeseries.shape[1]
+    baseline_timeseries = np.full((n_permutations, n_times), np.nan)
 
-    n_times = meg_rdm_sessions[0].shape[0]
-    n_sessions = len(meg_rdm_sessions)
-    consistency_timeseries = np.full(n_times, np.nan)
+    # Get upper triangular indices
+    triu_indices = np.triu_indices(n_objects, k=1)
+    embedding_rdm_vec = embedding_rdm[triu_indices]
 
-    # Get upper triangular indices (same for all sessions)
-    triu_indices = np.triu_indices(meg_rdm_sessions[0].shape[1], k=1)
+    # Find valid (non-NaN) entries in embedding RDM
+    valid_embedding_mask = ~np.isnan(embedding_rdm_vec)
 
-    logger.info(f"Computing within-subject consistency from {n_sessions} sessions")
+    if np.sum(valid_embedding_mask) < 2:
+        logger.warning("Too few valid embedding RDM values for baseline computation")
+        return baseline_timeseries
 
-    # For each timepoint, compute pairwise session correlations
-    for t in range(n_times):
-        pairwise_corrs = []
+    logger.info(f"Computing shuffled labels baseline with {n_permutations} permutations...")
 
-        # Compare all pairs of sessions
-        for i in range(n_sessions):
-            for j in range(i + 1, n_sessions):
-                rdm_i_vec = meg_rdm_sessions[i][t][triu_indices]
-                rdm_j_vec = meg_rdm_sessions[j][t][triu_indices]
+    for perm_idx in range(n_permutations):
+        # Shuffle object indices
+        shuffled_indices = np.random.permutation(n_objects)
 
-                # Find valid entries in both RDMs
-                valid_mask = ~np.isnan(rdm_i_vec) & ~np.isnan(rdm_j_vec)
+        for t in range(n_times):
+            # Permute MEG RDM rows and columns
+            meg_rdm_shuffled = meg_rdm_timeseries[t][np.ix_(shuffled_indices, shuffled_indices)]
+            meg_rdm_vec = meg_rdm_shuffled[triu_indices]
 
-                if np.sum(valid_mask) < 2:
-                    continue  # Not enough valid pairs
+            # Find entries that are valid in both RDMs
+            both_valid_mask = valid_embedding_mask & ~np.isnan(meg_rdm_vec)
 
-                try:
-                    corr, _ = spearmanr(rdm_i_vec[valid_mask], rdm_j_vec[valid_mask])
-                    if not np.isnan(corr):
-                        pairwise_corrs.append(corr)
-                except Exception as e:
-                    logger.warning(f"Session correlation failed at timepoint {t} for sessions {i}-{j}: {e}")
-                    continue
+            if np.sum(both_valid_mask) < 2:
+                continue  # Not enough valid pairs for correlation
 
-        # Take mean of all pairwise correlations
-        if len(pairwise_corrs) > 0:
-            consistency_timeseries[t] = np.mean(pairwise_corrs)
+            # Compute correlation only on valid entries
+            valid_meg_vec = meg_rdm_vec[both_valid_mask]
+            valid_emb_vec = embedding_rdm_vec[both_valid_mask]
 
-    logger.info(f"Computed consistency timeseries with {np.sum(~np.isnan(consistency_timeseries))} valid timepoints")
-    return consistency_timeseries
+            try:
+                corr, _ = spearmanr(valid_meg_vec, valid_emb_vec)
+                baseline_timeseries[perm_idx, t] = corr if not np.isnan(corr) else np.nan
+            except Exception as e:
+                continue
+
+    logger.info(f"Computed baseline for {n_permutations} permutations")
+    return baseline_timeseries
 
 
 def estimate_noise_covariance_mne(epochs_data: np.ndarray, times: np.ndarray,
@@ -425,7 +428,6 @@ def process_subject_sessions(subject_id: int, sessions: List[int],
         all_epochs_data = []
         all_embeddings_dict = {f"{model}_{layer}": [] for model, layer in model_specs}  # Store embeddings for each model
         all_metadata = []
-        session_meg_rdms = []  # Store per-session RDMs for consistency computation
         times = None
         total_epochs = 0
 
@@ -478,25 +480,6 @@ def process_subject_sessions(subject_id: int, sessions: List[int],
         for model_key, emb in combined_embeddings_dict.items():
             logger.info(f"  {model_key} embeddings: {emb.shape}")
 
-        # Process each session individually for consistency computation
-        if len(sessions) >= 2:
-            logger.info("Computing per-session RDMs for consistency estimation")
-            first_model_key = f"{model_specs[0][0]}_{model_specs[0][1]}"
-            for session_idx, (session_epochs, session_metadata) in enumerate(zip(all_epochs_data, all_metadata)):
-                # Group this session's data by objects (use first model's embeddings for grouping)
-                if use_object_labels:
-                    session_epochs_grouped, _, _ = group_by_objects(
-                        session_epochs, all_embeddings_dict[first_model_key][session_idx],
-                        session_metadata, data_path=data_path)
-                else:
-                    session_epochs_grouped = session_epochs
-
-                # Compute session-level MEG RDM
-                session_noise_cov = estimate_noise_covariance_mne(session_epochs_grouped, times) if distance_metric == 'mahalanobis' else None
-                session_meg_rdm = compute_rdm_timeseries(session_epochs_grouped, distance_metric, session_noise_cov)
-                session_meg_rdms.append(session_meg_rdm)
-                logger.info(f"Session {sessions[session_idx]}: RDM shape {session_meg_rdm.shape}")
-
         # Group by objects if requested (for aggregated analysis)
         # Process embeddings for each model
         final_embeddings_dict = {}
@@ -542,18 +525,19 @@ def process_subject_sessions(subject_id: int, sessions: List[int],
         # Compute embedding RDMs and RSA for each model
         embedding_rdms = {}
         rsa_timeseries_dict = {}
+        baseline_timeseries_dict = {}
         for model_key, final_embeddings in final_embeddings_dict.items():
             embedding_rdm = compute_embedding_rdm(final_embeddings, distance_metric)
             rsa_timeseries = compute_rsa_correlation(meg_rdm_timeseries, embedding_rdm)
+
+            # Compute shuffled labels baseline
+            baseline_timeseries = compute_shuffled_baseline(meg_rdm_timeseries, embedding_rdm,
+                                                           n_permutations=1000)
+
             embedding_rdms[model_key] = embedding_rdm
             rsa_timeseries_dict[model_key] = rsa_timeseries
-            logger.info(f"Computed RSA for {model_key}: {rsa_timeseries.shape}")
-
-        # Compute within-subject consistency if we have multiple sessions
-        consistency_timeseries = None
-        if len(session_meg_rdms) >= 2:
-            consistency_timeseries = compute_within_subject_consistency(session_meg_rdms)
-            logger.info(f"Computed within-subject consistency timeseries")
+            baseline_timeseries_dict[model_key] = baseline_timeseries
+            logger.info(f"Computed RSA and baseline for {model_key}: {rsa_timeseries.shape}")
 
         # Create structured output directory (per subject only)
         subject_output_dir = output_dir / f"sub-{subject_id:02d}"
@@ -572,6 +556,7 @@ def process_subject_sessions(subject_id: int, sessions: List[int],
                 'times': times,
                 'meg_rdm_timeseries': meg_rdm_timeseries,
                 'embedding_rdm': embedding_rdms[model_key],
+                'baseline_timeseries': baseline_timeseries_dict[model_key],  # Shuffled labels baseline
                 # Data matching information
                 'epoch_indices': np.arange(total_epochs),
                 'embedding_indices': np.arange(total_epochs),
@@ -586,11 +571,6 @@ def process_subject_sessions(subject_id: int, sessions: List[int],
                 'n_epochs_used': total_epochs,
                 'n_objects': len(object_labels) if object_labels else 0
             }
-
-            # Add consistency if computed
-            if consistency_timeseries is not None:
-                save_dict['consistency_timeseries'] = consistency_timeseries
-                logger.info("Saving within-subject consistency timeseries")
 
             np.savez_compressed(output_file, **save_dict)
             logger.info(f"Saved aggregated results to {output_file}")
@@ -622,11 +602,7 @@ def process_subject_sessions(subject_id: int, sessions: List[int],
                 model_key = f"{model_name}_{layer}"
                 save_dict[f'rsa_timeseries_{model_key}'] = rsa_timeseries_dict[model_key]
                 save_dict[f'embedding_rdm_{model_key}'] = embedding_rdms[model_key]
-
-            # Add consistency if computed
-            if consistency_timeseries is not None:
-                save_dict['consistency_timeseries'] = consistency_timeseries
-                logger.info("Saving within-subject consistency timeseries")
+                save_dict[f'baseline_timeseries_{model_key}'] = baseline_timeseries_dict[model_key]
 
             np.savez_compressed(output_file, **save_dict)
             logger.info(f"Saved multi-model results to {output_file}")

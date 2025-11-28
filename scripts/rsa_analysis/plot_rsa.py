@@ -131,9 +131,9 @@ def load_rsa_results(rsa_file: str) -> Dict[str, Any]:
         'layer': layer
     }
 
-    # Add consistency timeseries if available
-    if 'consistency_timeseries' in data:
-        result['consistency_timeseries'] = data['consistency_timeseries']
+    # Add baseline timeseries if available
+    if 'baseline_timeseries' in data:
+        result['baseline_timeseries'] = data['baseline_timeseries']
 
     return result
 
@@ -211,14 +211,19 @@ def plot_single_rsa_timeseries(rsa_data: Dict[str, Any], output_dir: Path,
     # Plot RSA time series
     ax.plot(times, rsa_timeseries, 'b-', linewidth=2, label='MEG-ANN RSA')
 
-    # Plot within-subject consistency if available
-    if 'consistency_timeseries' in rsa_data and rsa_data['consistency_timeseries'] is not None:
-        consistency = rsa_data['consistency_timeseries']
-        # Create a shaded region from 0 to consistency value
-        ax.fill_between(times, 0, consistency, alpha=0.2, color='green',
-                       label='Within-subject consistency')
-        ax.plot(times, consistency, 'g--', alpha=0.7, linewidth=1.5)
-        logger.info("Plotted within-subject consistency")
+    # Plot shuffled labels baseline if available
+    if 'baseline_timeseries' in rsa_data and rsa_data['baseline_timeseries'] is not None:
+        baseline = rsa_data['baseline_timeseries']  # Shape: (n_permutations, n_times)
+        # Compute percentiles
+        baseline_95 = np.percentile(baseline, 95, axis=0)
+        baseline_99 = np.percentile(baseline, 99, axis=0)
+        baseline_mean = np.mean(baseline, axis=0)
+
+        # Plot mean baseline
+        ax.plot(times, baseline_mean, 'r--', alpha=0.5, linewidth=1.5, label='Baseline (mean)')
+        # Plot 95th percentile threshold
+        ax.plot(times, baseline_95, 'r-', alpha=0.7, linewidth=1, label='Baseline (p<0.05)')
+        logger.info("Plotted shuffled labels baseline")
 
     # Compute and plot noise ceiling if requested
     if compute_nc:
@@ -690,9 +695,9 @@ def plot_grand_average_rsa(rsa_data_list: List[Dict[str, Any]], output_dir: Path
     n_subjects = len(rsa_data_list)
     
    
-    # Collect all RSA time series and consistency
+    # Collect all RSA time series and baselines
     all_rsa_timeseries = []
-    all_consistency_timeseries = []
+    all_baselines = []
 
     # apply a boxcar smoothing (causal) of window size 5
     for i, rsa_data in enumerate(rsa_data_list):
@@ -704,28 +709,27 @@ def plot_grand_average_rsa(rsa_data_list: List[Dict[str, Any]], output_dir: Path
         #replace
         rsa_data_list[i]['rsa_timeseries']= smoothed_rsa
 
-        # Collect consistency if available
-        if 'consistency_timeseries' in rsa_data and rsa_data['consistency_timeseries'] is not None:
-            smoothed_consistency = np.convolve(rsa_data['consistency_timeseries'], boxcar, mode='same')
-            all_consistency_timeseries.append(smoothed_consistency)
-        # # Plot individual subject as faint grey line
-        # ax.plot(times, smoothed_rsa, color='lightgrey', alpha=0.6, linewidth=1,
-        #        label='Individual subjects' if i == 0 else '')
+        # Collect baseline if available
+        if 'baseline_timeseries' in rsa_data and rsa_data['baseline_timeseries'] is not None:
+            all_baselines.append(rsa_data['baseline_timeseries'])  # Shape: (n_permutations, n_times)
 
-    # Plot group-level consistency if available
-    if len(all_consistency_timeseries) >= 2:
-        all_consistency = np.array(all_consistency_timeseries)
-        mean_consistency = np.nanmean(all_consistency, axis=0)
-        sem_consistency = np.nanstd(all_consistency, axis=0) / np.sqrt(len(all_consistency))
+    # Plot group-level baseline if available
+    if len(all_baselines) >= 1:
+        # Concatenate baselines from all subjects: (n_subjects * n_permutations, n_times)
+        all_baselines_concat = np.concatenate(all_baselines, axis=0)
 
-        # Plot consistency as shaded region
-        ax.fill_between(times*1000, 0, mean_consistency, alpha=0.2, color='green',
-                       label='Within-subject consistency')
-        ax.plot(times, mean_consistency, 'g--', alpha=0.7, linewidth=1.5)
-        # Add SEM shading
-        ax.fill_between(times*1000, mean_consistency - sem_consistency,
-                       mean_consistency + sem_consistency, alpha=0.1, color='green')
-        logger.info("Plotted group-level within-subject consistency")
+        # Compute percentiles across all permutations from all subjects
+        baseline_95 = np.percentile(all_baselines_concat, 95, axis=0)
+        baseline_mean = np.mean(all_baselines_concat, axis=0)
+
+        # Smooth baseline
+        baseline_95_smooth = np.convolve(baseline_95, boxcar, mode='same')
+        baseline_mean_smooth = np.convolve(baseline_mean, boxcar, mode='same')
+
+        # Plot baseline
+        ax.plot(times*1000, baseline_mean_smooth, 'r--', alpha=0.5, linewidth=1.5, label='Baseline (mean)')
+        ax.plot(times*1000, baseline_95_smooth, 'r-', alpha=0.7, linewidth=1, label='Baseline (p<0.05)')
+        logger.info("Plotted group-level shuffled labels baseline")
 
     # Compute grand average
     # make this a df to plot with seaborn
