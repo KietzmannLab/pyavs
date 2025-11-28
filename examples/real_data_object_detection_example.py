@@ -222,7 +222,7 @@ def plot_fixations_on_scene(scene_id: int, fixations_df: pd.DataFrame,
         color = object_colors[object_label]
         
         # Plot fixation point with larger, more visible marker
-        ax.scatter(x, y, c=[color], s=150, alpha=0.9, 
+        ax.scatter(x, y, c=[color], s=800, alpha=0.7, 
                   edgecolors='white', linewidth=3, zorder=10)
         
         # Add object label as text annotation directly on the image
@@ -234,7 +234,7 @@ def plot_fixations_on_scene(scene_id: int, fixations_df: pd.DataFrame,
             ax.annotate(object_label, 
                        xy=(x, y), xytext=(10, 10), 
                        textcoords='offset points',
-                       fontsize=11, fontweight='bold', 
+                       fontsize=22, fontweight='bold', 
                        color='black',
                        bbox=dict(boxstyle='round,pad=0.4', 
                                facecolor='lightgray', 
@@ -403,10 +403,11 @@ def main():
     # Create configuration with standardized parameters
     config = PyAVSConfig()
     config.data_path = "/share/klab/datasets/avs/"
+    plots_dir = "/share/klab/psulewski/psulewski/pyavs/object_detection"
     
     # Configuration
     SUBJECT_ID = 4
-    SESSION_ID = 1
+    SESSION_ID = 10
     DATA_PATH = config.data_path
     TRANSFORMED_ANNOTATIONS_DIR = "/share/klab/datasets/avs/AVS-UTILS/avs_scene_annotations/coco_objects"
     
@@ -441,7 +442,7 @@ def main():
     print(f"\nStep 3: Creating visualizations")
     
     # Plot summary statistics
-    plot_object_fixation_summary(fixations_with_objects)
+    plot_object_fixation_summary(fixations_with_objects, output_dir=plots_dir)
     
     # sort scenes by number of unique object fixations (getting more interesting scenes first)
     
@@ -459,8 +460,7 @@ def main():
             int(scene_id), 
             fixations_with_objects, 
             mscoco_image_dir,
-            config
-        )
+            config,output_dir=plots_dir,)
     
     # Print final summary
     print(f"\n=== Summary ===")

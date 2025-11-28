@@ -331,8 +331,8 @@ def plot_group_rsa_timeseries(rsa_data_list: List[Dict[str, Any]], output_dir: P
         ax.plot(times, mean_nc_upper, 'k--', alpha=0.7, linewidth=1)
     
     # Add reference lines
-    ax.axhline(y=0, color='k', linestyle='-', alpha=0.3)
-    ax.axvline(x=0, color='k', linestyle='-', alpha=0.3, label='Fixation onset')
+    #ax.axhline(y=0, color='k', linestyle='-', alpha=0.3)
+    ax.axvline(x=0, color='k', linestyle='-', alpha=0.3, label='fixation onset')
     ax.set_xlim(-0.2, 0.5)
     # Formatting
     ax.set_xlabel('time [s]')
@@ -348,8 +348,8 @@ def plot_group_rsa_timeseries(rsa_data_list: List[Dict[str, Any]], output_dir: P
     sns.despine()
     
     # Set reasonable y limits
-    y_min = min(0, np.nanmin(mean_rsa) - 0.05)
-    y_max = max(0.5, np.nanmax(mean_rsa) + 0.2)
+    y_min = 0#min(0, np.nanmin(mean_rsa) - 0.05)
+    y_max = 1
     ax.set_ylim(y_min, y_max)
     
     plt.tight_layout()
@@ -694,17 +694,18 @@ def plot_grand_average_rsa(rsa_data_list: List[Dict[str, Any]], output_dir: Path
     # make this a df to plot with seaborn
 
     df_rsa = pd.DataFrame(all_rsa_timeseries).T
-    df_rsa['time'] = times
+    df_rsa['time'] = times*1000
     df_melted = df_rsa.melt(id_vars='time', var_name='subject', value_name='rsa')
     
+    
     sns.lineplot(data=df_melted, x='time', y='rsa', errorbar=("ci",95), ax=ax, 
-                 color='steelblue', label=f'grand average (n = {len(rsa_data_list)})')
+                 label=f'grand average (n = {len(rsa_data_list)})', color="#991fb4")
 
     # Compute and plot inter-subject noise ceiling
     logger.info("Computing inter-subject noise ceiling...")
     nc_lower, nc_upper = compute_intersubject_noise_ceiling(rsa_data_list)
 
-    ax.fill_between(times, nc_lower, nc_upper, alpha=0.2, color='gray',
+    ax.fill_between(times*1000, nc_lower, nc_upper, alpha=0.2, color='gray',
                    label='inter-subject noise ceiling')
 
 
@@ -713,9 +714,9 @@ def plot_grand_average_rsa(rsa_data_list: List[Dict[str, Any]], output_dir: Path
     ax.axvline(x=0, color='k', linestyle='--', alpha=0.3, label='fixation onset')
 
     # Formatting
-    ax.set_xlabel('time [s]')
+    ax.set_xlabel('time [ms]')
     ax.set_ylabel("RDM similarity [spearman's rho]")
-    ax.set_xlim(-0.2, 0.5)
+    ax.set_xlim(-200, 500)
 
     # Get model and layer info from first result
     model_name = rsa_data_list[0]['model_name']
@@ -725,14 +726,14 @@ def plot_grand_average_rsa(rsa_data_list: List[Dict[str, Any]], output_dir: Path
    
 
     # Set reasonable y limits
-    y_min = max(0.1, np.nanmin(df_melted['rsa']) - 0.05)
-    y_max = max(0.6, np.nanmax(df_melted['rsa']) + 0.2)
+    y_min = 0#max(0.1, np.nanmin(df_melted['rsa']) - 0.05)
+    y_max = 1#max(0.6, np.nanmax(df_melted['rsa']) + 0.2)
     ax.set_ylim(y_min, y_max)
     # despine for cleaner look
     sns.despine()
     # no grid
-    ax.grid(False)
-    ax.legend()
+    #ax.grid(False)
+    ax.legend(frameon=False, loc='upper right')
     plt.tight_layout()
 
     if save_fig:
@@ -762,21 +763,21 @@ Examples:
     )
     
     # Input specification
-    parser.add_argument('--rsa-dir', type=str, help='Directory containing RSA results')
+    parser.add_argument('--rsa-dir', type=str, help='Directory containing RSA results', default="/share/klab/psulewski/psulewski/pyavs/rsa")
     parser.add_argument('--data-path', type=str, help='Base data path (for automatic RSA dir detection)')
     
     # Subject selection
-    parser.add_argument('--subjects', type=int, nargs='+', help='Specific subject IDs to plot')
+    parser.add_argument('--subjects', type=int, nargs='+', help='Specific subject IDs to plot', default=[1,2,3,4,5])
     parser.add_argument('--single-subject', type=int, help='Single subject ID to plot')
-    parser.add_argument('--sessions', type=int, nargs='+', help='Specific session numbers to plot')
+    parser.add_argument('--sessions', type=int, nargs='+', help='Specific session numbers to plot', default=np.arange(1,11).tolist())
     
     # Model filtering
     parser.add_argument('--model', '--model-name', dest='model_name', 
-                       help='Filter by model name (e.g., resnet50_ecoset_crop)')
-    parser.add_argument('--layer', help='Filter by layer name (e.g., avgpool)')
+                       help='Filter by model name (e.g., resnet50_ecoset_crop)', default='resnet50_ecoset_crop')
+    parser.add_argument('--layer', help='Filter by layer name (e.g., avgpool)', default='avgpool')
     
     # Plot options
-    parser.add_argument('--output-dir', type=str, help='Output directory for plots')
+    parser.add_argument('--output-dir', type=str, help='Output directory for plots', default="/share/klab/psulewski/psulewski/pyavs/rsa")
     parser.add_argument('--save-individual', action='store_true',
                        help='Save individual subject plots')
     parser.add_argument('--no-noise-ceiling', action='store_true',

@@ -48,54 +48,47 @@ def load_encoding_results(results_file: str):
 
     return r_values, times, metadata
 
-
-def create_mne_evoked(r_values: np.ndarray, times: np.ndarray, sfreq: float = 1000.0) -> mne.EvokedArray:
-    """Create MNE Evoked object from R-values for visualization."""
+def create_mne_evoked(r_values: np.ndarray, times: np.ndarray, sfreq: float = 500.0, info: mne.Info = None) -> mne.EvokedArray:
+    """Create MNE Evoked object from encoding results."""
     n_channels, n_times = r_values.shape
 
-    # Create channel names and types (assuming MEG data structure)
-    if n_channels == 306:  # Standard MEG setup
-        ch_names = []
-        ch_types = []
-        # 102 magnetometers
-        for i in range(102):
-            ch_names.append(f'MEG{i+1:04d}1')
-            ch_types.append('mag')
-        # 204 gradiometers
-        for i in range(204):
-            ch_names.append(f'MEG{(i//2)+1:04d}{2+(i%2)}')
-            ch_types.append('grad')
-    else:
-        # Generic channel names
-        ch_names = [f'CH{i:03d}' for i in range(n_channels)]
+    if info is None:
+        # Create default info if not provided
+        ch_names = [f'MEG{idx:03d}' for idx in range(n_channels)]
         ch_types = ['mag'] * n_channels
-
-    # Create MNE info
-    info = mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types=ch_types)
-
-    # Create Evoked object
-    evoked = mne.EvokedArray(r_values[:, np.newaxis, :], info, tmin=times[0], nave=1, comment='Encoding R-values')
-
+        info = mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types=ch_types)
+    # Create EvokedArray
+    # change the sfreq to match the times array
+    if info['sfreq'] != sfreq:
+        info['sfreq'] = sfreq
+    evoked = mne.EvokedArray(r_values, info, tmin=times[0])
     return evoked
-
 
 def plot_encoding_joint(evoked: mne.EvokedArray, output_dir: Path, metadata: dict):
     """Plot joint topography and time course."""
     try:
         # Create joint plot
-        fig = evoked.plot_joint(
-            title=f'Encoding Performance - Subject {metadata["subject_id"]:02d}\n'
-                  f'{metadata["model_name"]}, {metadata["layer"]}',
-            show=False
-        )
-
+        fig = evoked.plot(scalings=1, show=False)
+        # make all lines gray and low alppha that never cross 0.075
+        for ax in fig.axes:
+            for line in ax.get_lines():
+                line.set_color('gray')
+                line.set_alpha(0.3)
+                if np.any(np.abs(line.get_ydata()) > 0.1):
+                    line.set_alpha(.8)
+                    line.set_color('magenta')
+        # nuke the same chanels from the small topomap
+  
+        # add the topo at t=110ms
+        #evoked.plot_topomap(times=0.110, ch_type='mag', colorbar=True, show=False, axes=fig.axes[0])
+        
         # Save figure
         output_file = output_dir / f'sub-{metadata["subject_id"]:02d}_encoding_joint.png'
         plt.savefig(output_file, dpi=300, bbox_inches='tight')
         print(f"Saved joint plot to {output_file}")
         plt.close()
 
-    except Exception as e:
+    except IndentationError as e:
         print(f"Could not create joint plot: {e}")
 
 
@@ -106,7 +99,7 @@ def main():
     parser.add_argument('--results-file', required=True, help='Path to encoding results NPZ file')
 
     # Output options
-    parser.add_argument('--output-dir', help='Output directory for plots')
+    parser.add_argument('--output-dir', help='Output directory for plots', default="/share/klab/psulewski/psulewski/pyavs/encoding")
 
     args = parser.parse_args()
 
@@ -127,10 +120,19 @@ def main():
         # Load results
         print("\nLoading encoding results...")
         r_values, times, metadata = load_encoding_results(results_file)
-
+        print(times)
         # Create MNE Evoked object
         print("Creating MNE Evoked object...")
-        evoked = create_mne_evoked(r_values, times)
+        # load infro from raw file in data dir
+        rawdir = Path("/share/klab/datasets/avs/rawdir/as01a/as01a01.fif")
+        raw = mne.io.read_raw_fif(rawdir, preload=False)
+        info = mne.pick_info(raw.info, mne.pick_types(raw.info, meg=True, eeg=False))
+        # infer the sampling frequency from the number of timepoints in tthe times array
+        diffs = np.diff(times)
+        mean_diff = np.mean(diffs)
+        sfreq_inferred = 1.0 / mean_diff if mean_diff > 0 else 500
+        print(f"Inferred sampling frequency: {sfreq_inferred} Hz")
+        evoked = create_mne_evoked(r_values, times, sfreq=sfreq_inferred, info=info)
 
         # Create joint plot
         print("Creating joint plot...")
@@ -146,7 +148,7 @@ def main():
 
         return 0
 
-    except Exception as e:
+    except IndentationError as e:
         print(f"Error in plotting pipeline: {e}")
         return 1
 

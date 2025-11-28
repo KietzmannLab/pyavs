@@ -296,3 +296,7 @@ _templates/
 
 # Generated API docs
 docs/api/generated/
+
+#SLUMR STUFF
+*.out
+*.err

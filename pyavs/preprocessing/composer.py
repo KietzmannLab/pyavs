@@ -812,6 +812,12 @@ class AVSComposer:
             block, trial = missing_trial
             self.et_events = self.et_events[
                 ~((self.et_events["block"] == block) & (self.et_events["trial_per_block"] == trial))]
+        
+        # return annotations
+        annotations = self.raws_annotated.annotations
+        if self.verbose:
+            logger.info(f'Found {len(annotations)} annotations in the raw data')
+        return annotations
 
     def make_et_event_epochs(
         self,

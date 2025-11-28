@@ -129,7 +129,8 @@ def _process_messages(events: pd.DataFrame, messages: pd.DataFrame, explog: pd.D
     
     # Determine time column based on preprocessing
     sanity_var = "msg_time" if preprocessed else "trialid_time"
-    
+    duration_prev_scene = 4
+    duration_prev_mic = 1
     for i in messages.index:
         if not is_list_like(messages.loc[i, sanity_var]):
             if not pd.isna(messages.loc[i, sanity_var]):
@@ -142,7 +143,9 @@ def _process_messages(events: pd.DataFrame, messages: pd.DataFrame, explog: pd.D
                     scene_onset = np.min(scene_onset)
                 
                 scene_offset = messages.ENDTRIALID_time[i] # depending on the recording type, this might be the end of the scene, mic or caption
-              
+                # print the messages row for debugging
+                print(messages.loc[i])
+            
                 # Extract trial ID
                 trialid = messages.loc[i, 'trialid '].split(' ')
                 trialid_int = int(trialid[1])
@@ -196,17 +199,28 @@ def _process_messages(events: pd.DataFrame, messages: pd.DataFrame, explog: pd.D
                     events.loc[mask, 'time_in_trial'] = (
                         events.loc[mask, 'time_in_trial'] + offset_scene_triggers_ms / 1000
                     )
-                
-                # Add recording type
-                
-                if recording_type == 1:
-                    events.loc[mask, 'recording'] = 'caption'
-                elif recording_type == 0:
+                    
+                    
+                if recording_type == 0:
                     events.loc[mask, 'recording'] = 'scene'
+                    duration_prev_scene = (float(scene_offset) - float(scene_onset)) / 1000
+                elif recording_type == 1:
+                    events.loc[mask, 'recording'] = 'caption'
+                    # add the time of the scene and microphone recording as well to the time_in_trial
+                    # compute the duration of the previous scene recording scene offset - scene_onset
+                    events.loc[mask, 'time_in_trial'] = (
+                        events.loc[mask, 'time_in_trial'] + duration_prev_scene + duration_prev_mic
+                    )
                 elif recording_type == 3:
                     events.loc[mask, 'recording'] = 'microphone'
+                    # add the time of the scene recording to the time_in_trial
+                    events.loc[mask, 'time_in_trial'] = (
+                        events.loc[mask, 'time_in_trial'] + duration_prev_scene
+                        
+                    )
+                    duration_prev_mic = (float(scene_offset) - float(scene_onset)) / 1000
                     
-          
+    
                 
                 # Add duration for non-preprocessed data
                 if not preprocessed:

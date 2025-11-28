@@ -148,7 +148,7 @@ def match_epochs_to_embeddings(metadata: pd.DataFrame, file_names: List[str]) ->
 
 
 def clip_outliers_and_filter(epochs_data: np.ndarray, embeddings: np.ndarray,
-                            metadata: pd.DataFrame, outlier_percentiles: Tuple[float, float] = (1, 99)) -> Tuple[np.ndarray, np.ndarray, pd.DataFrame]:
+                            metadata: pd.DataFrame, outlier_percentiles: Tuple[float, float] = (0.05, 99.5)) -> Tuple[np.ndarray, np.ndarray, pd.DataFrame]:
     """Clip outliers in MEG data and return filtered data."""
 
     # Compute outlier thresholds across all channels and timepoints
@@ -287,7 +287,7 @@ def fit_encoding_model_ridgecv(epochs_data: np.ndarray, embeddings: np.ndarray,
 
     # Apply PCA for dimensionality reduction (90% variance)
     print("Applying PCA for dimensionality reduction...")
-    pca = PCA(n_components=0.90, random_state=42)  # Keep 90% of variance
+    pca = PCA(n_components=0.75, random_state=42) 
     X_train_pca = pca.fit_transform(X_train_scaled)
     X_test_pca = pca.transform(X_test_scaled)
 
@@ -391,7 +391,16 @@ def process_subject_sessions(subject_id: int, sessions: List[int], model_name: s
             logger.info(f"Loading data for sub-{subject_id:02d}_ses-{session:02d}")
 
             # Load data for this session
-            epochs_data, metadata, session_times = load_fixation_epochs(subject_id, session, data_path)
+            # Parallel-load fixation epochs for all sessions once (cached for this subject)
+            if '_session_load_map' not in locals():
+                logger.info(f"Parallel loading fixation epochs for sub-{subject_id:02d} sessions {sessions} (n_jobs={n_jobs})")
+                results = Parallel(n_jobs=n_jobs)(
+                    delayed(load_fixation_epochs)(subject_id, s, data_path) for s in sessions
+                )
+                _session_load_map = {s: res for s, res in zip(sessions, results)}
+
+            # Retrieve the already-loaded data for the current session
+            epochs_data, metadata, session_times = _session_load_map[session]
             embeddings, file_names = load_embeddings(subject_id, session, data_path, model_name, layer)
 
             # Match epochs to embeddings
@@ -510,14 +519,14 @@ def main():
     # Required arguments
     parser.add_argument('--data-path', required=True, help='Data directory path')
     parser.add_argument('--subjects', type=int, nargs='+', required=True, help='Subject IDs')
-    parser.add_argument('--sessions', type=int, nargs='+', default=[1], help='Session numbers')
+    parser.add_argument('--sessions', type=int, nargs='+', default=[1,2,3,4,5,6,7,8,9,10], help='Session numbers')
 
     # Model parameters
     parser.add_argument('--model', default='resnet50_ecoset_crop', help='Model name')
-    parser.add_argument('--layer', default='layer2', help='Model layer')
+    parser.add_argument('--layer', default='avgpool', help='Model layer')
 
     # Time subsampling options
-    parser.add_argument('--time-window', nargs=2, type=float, metavar=('TMIN', 'TMAX'),
+    parser.add_argument('--time-window', nargs=2, type=float, metavar=('TMIN', 'TMAX'), default=(-200, 500),
                        help='Time window in milliseconds (e.g., -200 500)')
     parser.add_argument('--decimate', type=int, default=1,
                        help='Decimation factor: keep every Nth timepoint (default: 1)')

@@ -309,6 +309,7 @@ def get_meg_timestamp(meg_events: np.ndarray, trial: int, block: int,
     
     if optimized_timing or use_block_trigger:
         # What index in all MEG events is the current event
+        # Here we use the block trigger that was sent before the scene onset trigger to increase timing accuracy.
         index_of_current_event = np.where(meg_events[:, 0] == timestamp_onset)[0][0]
         
         # What is the index of the previous event
@@ -320,7 +321,7 @@ def get_meg_timestamp(meg_events: np.ndarray, trial: int, block: int,
         if optimized_timing:
             if verbose:
                 logger.debug(f"Trial {trial}, Block {block}: Optimizing timestamp (diff: {timestamp_onset - timestamp_previous_event:.3f}ms)")
-            # Make a linear interpolation between the previous and the current event
+            # Make a linear interpolation between the previous and the current event 
             timestamp_onset = timestamp_previous_event + (timestamp_onset - timestamp_previous_event) / 2
         elif use_block_trigger:
             timestamp_onset = timestamp_previous_event  # This is the block trigger timestamp
@@ -365,7 +366,7 @@ def add_fix_event_trigger(raw: mne.io.Raw, blocks: List[int], et_events: pd.Data
         (raw_with_annotations, missing_trials) - Raw with added eye movement based event annotations
         and list of missing trials
     """
-    # TODO: Check time in trial for saccades
+
     trigger_events_raw = mne.find_events(raw, stim_channel=stim_channel, consecutive=True, min_duration=0.005)
     
     # Now we need to correct the block trigger events

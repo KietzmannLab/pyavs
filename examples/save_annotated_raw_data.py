@@ -37,7 +37,7 @@ def save_annotated_raw_data(subject_id: int,
                            filter_params: dict = None,
                            event_types: list = None,
                            min_block: int = 1,
-                           max_block: int = None,
+                           max_block: int = None, 
                            overwrite: bool = False,
                            ignore_existing_filter: bool = False,
                            verbose: bool = True):
@@ -326,7 +326,7 @@ Examples:
     # Block selection
     parser.add_argument('--min_block', type=int, default=1,
                        help='Minimum block number (default: 1)')
-    parser.add_argument('--max_block', type=int,
+    parser.add_argument('--max_block', type=int, default=None,
                        help='Maximum block number (default: auto-detect)')
     
     # Options
@@ -398,7 +398,7 @@ Examples:
         event_types=args.event_types,
         min_block=args.min_block,
         max_block=args.max_block,
-        overwrite=args.overwrite,
+        overwrite=True, #TODO
         ignore_existing_filter=args.ignore_existing_filter,
         verbose=not args.quiet
     )
