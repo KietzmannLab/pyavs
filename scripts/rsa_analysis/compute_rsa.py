@@ -644,20 +644,20 @@ def main():
     parser = argparse.ArgumentParser(description="MEG RSA Pipeline with Multi-Model Support")
 
     # Required arguments
-    parser.add_argument('--data-path', required=True, help='Data directory path')
-    parser.add_argument('--subjects', type=int, nargs='+', required=True, help='Subject IDs')
-    parser.add_argument('--sessions', type=int, nargs='+', default=[1], help='Session numbers')
+    parser.add_argument('--data-path', required=False, help='Data directory path', default="/share/klab/datasets/avs/")
+    parser.add_argument('--subjects', type=int, nargs='+', required=False, help='Subject IDs', default=[3,4,5])
+    parser.add_argument('--sessions', type=int, nargs='+', help='Session numbers', default=[1,2,3,4,5,6,7,8,9,10])
 
     # Model parameters (can specify multiple models)
     parser.add_argument('--models', type=str, nargs='+',
                        default=['resnet50_ecoset_crop'],
                        help='Model names (can specify multiple)')
     parser.add_argument('--layers', type=str, nargs='+',
-                       default=['layer2'],
+                       default=['avgpool'],
                        help='Model layers (must match number of models)')
 
     # Optional parameters
-    parser.add_argument('--output-dir', help='Output directory')
+    parser.add_argument('--output-dir', help='Output directory' , default="/share/klab/psulewski/psulewski/pyavs/rsa")
     parser.add_argument('--n-jobs', type=int, default=-2, help='Number of parallel jobs')
 
     args = parser.parse_args()
@@ -707,8 +707,8 @@ def main():
     print(f"Total epochs: {sum(r.get('n_epochs', 0) for r in successful)}")
     print(f"Models processed: {len(model_specs)}")
 
-    if failed:
-        print(f"Failed subjects: {[f'sub-{r["subject_id"]:02d}' for r in failed]}")
+    #if failed:
+        #print(f"Failed subjects: {[f'sub-{r["subject_id"]:02d}' for r in failed]}")
 
     return 0 if not failed else 1
 

@@ -37,16 +37,16 @@ logger = get_logger('scripts.rsa_analysis.plot_mds')
 
 # Set matplotlib style
 sns.set_context("poster")
-sns.set_style("whitegrid")
+#sns.set_style("whitegrid")
 
 # MDS PLOTTING PARAMETERS
 MDS_CONFIG = {
     'default_timepoint_ms': 140.0,  # Default timepoint in milliseconds
     'figure_dpi': 300,
     'random_state': 42,  # For reproducible MDS
-    'n_init': 10,  # Number of MDS initializations
-    'max_iter': 300,  # Maximum MDS iterations
-    'icon_size': 0.4,  # Icon zoom factor (size relative to axes)
+    'n_init': 20,  # Number of MDS initializations
+    'max_iter': 1000,  # Maximum MDS iterations
+    'icon_size': 0.3,  # Icon zoom factor (size relative to axes)
     'use_icons': True,  # Whether to use icons instead of scatter points
 }
 
@@ -89,9 +89,10 @@ def load_icon(object_label: str, icon_dir: Path) -> Optional[np.ndarray]:
         return None
 
 
-def add_icon_to_plot(ax, x, y, icon_img: np.ndarray, zoom: float = 0.4):
+def add_icon_to_plot(ax, x, y, icon_img: np.ndarray, zoom: float = 0.4, alpha: float = 1.0):
     """Add an icon image to matplotlib axes at specified coordinates."""
     imagebox = OffsetImage(icon_img, zoom=zoom)
+    imagebox.set_alpha(alpha)
     ab = AnnotationBbox(imagebox, (x, y), frameon=False, pad=0)
     ax.add_artist(ab)
 
@@ -183,18 +184,12 @@ def plot_grand_average_mds(rsa_data_list: List[Dict[str, Any]],
     # Get object labels from first subject
     object_labels = rsa_data_list[0].get('object_labels', [])
 
-    # Clean RDM - remove objects without data
-    valid_mask = ~np.all(np.isnan(avg_rdm), axis=1)
-    valid_indices = np.where(valid_mask)[0]
-    rdm_clean = avg_rdm[np.ix_(valid_indices, valid_indices)]
-    valid_labels = [object_labels[i] for i in valid_indices] if object_labels else []
-
-    logger.info(f"Computing MDS for {len(valid_indices)} objects (from {len(object_labels)} total)")
+  
 
     # Prepare dissimilarity matrix
-    dissimilarity = rdm_clean.copy()
+    dissimilarity = avg_rdm.copy()
     max_dissim = np.nanmax(dissimilarity)
-    dissimilarity = np.nan_to_num(dissimilarity, nan=max_dissim)
+   
     dissimilarity = (dissimilarity + dissimilarity.T) / 2
 
     # Run MDS
@@ -202,10 +197,11 @@ def plot_grand_average_mds(rsa_data_list: List[Dict[str, Any]],
               random_state=MDS_CONFIG['random_state'],
               n_init=MDS_CONFIG['n_init'],
               max_iter=MDS_CONFIG['max_iter'])
+    
     coords_2d = mds.fit_transform(dissimilarity)
 
     # Create figure
-    fig, ax = plt.subplots(figsize=(12, 10))
+    fig, ax = plt.subplots(figsize=(4, 4))
 
     # Try to load icons
     icon_dir = get_icon_directory()
@@ -215,42 +211,48 @@ def plot_grand_average_mds(rsa_data_list: List[Dict[str, Any]],
         logger.info(f"Using object icons from: {icon_dir}")
         objects_with_icons = []
 
-        for i, label in enumerate(valid_labels):
+        for i, label in enumerate(object_labels):
             icon_img = load_icon(label, icon_dir)
             if icon_img is not None:
                 # Add icon at MDS coordinates
                 add_icon_to_plot(ax, coords_2d[i, 0], coords_2d[i, 1],
-                               icon_img, zoom=MDS_CONFIG['icon_size'])
+                               icon_img, zoom=MDS_CONFIG['icon_size'], alpha=0.8)
                 objects_with_icons.append(label)
 
-        logger.info(f"Displayed {len(objects_with_icons)} icons out of {len(valid_labels)} objects")
+        #logger.info(f"Displayed {len(objects_with_icons)} icons out of {len(valid_labels)} objects")
     else:
         # Fallback: scatter points (shouldn't happen with icons directory present)
         logger.warning("Icons not available, using scatter points")
         ax.scatter(coords_2d[:, 0], coords_2d[:, 1], s=200, alpha=0.7,
                   edgecolors='black', linewidth=1.5)
 
-        # Add labels
-        for i, label in enumerate(valid_labels):
-            ax.annotate(label, (coords_2d[i, 0], coords_2d[i, 1]),
-                       xytext=(5, 5), textcoords='offset points',
-                       fontsize=8, alpha=0.7)
+        # # Add labels
+        # for i, label in enumerate(valid_labels):
+        #     ax.annotate(label, (coords_2d[i, 0], coords_2d[i, 1]),
+        #                xytext=(5, 5), textcoords='offset points',
+        #                fontsize=8, alpha=0.7)
 
     # Formatting (preserve user's style)
-    ax.set_xlabel('MDS Dimension 1')
-    ax.set_ylabel('MDS Dimension 2')
-    sns.despine()
+    # remove ticks and tick labels
+    ax.set_xticks([])
+    ax.set_yticks([])
+    
+    #ax.set_xlabel('MDS dimension 1')
+    #ax.set_ylabel('MDS dimension 2')
+    sns.despine(ax=ax, top=True, right=True, left=True, bottom=True)
 
     # Set limits to center the plot
-    ax.set_xlim(np.min(coords_2d[:, 0]) * 0.5, np.max(coords_2d[:, 0]) * 0.5)
-    ax.set_ylim(np.min(coords_2d[:, 1]) * 0.5, np.max(coords_2d[:, 1]) * 0.5)
-
-    plt.tight_layout()
+    #
+    ax.set_xlim(-0.35, 0.25)
+    ax.set_ylim(-0.15, 0.15)
+    #ax.set_ylim(np.min(coords_2d[:, 1]) * 0.35, np.max(coords_2d[:, 1]) * 0.35)
+    #fig.tight_layout()
 
     if save_fig and output_dir:
-        filename = f"grand_average_mds_{actual_time_ms:.0f}ms.png"
-        fig.savefig(output_dir / filename, dpi=MDS_CONFIG['figure_dpi'], bbox_inches='tight')
-        logger.info(f"Saved grand average MDS plot: {filename}")
+        filename = f"grand_average_mds_{actual_time_ms:.0f}ms.pdf"
+        fig.savefig(output_dir / filename, dpi=MDS_CONFIG['figure_dpi'])
+        logger.info(f"Saved grand average MDS plot: {filename} in {output_dir}")
+        
 
     return fig
 

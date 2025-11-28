@@ -59,8 +59,9 @@ def create_mne_evoked(r_values: np.ndarray, times: np.ndarray, sfreq: float = 50
         info = mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types=ch_types)
     # Create EvokedArray
     # change the sfreq to match the times array
-    if info['sfreq'] != sfreq:
-        info['sfreq'] = sfreq
+    
+        
+        
     evoked = mne.EvokedArray(r_values, info, tmin=times[0])
     return evoked
 
@@ -68,17 +69,52 @@ def plot_encoding_joint(evoked: mne.EvokedArray, output_dir: Path, metadata: dic
     """Plot joint topography and time course."""
     try:
         # Create joint plot
-        fig = evoked.plot(scalings=1, show=False)
+   
+        import seaborn as sns
+        sns.set_context("poster")
+        # filter at 40 Hz for better visualization
+        evoked.filter(None, 30., fir_design='firwin')
+        # make pick from mask channels
+        # pcick only grad channels
+        evoked = evoked.copy().pick_types(meg='grad')
+             #mask channels in the small topomap that never cross 0.075
+        mask_channels = np.abs(evoked.data).max(axis=1) > 0.1
+        picks = mne.pick_channels(evoked.info['ch_names'], include=np.array(evoked.info['ch_names'])[mask_channels].tolist())
+
+        fig = evoked.plot(scalings=1, show=False, xlim=(-100, 300), time_unit='ms',
+                          units=dict(mag='encoding [r]',grad='encoding [r]'), picks=picks,
+                          titles=dict(mag='magnetometers', grad='gradiometers'),spatial_colors=True)
+                          
+
         # make all lines gray and low alppha that never cross 0.075
-        for ax in fig.axes:
+        # chage figsize
+        fig.set_size_inches(6, 5)
+        # despine
+        sns.despine(fig=fig)
+        print(fig.axes)
+        for ax in fig.axes[:-1]:
+            print(ax, ax.title.get_text())
             for line in ax.get_lines():
-                line.set_color('gray')
-                line.set_alpha(0.3)
-                if np.any(np.abs(line.get_ydata()) > 0.1):
-                    line.set_alpha(.8)
-                    line.set_color('magenta')
+                # if np.any(np.abs(line.get_ydata()) > 0.1):
+                #     line.set_alpha(.8)
+                line.set_linewidth(6)
+                line.set_alpha(.4)
+        # incease size ot the small topomap
+        #ax_topo1 = fig.axes[3]
+        #box = ax_topo1.get_position()
+        #ax_topo1.set_position([box.x0 - 0.05, box.y0 - 0.05, box.width + 0.1, box.height + 0.1])
+        # add title to the small topomap
+        #ax_topo1.set_title('Topography at 110 ms', fontsize=16)
+        # vertical line at 0 ms
+        for ax in fig.axes:
+            if 'Time (ms)' in ax.get_xlabel():
+                ax.axvline(x=0, color='grey', linestyle='--')
+                ax.axhline(y=0, color='grey', linestyle='-')
+                ax.set_xlabel('time[ms]')
+                ax.set_title(None)
+            
         # nuke the same chanels from the small topomap
-  
+
         # add the topo at t=110ms
         #evoked.plot_topomap(times=0.110, ch_type='mag', colorbar=True, show=False, axes=fig.axes[0])
         
@@ -121,18 +157,27 @@ def main():
         print("\nLoading encoding results...")
         r_values, times, metadata = load_encoding_results(results_file)
         print(times)
-        # Create MNE Evoked object
-        print("Creating MNE Evoked object...")
-        # load infro from raw file in data dir
-        rawdir = Path("/share/klab/datasets/avs/rawdir/as01a/as01a01.fif")
-        raw = mne.io.read_raw_fif(rawdir, preload=False)
-        info = mne.pick_info(raw.info, mne.pick_types(raw.info, meg=True, eeg=False))
-        # infer the sampling frequency from the number of timepoints in tthe times array
+        # Infer the sampling frequency from the number of timepoints in the times array
         diffs = np.diff(times)
         mean_diff = np.mean(diffs)
         sfreq_inferred = 1.0 / mean_diff if mean_diff > 0 else 500
+        # Create MNE Evoked object
+        print("Creating MNE Evoked object...")
+        # Load info from raw file in data dir
+        rawdir = Path("/share/klab/datasets/avs/rawdir/as01a/as01ad.fif")
+        raw = mne.io.read_raw_fif(rawdir, preload=False)
+        # subselect a small sipped from raw
+        raw = raw.crop(tmin=20, tmax=30)
+        # resmple to inferred sfreq
+        raw.resample(sfreq_inferred, npad="auto")
+        info_raw = mne.pick_info(raw.info, mne.pick_types(raw.info, meg=True, eeg=False, exclude='bads'))
+        # Get the montage from raw
+       
+      
         print(f"Inferred sampling frequency: {sfreq_inferred} Hz")
-        evoked = create_mne_evoked(r_values, times, sfreq=sfreq_inferred, info=info)
+        # Resample the raw object to adjust the sampling frequency
+      
+        evoked = create_mne_evoked(r_values, times, sfreq=sfreq_inferred, info=info_raw)
 
         # Create joint plot
         print("Creating joint plot...")

@@ -719,11 +719,11 @@ def plot_grand_average_rsa(rsa_data_list: List[Dict[str, Any]], output_dir: Path
         sem_consistency = np.nanstd(all_consistency, axis=0) / np.sqrt(len(all_consistency))
 
         # Plot consistency as shaded region
-        ax.fill_between(times, 0, mean_consistency, alpha=0.2, color='green',
+        ax.fill_between(times*1000, 0, mean_consistency, alpha=0.2, color='green',
                        label='Within-subject consistency')
         ax.plot(times, mean_consistency, 'g--', alpha=0.7, linewidth=1.5)
         # Add SEM shading
-        ax.fill_between(times, mean_consistency - sem_consistency,
+        ax.fill_between(times*1000, mean_consistency - sem_consistency,
                        mean_consistency + sem_consistency, alpha=0.1, color='green')
         logger.info("Plotted group-level within-subject consistency")
 
