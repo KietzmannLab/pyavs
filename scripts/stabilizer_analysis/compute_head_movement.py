@@ -213,16 +213,19 @@ def process_subject_session(subject_id: int,
         logger.error(f"Failed to load data: {e}")
         return None
 
-    # Concatenate runs
-    try:
-        raw_concat = concatenate_meg_runs(raws_dict, verbose=False)
-        logger.info(f"Concatenated {len(raws_dict)} runs")
-    except Exception as e:
-        logger.error(f"Failed to concatenate runs: {e}")
-        return None
+    # Extract the headpos from all runs
+    head_pos_list = []
+    for run_idx, raw in raws_dict.items():
+        logger.info(f"Run {run_idx}: {raw.n_times} samples, {raw.info['nchan']} channels")
+        head_pos = extract_head_positions(raw)
+        if head_pos is not None:
+            head_pos_list.append(head_pos)
+        else:
+            logger.warning(f"Run {run_idx}: No head position data extracted")
+        
 
     # Extract head positions
-    head_pos = extract_head_positions(raw_concat)
+    head_pos = np.vstack(head_pos_list) if head_pos_list else None
     if head_pos is None:
         logger.error("Head position extraction failed")
         return None
@@ -272,7 +275,7 @@ def main():
 
     # Subject and session selection
     parser.add_argument('--subjects', type=int, nargs='+',
-                       default=[1, 2, 3, 4, 5],
+                       default=[1,],
                        help='Subject IDs to process')
     parser.add_argument('--sessions', type=int, nargs='+',
                        default=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
