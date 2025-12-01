@@ -22,6 +22,7 @@ import logging
 import numpy as np
 import mne
 from mne.chpi import compute_chpi_amplitudes, compute_chpi_locs, compute_head_pos
+from joblib import Parallel, delayed
 
 # Add pyavs to path for development
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
@@ -169,10 +170,36 @@ def quaternions_to_euler(quaternions: np.ndarray) -> np.ndarray:
     return euler
 
 
+def extract_head_positions_from_run(run_idx: int, raw: mne.io.Raw) -> tuple:
+    """
+    Extract head positions from a single run.
+
+    Parameters
+    ----------
+    run_idx : int
+        Run index
+    raw : mne.io.Raw
+        Raw MEG data
+
+    Returns
+    -------
+    run_idx : int
+        Run index (for tracking)
+    head_pos : np.ndarray or None
+        Head position array or None if extraction failed
+    """
+    logger.info(f"Run {run_idx}: {raw.n_times} samples, {raw.info['nchan']} channels")
+    head_pos = extract_head_positions(raw)
+    if head_pos is None:
+        logger.warning(f"Run {run_idx}: No head position data extracted")
+    return run_idx, head_pos
+
+
 def process_subject_session(subject_id: int,
                             session_num: int,
                             data_path: Path,
-                            output_dir: Path) -> Optional[Path]:
+                            output_dir: Path,
+                            n_jobs: int = 1) -> Optional[Path]:
     """
     Process a single subject-session: extract head positions and save metrics.
 
@@ -186,6 +213,8 @@ def process_subject_session(subject_id: int,
         Base data directory
     output_dir : Path
         Output directory for results
+    n_jobs : int
+        Number of parallel jobs for processing runs (default: 1)
 
     Returns
     -------
@@ -213,18 +242,18 @@ def process_subject_session(subject_id: int,
         logger.error(f"Failed to load data: {e}")
         return None
 
-    # Extract the headpos from all runs
-    head_pos_list = []
-    for run_idx, raw in raws_dict.items():
-        logger.info(f"Run {run_idx}: {raw.n_times} samples, {raw.info['nchan']} channels")
-        head_pos = extract_head_positions(raw)
-        if head_pos is not None:
-            head_pos_list.append(head_pos)
-        else:
-            logger.warning(f"Run {run_idx}: No head position data extracted")
-        
+    # Extract head positions from all runs in parallel
+    logger.info(f"Extracting head positions from {len(raws_dict)} runs using {n_jobs} parallel jobs")
 
-    # Extract head positions
+    results = Parallel(n_jobs=n_jobs, verbose=10)(
+        delayed(extract_head_positions_from_run)(run_idx, raw)
+        for run_idx, raw in raws_dict.items()
+    )
+
+    # Collect successful extractions
+    head_pos_list = [head_pos for run_idx, head_pos in results if head_pos is not None]
+
+    # Concatenate all head positions
     head_pos = np.vstack(head_pos_list) if head_pos_list else None
     if head_pos is None:
         logger.error("Head position extraction failed")
@@ -289,6 +318,9 @@ def main():
     # Processing options
     parser.add_argument('--verbose', '-v', action='store_true',
                        help='Increase verbosity')
+    parser.add_argument('--n-jobs', type=int,
+                       default=1,
+                       help='Number of parallel jobs for processing runs within each session (default: 1)')
 
     args = parser.parse_args()
 
@@ -320,7 +352,8 @@ def main():
                     subject_id=subject_id,
                     session_num=session_num,
                     data_path=data_path,
-                    output_dir=output_dir
+                    output_dir=output_dir,
+                    n_jobs=args.n_jobs
                 )
                 if result:
                     n_processed += 1
