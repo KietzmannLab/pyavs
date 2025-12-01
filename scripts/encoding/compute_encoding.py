@@ -150,7 +150,6 @@ def match_epochs_to_embeddings(metadata: pd.DataFrame, file_names: List[str]) ->
 
 def clip_outliers_and_filter(epochs_data: np.ndarray, embeddings: np.ndarray,
                             metadata: pd.DataFrame, outlier_percentiles: Tuple[float, float] = (0.05, 99.5)) -> Tuple[np.ndarray, np.ndarray, pd.DataFrame]:
-                            metadata: pd.DataFrame, outlier_percentiles: Tuple[float, float] = (0.05, 99.5)) -> Tuple[np.ndarray, np.ndarray, pd.DataFrame]:
     """Clip outliers in MEG data and return filtered data."""
 
     # Compute outlier thresholds across all channels and timepoints
