@@ -170,16 +170,23 @@ def quaternions_to_euler(quaternions: np.ndarray) -> np.ndarray:
     return euler
 
 
-def extract_head_positions_from_run(run_idx: int, raw: mne.io.Raw) -> tuple:
+def extract_head_positions_from_run(subject_id: int, session_num: int, run_idx: int, data_path: str) -> tuple:
     """
     Extract head positions from a single run.
 
+    This function loads the Raw data internally to avoid pickling issues
+    when used with joblib.Parallel.
+
     Parameters
     ----------
+    subject_id : int
+        Subject ID
+    session_num : int
+        Session number
     run_idx : int
         Run index
-    raw : mne.io.Raw
-        Raw MEG data
+    data_path : str
+        Base data directory path
 
     Returns
     -------
@@ -188,11 +195,35 @@ def extract_head_positions_from_run(run_idx: int, raw: mne.io.Raw) -> tuple:
     head_pos : np.ndarray or None
         Head position array or None if extraction failed
     """
-    logger.info(f"Run {run_idx}: {raw.n_times} samples, {raw.info['nchan']} channels")
-    head_pos = extract_head_positions(raw)
-    if head_pos is None:
-        logger.warning(f"Run {run_idx}: No head position data extracted")
-    return run_idx, head_pos
+    from pyavs.dataloader.meg import load_meg_run
+
+    try:
+        # Load the raw data for this specific run
+        raw = load_meg_run(
+            subject_id=subject_id,
+            session=session_num,
+            run=run_idx,
+            data_path=data_path,
+            preprocessed=False  # Use raw data for HPI extraction
+        )
+
+        if raw is None:
+            logger.warning(f"Run {run_idx}: Could not load raw data")
+            return run_idx, None
+
+        logger.info(f"Run {run_idx}: {raw.n_times} samples, {raw.info['nchan']} channels")
+
+        # Extract head positions
+        head_pos = extract_head_positions(raw)
+
+        if head_pos is None:
+            logger.warning(f"Run {run_idx}: No head position data extracted")
+
+        return run_idx, head_pos
+
+    except Exception as e:
+        logger.error(f"Run {run_idx}: Failed to process - {e}")
+        return run_idx, None
 
 
 def process_subject_session(subject_id: int,
@@ -223,31 +254,22 @@ def process_subject_session(subject_id: int,
     """
     logger.info(f"Processing subject {subject_id}, session {session_num}")
 
-    # Load raw MEG data for this session
-    try:
-        raws_dict = load_meg_session(
-            subject_id=subject_id,
-            session=session_num,
-            data_path=str(data_path),
-            preprocessed=False,  # Use raw data for HPI extraction
-        )
+    # Determine which runs to process for this session
+    # Session 1 has 10 runs (1-10), sessions 2-10 have 14 runs (1-14)
+    if session_num == 1:
+        run_indices = list(range(1, 11))  # 1-10
+    else:
+        run_indices = list(range(1, 15))  # 1-14
 
-        if not raws_dict:
-            logger.error(f"No raw data found for subject {subject_id}, session {session_num}")
-            return None
-
-        logger.info(f"Loaded {len(raws_dict)} runs for session {session_num}")
-
-    except Exception as e:
-        logger.error(f"Failed to load data: {e}")
-        return None
+    logger.info(f"Processing {len(run_indices)} runs for session {session_num}")
 
     # Extract head positions from all runs in parallel
-    logger.info(f"Extracting head positions from {len(raws_dict)} runs using {n_jobs} parallel jobs")
+    # Each worker will load its own Raw data to avoid pickling issues
+    logger.info(f"Extracting head positions from {len(run_indices)} runs using {n_jobs} parallel jobs")
 
     results = Parallel(n_jobs=n_jobs, verbose=10)(
-        delayed(extract_head_positions_from_run)(run_idx, raw)
-        for run_idx, raw in raws_dict.items()
+        delayed(extract_head_positions_from_run)(subject_id, session_num, run_idx, str(data_path))
+        for run_idx in run_indices
     )
 
     # Collect successful extractions
