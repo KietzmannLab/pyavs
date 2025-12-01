@@ -20,7 +20,7 @@ eval "$(conda shell.bash hook)"
 conda activate avs
 
 # Base paths
-script_path="/home/student/p/psulewski/pyavs_conversion/pyavs/scripts/stabilizer_analysis"
+script_path="/home/student/p/psulewski/pyAVS/scripts/stabilizer_analysis/"
 data_path="/share/klab/datasets/avs/"
 output_dir="/share/klab/psulewski/psulewski/pyavs/stabilizer"
 

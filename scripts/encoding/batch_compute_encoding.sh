@@ -20,7 +20,7 @@ eval "$(conda shell.bash hook)"
 conda activate avs
 
 # Base paths
-script_path="/home/student/p/psulewski/pyavs_conversion/pyavs/scripts/encoding"
+script_path="/home/student/p/psulewski/pyavs/scripts/encoding"
 data_path="/share/klab/datasets/avs/"
 
 # Get subject ID from array task ID
@@ -41,7 +41,7 @@ python ${script_path}/compute_encoding.py \
     --sessions 1 2 3 4 5 6 7 8 9 10 \
     --model resnet50_ecoset_crop \
     --layer avgpool \
-    --n-jobs -1
+    --n-jobs 1
 
 echo "==================================================="
 echo "Subject $subject encoding analysis complete"
