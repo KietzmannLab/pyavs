@@ -1,10 +1,10 @@
 #!/bin/bash
-#SBATCH --time=1:00:00
+#SBATCH --time=5:00:00
 #SBATCH --nodes=1
 #SBATCH --mem=50G
 #SBATCH --cpus-per-task=15
 
-#SBATCH -p klab-cpu
+#SBATCH -p workq
 #SBATCH --job-name=headmove
 #SBATCH --error=error_head_movement_%A_%a.err
 #SBATCH --output=output_head_movement_%A_%a.out

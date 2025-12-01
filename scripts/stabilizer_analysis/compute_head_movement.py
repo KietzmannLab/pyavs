@@ -195,18 +195,12 @@ def extract_head_positions_from_run(subject_id: int, session_num: int, run_idx: 
     head_pos : np.ndarray or None
         Head position array or None if extraction failed
     """
-    from pyavs.dataloader.meg import load_meg_run
+    #from pyavs.dataloader.meg import load_meg_run
 
     try:
         # Load the raw data for this specific run
-        raw = load_meg_run(
-            subject_id=subject_id,
-            session=session_num,
-            run=run_idx,
-            data_path=data_path,
-            preprocessed=False  # Use raw data for HPI extraction
-        )
-
+        raw = load_meg_session(subject_id=subject_id, session=session_num, runs=[run_idx], data_path=data_path, preprocessed=False)
+        raw = raw[run_idx]
         if raw is None:
             logger.warning(f"Run {run_idx}: Could not load raw data")
             return run_idx, None
