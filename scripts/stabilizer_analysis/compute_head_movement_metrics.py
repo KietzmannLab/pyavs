@@ -159,7 +159,7 @@ def compute_between_session_metrics(session_data_list: List[Dict]) -> Dict:
     start_positions = []
     for sess_data in session_data_list:
         if sess_data is not None and 'positions' in sess_data:
-            start_pos = sess_data['positions'][0]  # First timepoint
+            start_pos = np.mean(sess_data['positions'][:5], axis=0)  # Average over first 5 timepoints
             start_positions.append(start_pos)
 
     if len(start_positions) < 2:
