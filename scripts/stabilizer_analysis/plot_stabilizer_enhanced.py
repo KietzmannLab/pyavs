@@ -6,6 +6,7 @@ Creates publication-ready figures comparing AVS dataset to Meyer et al. (2017) b
 
 Usage:
     python plot_stabilizer_enhanced.py --metrics-dir /path/to/analysis
+    python plot_stabilizer_enhanced.py --metrics-dir /path/to/analysis
 
 Author: pyAVS development team
 """
@@ -43,25 +44,43 @@ def load_metrics(metrics_dir: Path) -> dict:
     metrics : dict
         Dictionary with DataFrames and benchmarks
     """
-    within_csv = metrics_dir / 'within_session_metrics.csv'
-    between_csv = metrics_dir / 'between_session_metrics.csv'
+    # Try new repositioning metrics format first
+    repositioning_csv = metrics_dir / 'repositioning_metrics.csv'
+    within_run_csv = metrics_dir / 'within_run_stability.csv'
 
-    if not within_csv.exists():
-        raise FileNotFoundError(f"Within-session metrics not found: {within_csv}")
-    if not between_csv.exists():
-        raise FileNotFoundError(f"Between-session metrics not found: {between_csv}")
+    if repositioning_csv.exists():
+        # New format
+        df_repositioning = pd.read_csv(repositioning_csv)
+        df_within_run = pd.read_csv(within_run_csv) if within_run_csv.exists() else pd.DataFrame()
 
-    df_within = pd.read_csv(within_csv)
-    df_between = pd.read_csv(between_csv)
+        print(f"Loaded {len(df_repositioning)} repositioning records")
+        if not df_within_run.empty:
+            print(f"Loaded {len(df_within_run)} within-run stability records")
 
-    print(f"Loaded {len(df_within)} within-session records")
-    print(f"Loaded {len(df_between)} between-session records")
+        return {
+            'repositioning': df_repositioning,
+            'within_run': df_within_run,
+            'meyer_benchmarks': MEYER_BENCHMARKS,
+        }
+    else:
+        # Fall back to old format
+        within_csv = metrics_dir / 'within_session_metrics.csv'
+        between_csv = metrics_dir / 'between_session_metrics.csv'
 
-    return {
-        'within_session': df_within,
-        'between_subject': df_between,
-        'meyer_benchmarks': MEYER_BENCHMARKS,
-    }
+        if not within_csv.exists():
+            raise FileNotFoundError(f"Metrics not found. Run compute_head_movement_metrics.py first.")
+
+        df_within = pd.read_csv(within_csv)
+        df_between = pd.read_csv(between_csv)
+
+        print(f"Loaded {len(df_within)} within-session records (old format)")
+        print(f"Loaded {len(df_between)} between-session records (old format)")
+
+        return {
+            'within_session': df_within,
+            'between_subject': df_between,
+            'meyer_benchmarks': MEYER_BENCHMARKS,
+        }
 
 
 def load_raw_head_positions(data_dir: Path, subject_id: int, session_num: int) -> dict:
@@ -201,7 +220,7 @@ def create_comparison_bar_chart(df_within: pd.DataFrame, df_between: pd.DataFram
 
     # Create figure
     sns.set_context("paper", font_scale=1.3)
-    #sns.set_style("whitegrid")
+    sns.set_style("whitegrid")
 
     fig, ax = plt.subplots(figsize=(12, 6))
 
@@ -236,81 +255,60 @@ def create_comparison_bar_chart(df_within: pd.DataFrame, df_between: pd.DataFram
     plt.close()
 
 
-def create_within_vs_between_pointplot(df_within: pd.DataFrame, df_between: pd.DataFrame,
-                                       output_dir: Path):
+def create_within_vs_between_pointplot(repositioning_df: pd.DataFrame, output_dir: Path):
     """
-    Create publication-quality point plot comparing within-session vs between-session displacement.
+    Create publication-quality point plot comparing within-session vs between-session repositioning error.
 
-    Shows X, Y, Z axes with within-session and between-session metrics as separate hues.
-    Style inspired by encoding grand average plot.
+    Shows X, Y, Z axes with within-session (between runs) and between-session repositioning
+    as separate hues. Style inspired by encoding grand average plot.
 
     Parameters
     ----------
-    df_within : pd.DataFrame
-        Within-session metrics
-    df_between : pd.DataFrame
-        Between-session metrics
+    repositioning_df : pd.DataFrame
+        Repositioning metrics with columns: axis, repositioning_error_mm, metric_type
     output_dir : Path
         Output directory for figure
     """
-    # Prepare data: aggregate within-session by subject (mean across sessions)
-    within_by_subject = df_within.groupby('subject_id').agg({
-        'sd_x': 'mean',
-        'sd_y': 'mean',
-        'sd_z': 'mean'
-    }).reset_index()
-
-    # Reshape within-session to long format
-    within_long = pd.DataFrame({
-        'subject': list(within_by_subject['subject_id']) * 3,
-        'axis': ['X'] * len(within_by_subject) + ['Y'] * len(within_by_subject) + ['Z'] * len(within_by_subject),
-        'displacement_mm': list(within_by_subject['sd_x']) + list(within_by_subject['sd_y']) + list(within_by_subject['sd_z']),
-        'metric_type': 'Within-session'
-    })
-
-    # Reshape between-session to long format
-    between_long = pd.DataFrame({
-        'subject': list(df_between['subject_id']) * 3,
-        'axis': ['X'] * len(df_between) + ['Y'] * len(df_between) + ['Z'] * len(df_between),
-        'displacement_mm': list(df_between['repositioning_sd_x']) + list(df_between['repositioning_sd_y']) + list(df_between['repositioning_sd_z']),
-        'metric_type': 'Between-session'
-    })
-
-    # Combine
-    df_combined = pd.concat([within_long, between_long], ignore_index=True)
-
     # Set style matching encoding plot
     sns.set_context("poster")
 
     # Create figure
-    fig, ax = plt.subplots(figsize=(4, 4))
+    fig, ax = plt.subplots(figsize=(8, 6))
 
     # Create pointplot with bootstrapped CI
     sns.pointplot(
-        data=df_combined,
+        data=repositioning_df,
         x='axis',
-        y='displacement_mm',
+        y='repositioning_error_mm',
         hue='metric_type',
         errorbar=('ci', 95),  # 95% confidence interval
-        #capsize=0.1,
+        capsize=0.1,
         markers=['o', 's'],  # Different markers for within vs between
-        #linestyles=['-', '--'],  # Different line styles
+        linestyles=['-', '--'],  # Different line styles
         ax=ax,
-        #linewidth=2.5,
-        #markersize=10,
-        #err_kws={'linewidth': 2}
-        estimator=np.mean,
-        join=False,
-        palette='plasma'
+        linewidth=2.5,
+        markersize=10,
+        err_kws={'linewidth': 2}
     )
 
     # Styling
-    ax.set_ylim(0, 5)
-    ax.axhline(y=0, color='grey', linestyle='-')
-    ax.set_xlabel('axis')
-    ax.set_ylabel('head displacement\n[mm]')
-    #ax.set_title('Within-session vs. Between-session Head Displacement', fontsize=20)
-    ax.legend(title='',frameon=False)
+    ax.axhline(y=0, color='grey', linestyle='-', linewidth=1)
+    ax.set_xlabel('Axis', fontsize=18)
+    ax.set_ylabel('Repositioning error [mm]', fontsize=18)
+    ax.set_title('Within-session vs. Between-session Repositioning Error', fontsize=20)
+
+    # Update legend labels
+    handles, labels = ax.get_legend_handles_labels()
+    new_labels = []
+    for label in labels:
+        if label == 'within_session':
+            new_labels.append('Within-session (between runs)')
+        elif label == 'between_session':
+            new_labels.append('Between-session')
+        else:
+            new_labels.append(label)
+    ax.legend(handles, new_labels, title='', fontsize=14, frameon=False)
+
     sns.despine(fig=fig)
 
     # Adjust layout
@@ -323,8 +321,8 @@ def create_within_vs_between_pointplot(df_within: pd.DataFrame, df_between: pd.D
     plt.close()
 
     # Print summary statistics
-    print("\nWithin vs Between Statistics:")
-    summary = df_combined.groupby(['metric_type', 'axis'])['displacement_mm'].agg(['mean', 'std', 'sem'])
+    print("\nRepositioning Error Statistics:")
+    summary = repositioning_df.groupby(['metric_type', 'axis'])['repositioning_error_mm'].agg(['mean', 'std', 'sem'])
     print(summary.to_string())
 
 
@@ -427,21 +425,28 @@ def main():
     # Load metrics
     print("Loading metrics...")
     metrics = load_metrics(metrics_dir)
-    df_within = metrics['within_session']
-    df_between = metrics['between_subject']
     meyer = metrics['meyer_benchmarks']
 
-    # Create 4-panel figure
-    print("\nCreating 4-panel comprehensive figure...")
-    create_four_panel_figure(df_within, df_between, meyer, output_dir)
+    # Check which format we have
+    if 'repositioning' in metrics:
+        # New format - only create repositioning point plot
+        print("\nCreating within vs between session point plot...")
+        create_within_vs_between_pointplot(metrics['repositioning'], output_dir)
+    else:
+        # Old format - create all plots
+        df_within = metrics['within_session']
+        df_between = metrics['between_subject']
 
-    # Create comparison bar chart
-    print("\nCreating AVS vs Meyer comparison chart...")
-    create_comparison_bar_chart(df_within, df_between, meyer, output_dir)
+        # Create 4-panel figure
+        print("\nCreating 4-panel comprehensive figure...")
+        create_four_panel_figure(df_within, df_between, meyer, output_dir)
 
-    # Create within vs between point plot
-    print("\nCreating within vs between session point plot...")
-    create_within_vs_between_pointplot(df_within, df_between, output_dir)
+        # Create comparison bar chart
+        print("\nCreating AVS vs Meyer comparison chart...")
+        create_comparison_bar_chart(df_within, df_between, meyer, output_dir)
+
+        # Create within vs between point plot (old format)
+        print("\nNote: Using old metrics format. Rerun compute_head_movement_metrics.py for new repositioning metrics.")
 
     # Parse example sessions
     examples = []

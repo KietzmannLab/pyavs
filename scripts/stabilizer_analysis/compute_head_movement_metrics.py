@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """
-Compute Meyer-compatible head movement metrics from HPI coil data.
+Compute head movement repositioning metrics from HPI coil data.
 
-This script loads head position data and computes metrics following
-Meyer et al. (2017) methodology for assessing head stabilizer efficacy.
-
-Reference:
-Meyer, S. S., et al. (2017). Flexible head-casts for high spatial precision MEG.
-Journal of Neuroscience Methods, 276, 38-45.
+This script computes:
+1. Within-session repositioning error (between runs)
+2. Between-session repositioning error (between sessions)
+3. Within-run stability (SD per run)
 
 Usage:
     python compute_head_movement_metrics.py --data-dir /path/to/stabilizer --subjects 1 2 3 4 5
@@ -18,20 +16,12 @@ Author: pyAVS development team
 import argparse
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
 
-# Meyer et al. (2017) benchmarks
-MEYER_BENCHMARKS = {
-    'within_session_sd_threshold': 0.22,  # mm per axis
-    'max_deviation_threshold': 0.75,  # mm
-    'between_session_repositioning': 1.0,  # mm typical value
-}
 
-
-def load_head_position_data(data_dir: Path, subject_id: int, session_num: int) -> Dict:
+def load_head_position_data(data_dir: Path, subject_id: int, session_num: int) -> dict:
     """
     Load head position data for a subject-session.
 
@@ -62,137 +52,181 @@ def load_head_position_data(data_dir: Path, subject_id: int, session_num: int) -
             'session_num': int(data['session_num']),
             'times': data['times'],
             'positions': data['positions'],  # [N_times, 3] in meters
-            'displacement': data['displacement'],  # [N_times, 3] in mm
-            'displacement_magnitude': data['displacement_magnitude'],  # [N_times] in mm
             'goodness_of_fit': data['goodness_of_fit'],  # [N_times]
+            'run_ids': data.get('run_ids', None),  # [N_times] run numbers
         }
     except Exception as e:
         print(f"Error loading {npz_file}: {e}")
         return None
 
 
-def compute_within_session_metrics(positions: np.ndarray, gof: np.ndarray = None, gof_threshold: float = 0.95) -> Dict:
+def compute_within_session_repositioning(data: dict, n_samples: int = 100) -> dict:
     """
-    Compute within-session stability metrics following Meyer et al. (2017).
+    Compute repositioning error between runs within a session.
 
-    Meyer method: Mean-correct positions first, then compute SD.
-    This measures variability around the mean position, not drift from start.
+    For each run, compute median XYZ of first n_samples, then compute SD across runs.
 
     Parameters
     ----------
-    positions : np.ndarray
-        Position array [N_times, 3] in meters
-    gof : np.ndarray, optional
-        Goodness of fit array [N_times]
-    gof_threshold : float
-        Minimum GOF to include samples (default: 0.95)
+    data : dict
+        Session data with positions and run_ids
+    n_samples : int
+        Number of samples to use from start of each run (default: 100)
 
     Returns
     -------
     metrics : dict
-        Dictionary with:
-        - sd_x, sd_y, sd_z: Standard deviations in mm
-        - sd_total: Total SD (Euclidean)
-        - max_deviation: Maximum distance from mean position in mm
-        - mean_position: Mean position [3] in meters
-        - n_samples: Number of samples used
-        - n_samples_excluded: Number of samples excluded by GOF
+        Repositioning SD per axis
     """
-    # Filter by goodness of fit if provided
-    if gof is not None:
-        valid_mask = gof >= gof_threshold
-        positions_filtered = positions[valid_mask]
-        n_excluded = np.sum(~valid_mask)
-    else:
-        positions_filtered = positions
-        n_excluded = 0
+    if data['run_ids'] is None:
+        print("Warning: run_ids not found in data, cannot compute within-session repositioning")
+        return None
 
-    # Convert to mm
-    positions_mm = positions_filtered * 1000
+    positions = data['positions'] * 1000  # Convert to mm
+    run_ids = data['run_ids']
+    unique_runs = np.unique(run_ids)
 
-    # Mean-correct (Meyer method)
-    mean_pos = np.mean(positions_mm, axis=0)
-    positions_centered = positions_mm - mean_pos
+    # Extract median starting position for each run
+    run_medians = []
+    for run_id in unique_runs:
+        run_mask = run_ids == run_id
+        run_positions = positions[run_mask]
 
-    # Compute SD per axis
-    sd_x, sd_y, sd_z = np.std(positions_centered, axis=0)
+        if len(run_positions) < n_samples:
+            print(f"Warning: Run {run_id} has only {len(run_positions)} samples, using all")
+            run_medians.append(np.median(run_positions, axis=0))
+        else:
+            run_medians.append(np.median(run_positions[:n_samples], axis=0))
 
-    # Compute total SD (Euclidean)
-    sd_total = np.sqrt(sd_x**2 + sd_y**2 + sd_z**2)
+    run_medians = np.array(run_medians)  # [n_runs, 3]
 
-    # Compute max deviation from mean
-    deviations = np.sqrt(np.sum(positions_centered**2, axis=1))
-    max_deviation = np.max(deviations)
-
-    return {
-        'sd_x': sd_x,
-        'sd_y': sd_y,
-        'sd_z': sd_z,
-        'sd_total': sd_total,
-        'max_deviation': max_deviation,
-        'mean_position': mean_pos,
-        'n_samples': len(positions_filtered),
-        'n_samples_excluded': n_excluded,
-    }
-
-
-def compute_between_session_metrics(session_data_list: List[Dict]) -> Dict:
-    """
-    Compute between-session repositioning metrics.
-
-    This measures how consistently the head is repositioned across sessions.
-
-    Parameters
-    ----------
-    session_data_list : list of dict
-        List of session data dictionaries
-
-    Returns
-    -------
-    metrics : dict
-        Dictionary with:
-        - repositioning_sd_x, _y, _z: SD of starting positions in mm
-        - repositioning_sd_total: Total repositioning SD in mm
-        - n_sessions: Number of sessions
-    """
-    # Extract starting positions from each session
-    start_positions = []
-    for sess_data in session_data_list:
-        if sess_data is not None and 'positions' in sess_data:
-            start_pos = np.mean(sess_data['positions'][:5], axis=0)  # Average over first 5 timepoints
-            start_positions.append(start_pos)
-
-    if len(start_positions) < 2:
-        return {
-            'repositioning_sd_x': np.nan,
-            'repositioning_sd_y': np.nan,
-            'repositioning_sd_z': np.nan,
-            'repositioning_sd_total': np.nan,
-            'n_sessions': len(start_positions),
-        }
-
-    # Convert to array [n_sessions, 3]
-    start_positions = np.array(start_positions) * 1000  # Convert to mm
-
-    # Compute SD across sessions per axis
-    sd_x, sd_y, sd_z = np.std(start_positions, axis=0)
-
-    # Compute total SD
-    sd_total = np.sqrt(sd_x**2 + sd_y**2 + sd_z**2)
+    # Compute SD across runs for each axis
+    sd_x, sd_y, sd_z = np.std(run_medians, axis=0)
 
     return {
         'repositioning_sd_x': sd_x,
         'repositioning_sd_y': sd_y,
         'repositioning_sd_z': sd_z,
-        'repositioning_sd_total': sd_total,
-        'n_sessions': len(start_positions),
+        'n_runs': len(unique_runs),
     }
+
+
+def compute_between_session_repositioning(session_data_list: list, n_samples: int = 100) -> dict:
+    """
+    Compute repositioning error between sessions.
+
+    For each session, get median XYZ of first n_samples of first run.
+
+    Parameters
+    ----------
+    session_data_list : list of dict
+        List of session data dictionaries
+    n_samples : int
+        Number of samples to use from start (default: 100)
+
+    Returns
+    -------
+    metrics : dict
+        Repositioning SD per axis across sessions
+    """
+    session_medians = []
+
+    for sess_data in session_data_list:
+        if sess_data is None or sess_data['run_ids'] is None:
+            continue
+
+        positions = sess_data['positions'] * 1000  # Convert to mm
+        run_ids = sess_data['run_ids']
+
+        # Get first run
+        first_run_id = np.min(run_ids)
+        first_run_mask = run_ids == first_run_id
+        first_run_positions = positions[first_run_mask]
+
+        if len(first_run_positions) < n_samples:
+            session_medians.append(np.median(first_run_positions, axis=0))
+        else:
+            session_medians.append(np.median(first_run_positions[:n_samples], axis=0))
+
+    if len(session_medians) < 2:
+        return {
+            'repositioning_sd_x': np.nan,
+            'repositioning_sd_y': np.nan,
+            'repositioning_sd_z': np.nan,
+            'n_sessions': len(session_medians),
+        }
+
+    session_medians = np.array(session_medians)  # [n_sessions, 3]
+    sd_x, sd_y, sd_z = np.std(session_medians, axis=0)
+
+    return {
+        'repositioning_sd_x': sd_x,
+        'repositioning_sd_y': sd_y,
+        'repositioning_sd_z': sd_z,
+        'n_sessions': len(session_medians),
+    }
+
+
+def compute_within_run_stability(data: dict, gof_threshold: float = 0.95) -> list:
+    """
+    Compute SD within each run.
+
+    Parameters
+    ----------
+    data : dict
+        Session data
+    gof_threshold : float
+        Minimum goodness-of-fit threshold
+
+    Returns
+    -------
+    run_metrics : list of dict
+        Per-run stability metrics
+    """
+    if data['run_ids'] is None:
+        return []
+
+    positions = data['positions'] * 1000  # Convert to mm
+    run_ids = data['run_ids']
+    gof = data['goodness_of_fit']
+    unique_runs = np.unique(run_ids)
+
+    run_metrics = []
+
+    for run_id in unique_runs:
+        run_mask = run_ids == run_id
+        run_positions = positions[run_mask]
+        run_gof = gof[run_mask]
+
+        # Filter by GOF
+        valid_mask = run_gof >= gof_threshold
+        if np.sum(valid_mask) < 10:
+            print(f"Warning: Run {run_id} has only {np.sum(valid_mask)} valid samples after GOF filtering")
+            continue
+
+        valid_positions = run_positions[valid_mask]
+
+        # Mean-correct and compute SD (Meyer method)
+        mean_pos = np.mean(valid_positions, axis=0)
+        positions_centered = valid_positions - mean_pos
+        sd_x, sd_y, sd_z = np.std(positions_centered, axis=0)
+
+        run_metrics.append({
+            'subject_id': data['subject_id'],
+            'session_num': data['session_num'],
+            'run_num': int(run_id),
+            'sd_x': sd_x,
+            'sd_y': sd_y,
+            'sd_z': sd_z,
+            'n_samples': np.sum(valid_mask),
+        })
+
+    return run_metrics
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Compute Meyer-compatible head movement metrics",
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        description="Compute head movement repositioning metrics"
     )
 
     # Input/output paths
@@ -201,7 +235,7 @@ def main():
                        help='Directory containing head position NPZ files')
     parser.add_argument('--output-dir', type=str,
                        default="/share/klab/psulewski/psulewski/pyavs/stabilizer/analysis",
-                       help='Output directory for metrics and tables')
+                       help='Output directory for metrics')
 
     # Subject/session selection
     parser.add_argument('--subjects', type=int, nargs='+',
@@ -211,9 +245,11 @@ def main():
                        default=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
                        help='Session numbers to process')
 
-    # Quality control
+    # Parameters
+    parser.add_argument('--n-samples-start', type=int, default=100,
+                       help='Number of samples from start to use for repositioning (default: 100)')
     parser.add_argument('--gof-threshold', type=float, default=0.95,
-                       help='Minimum goodness-of-fit to include samples (default: 0.95)')
+                       help='Goodness-of-fit threshold (default: 0.95)')
 
     args = parser.parse_args()
 
@@ -223,18 +259,17 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print("="*70)
-    print("Head Movement Metrics Computation (Meyer et al. 2017 method)")
+    print("Head Movement Repositioning Metrics")
     print("="*70)
     print(f"Data directory: {data_dir}")
     print(f"Output directory: {output_dir}")
     print(f"Subjects: {args.subjects}")
     print(f"Sessions: {args.sessions}")
-    print(f"GOF threshold: {args.gof_threshold}")
     print()
 
-    # Store all metrics
-    within_session_metrics = []
-    between_subject_metrics = []
+    # Storage for metrics
+    repositioning_metrics = []
+    within_run_metrics = []
 
     # Process each subject
     for subject_id in args.subjects:
@@ -249,101 +284,103 @@ def main():
             session_data_list.append(data)
 
             if data is not None:
-                # Compute within-session metrics
-                metrics = compute_within_session_metrics(
-                    data['positions'],
-                    data['goodness_of_fit'],
-                    args.gof_threshold
-                )
+                # Within-session repositioning (between runs)
+                within_metrics = compute_within_session_repositioning(data, args.n_samples_start)
+                if within_metrics:
+                    repositioning_metrics.append({
+                        'subject_id': subject_id,
+                        'session_num': session_num,
+                        'axis': 'X',
+                        'repositioning_error_mm': within_metrics['repositioning_sd_x'],
+                        'metric_type': 'within_session',
+                        'n_units': within_metrics['n_runs'],
+                    })
+                    repositioning_metrics.append({
+                        'subject_id': subject_id,
+                        'session_num': session_num,
+                        'axis': 'Y',
+                        'repositioning_error_mm': within_metrics['repositioning_sd_y'],
+                        'metric_type': 'within_session',
+                        'n_units': within_metrics['n_runs'],
+                    })
+                    repositioning_metrics.append({
+                        'subject_id': subject_id,
+                        'session_num': session_num,
+                        'axis': 'Z',
+                        'repositioning_error_mm': within_metrics['repositioning_sd_z'],
+                        'metric_type': 'within_session',
+                        'n_units': within_metrics['n_runs'],
+                    })
 
-                # Store with metadata
-                metrics_record = {
-                    'subject_id': subject_id,
-                    'session_num': session_num,
-                    **metrics
-                }
-                within_session_metrics.append(metrics_record)
+                    print(f"  Session {session_num} within-session repositioning: "
+                          f"X={within_metrics['repositioning_sd_x']:.3f}, "
+                          f"Y={within_metrics['repositioning_sd_y']:.3f}, "
+                          f"Z={within_metrics['repositioning_sd_z']:.3f} mm")
 
-                # Print summary
-                print(f"  Session {session_num}: "
-                      f"SD = ({metrics['sd_x']:.3f}, {metrics['sd_y']:.3f}, {metrics['sd_z']:.3f}) mm, "
-                      f"Max dev = {metrics['max_deviation']:.3f} mm "
-                      f"({metrics['n_samples']} samples, {metrics['n_samples_excluded']} excluded)")
+                # Within-run stability
+                run_stability = compute_within_run_stability(data, args.gof_threshold)
+                within_run_metrics.extend(run_stability)
 
-        # Compute between-session metrics for this subject
-        between_metrics = compute_between_session_metrics(session_data_list)
-        between_metrics['subject_id'] = subject_id
-        between_subject_metrics.append(between_metrics)
-
-        print(f"\n  Between-session repositioning: "
-              f"SD = ({between_metrics['repositioning_sd_x']:.3f}, "
-              f"{between_metrics['repositioning_sd_y']:.3f}, "
-              f"{between_metrics['repositioning_sd_z']:.3f}) mm, "
-              f"Total = {between_metrics['repositioning_sd_total']:.3f} mm")
-
-    # Convert to DataFrames
-    df_within = pd.DataFrame(within_session_metrics)
-    df_between = pd.DataFrame(between_subject_metrics)
-
-    # Compute summary statistics
-    print(f"\n{'='*70}")
-    print("Summary Statistics (AVS Dataset)")
-    print(f"{'='*70}")
-
-    summary_stats = {
-        'within_session_sd_x': (df_within['sd_x'].mean(), df_within['sd_x'].std()),
-        'within_session_sd_y': (df_within['sd_y'].mean(), df_within['sd_y'].std()),
-        'within_session_sd_z': (df_within['sd_z'].mean(), df_within['sd_z'].std()),
-        'max_deviation': (df_within['max_deviation'].mean(), df_within['max_deviation'].std()),
-        'between_session_repositioning': (df_between['repositioning_sd_total'].mean(),
-                                          df_between['repositioning_sd_total'].std()),
-    }
-
-    # Create comparison table
-    comparison_data = []
-    for metric, (mean_val, std_val) in summary_stats.items():
-        meyer_value = MEYER_BENCHMARKS.get(metric, MEYER_BENCHMARKS.get(metric.replace('_', ' '), np.nan))
-
-        comparison_data.append({
-            'Metric': metric.replace('_', ' ').title(),
-            'AVS Dataset': f"{mean_val:.3f} ± {std_val:.3f} mm",
-            'Meyer et al. (2017)': f"< {meyer_value:.2f} mm" if not np.isnan(meyer_value) else "N/A"
+        # Between-session repositioning
+        between_metrics = compute_between_session_repositioning(session_data_list, args.n_samples_start)
+        repositioning_metrics.append({
+            'subject_id': subject_id,
+            'session_num': np.nan,  # Across all sessions
+            'axis': 'X',
+            'repositioning_error_mm': between_metrics['repositioning_sd_x'],
+            'metric_type': 'between_session',
+            'n_units': between_metrics['n_sessions'],
+        })
+        repositioning_metrics.append({
+            'subject_id': subject_id,
+            'session_num': np.nan,
+            'axis': 'Y',
+            'repositioning_error_mm': between_metrics['repositioning_sd_y'],
+            'metric_type': 'between_session',
+            'n_units': between_metrics['n_sessions'],
+        })
+        repositioning_metrics.append({
+            'subject_id': subject_id,
+            'session_num': np.nan,
+            'axis': 'Z',
+            'repositioning_error_mm': between_metrics['repositioning_sd_z'],
+            'metric_type': 'between_session',
+            'n_units': between_metrics['n_sessions'],
         })
 
-    df_comparison = pd.DataFrame(comparison_data)
+        print(f"\n  Between-session repositioning: "
+              f"X={between_metrics['repositioning_sd_x']:.3f}, "
+              f"Y={between_metrics['repositioning_sd_y']:.3f}, "
+              f"Z={between_metrics['repositioning_sd_z']:.3f} mm")
 
-    print("\n" + df_comparison.to_string(index=False))
+    # Create DataFrames
+    df_repositioning = pd.DataFrame(repositioning_metrics)
+    df_within_run = pd.DataFrame(within_run_metrics)
 
-    # Save results
+    # Save CSVs
     print(f"\n{'='*70}")
     print("Saving Results")
     print(f"{'='*70}")
 
-    # Save metrics as NPZ
-    metrics_file = output_dir / 'metrics_summary.npz'
-    np.savez_compressed(
-        metrics_file,
-        within_session_metrics=df_within.to_dict('records'),
-        between_subject_metrics=df_between.to_dict('records'),
-        summary_stats=summary_stats,
-        meyer_benchmarks=MEYER_BENCHMARKS,
-    )
-    print(f"Saved metrics: {metrics_file}")
+    csv_repositioning = output_dir / 'repositioning_metrics.csv'
+    df_repositioning.to_csv(csv_repositioning, index=False)
+    print(f"Saved repositioning metrics: {csv_repositioning}")
 
-    # Save within-session metrics CSV
-    csv_within = output_dir / 'within_session_metrics.csv'
-    df_within.to_csv(csv_within, index=False)
-    print(f"Saved within-session CSV: {csv_within}")
+    csv_within_run = output_dir / 'within_run_stability.csv'
+    df_within_run.to_csv(csv_within_run, index=False)
+    print(f"Saved within-run stability: {csv_within_run}")
 
-    # Save between-session metrics CSV
-    csv_between = output_dir / 'between_session_metrics.csv'
-    df_between.to_csv(csv_between, index=False)
-    print(f"Saved between-session CSV: {csv_between}")
+    # Print summary
+    print(f"\n{'='*70}")
+    print("Summary Statistics")
+    print(f"{'='*70}")
+    print("\nRepositioning Error (mean ± sem):")
+    summary = df_repositioning.groupby(['metric_type', 'axis'])['repositioning_error_mm'].agg(['mean', 'sem'])
+    print(summary.to_string())
 
-    # Save comparison table
-    csv_comparison = output_dir / 'meyer_comparison.csv'
-    df_comparison.to_csv(csv_comparison, index=False)
-    print(f"Saved comparison table: {csv_comparison}")
+    print("\nWithin-Run Stability (mean ± sem):")
+    run_summary = df_within_run[['sd_x', 'sd_y', 'sd_z']].agg(['mean', 'sem'])
+    print(run_summary.to_string())
 
     print(f"\n{'='*70}")
     print("Metrics computation complete!")

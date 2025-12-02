@@ -52,7 +52,7 @@ def extract_head_positions(raw: mne.io.Raw) -> Optional[np.ndarray]:
     """
     try:
         logger.info("Extracting HPI coil amplitudes...")
-        chpi_amplitudes = compute_chpi_amplitudes(raw, verbose=False)
+        chpi_amplitudes = compute_chpi_amplitudes(raw, verbose=False, t_step_min=0.05)
 
         logger.info("Computing HPI coil locations...")
         chpi_locs = compute_chpi_locs(raw.info, chpi_amplitudes, verbose=False)
@@ -266,11 +266,20 @@ def process_subject_session(subject_id: int,
         for run_idx in run_indices
     )
 
-    # Collect successful extractions
-    head_pos_list = [head_pos for run_idx, head_pos in results if head_pos is not None]
+    # Collect successful extractions and build run_ids array
+    head_pos_list = []
+    run_ids_list = []
 
-    # Concatenate all head positions
+    for run_idx, head_pos in results:
+        if head_pos is not None:
+            head_pos_list.append(head_pos)
+            # Create run_id array for this run (same run_idx for all samples)
+            run_ids_list.append(np.full(len(head_pos), run_idx, dtype=int))
+
+    # Concatenate all head positions and run IDs
     head_pos = np.vstack(head_pos_list) if head_pos_list else None
+    run_ids = np.concatenate(run_ids_list) if run_ids_list else None
+
     if head_pos is None:
         logger.error("Head position extraction failed")
         return None
@@ -300,6 +309,7 @@ def process_subject_session(subject_id: int,
         displacement=metrics['displacement'],
         displacement_magnitude=metrics['displacement_magnitude'],
         goodness_of_fit=metrics['goodness_of_fit'],
+        run_ids=run_ids,  # NEW: Track which run each sample belongs to
     )
 
     logger.info(f"Saved head position data to: {output_file}")
