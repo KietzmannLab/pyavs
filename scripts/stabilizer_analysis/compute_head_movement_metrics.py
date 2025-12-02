@@ -246,7 +246,7 @@ def main():
                        help='Session numbers to process')
 
     # Parameters
-    parser.add_argument('--n-samples-start', type=int, default=100,
+    parser.add_argument('--n-samples-start', type=int, default=10,
                        help='Number of samples from start to use for repositioning (default: 100)')
     parser.add_argument('--gof-threshold', type=float, default=0.95,
                        help='Goodness-of-fit threshold (default: 0.95)')

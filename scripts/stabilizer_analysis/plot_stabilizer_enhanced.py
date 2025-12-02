@@ -273,7 +273,7 @@ def create_within_vs_between_pointplot(repositioning_df: pd.DataFrame, output_di
     sns.set_context("poster")
 
     # Create figure
-    fig, ax = plt.subplots(figsize=(8, 6))
+    fig, ax = plt.subplots(figsize=(3.5, 4))
 
     # Create pointplot with bootstrapped CI
     sns.pointplot(
@@ -282,32 +282,35 @@ def create_within_vs_between_pointplot(repositioning_df: pd.DataFrame, output_di
         y='repositioning_error_mm',
         hue='metric_type',
         errorbar=('ci', 95),  # 95% confidence interval
-        capsize=0.1,
+        capsize=0.05,
         markers=['o', 's'],  # Different markers for within vs between
-        linestyles=['-', '--'],  # Different line styles
+        #linestyles=['-', '--'],  # Different line styles
         ax=ax,
-        linewidth=2.5,
-        markersize=10,
-        err_kws={'linewidth': 2}
+        join=False,
+        palette="plasma",
+        #
+        #err_kws={'linewidth': 2}
     )
 
     # Styling
-    ax.axhline(y=0, color='grey', linestyle='-', linewidth=1)
-    ax.set_xlabel('Axis', fontsize=18)
-    ax.set_ylabel('Repositioning error [mm]', fontsize=18)
-    ax.set_title('Within-session vs. Between-session Repositioning Error', fontsize=20)
+    # set limits
+    ax.set_ylim(0, 5)
+    #ax.axhline(y=0, color='grey', linestyle='-', linewidth=1)
+    ax.set_xlabel('axis')
+    ax.set_ylabel('head repositioning\n precision [mm]')
+    #ax.set_title('Within-session vs. Between-session Repositioning Error', fontsize=20)
 
     # Update legend labels
     handles, labels = ax.get_legend_handles_labels()
     new_labels = []
     for label in labels:
         if label == 'within_session':
-            new_labels.append('Within-session (between runs)')
+            new_labels.append('within-session\n(between blocks)')
         elif label == 'between_session':
-            new_labels.append('Between-session')
+            new_labels.append('between-session')
         else:
             new_labels.append(label)
-    ax.legend(handles, new_labels, title='', fontsize=14, frameon=False)
+    ax.legend(handles, new_labels, title='', frameon=False)
 
     sns.despine(fig=fig)
 
@@ -315,8 +318,8 @@ def create_within_vs_between_pointplot(repositioning_df: pd.DataFrame, output_di
     plt.tight_layout()
 
     # Save figure
-    output_file = output_dir / 'within_vs_between_pointplot.png'
-    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    output_file = output_dir / 'within_vs_between_pointplot.pdf'
+    plt.savefig(output_file, dpi=300)
     print(f"Saved within vs between point plot: {output_file}")
     plt.close()
 
