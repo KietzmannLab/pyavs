@@ -320,60 +320,44 @@ def compute_rsa_correlation(meg_rdm_timeseries: np.ndarray, embedding_rdm: np.nd
     return rsa_timeseries
 
 
-def compute_shuffled_baseline(meg_rdm_timeseries: np.ndarray, embedding_rdm: np.ndarray,
-                              n_permutations: int = 1000) -> np.ndarray:
+def compute_shuffled_baseline(meg_rdm_timeseries: np.ndarray,
+                              grouped_embeddings: np.ndarray,
+                              distance_metric: str = 'correlation',
+                              n_permutations: int = 30) -> np.ndarray:
     """
-    Compute shuffled labels baseline for RSA by permuting object labels.
+    Compute baseline by shuffling embedding-to-object assignments before RDM computation.
+
+    This tests the null hypothesis: "What if the model represented different objects?"
+    By shuffling which embeddings belong to which objects before computing the embedding
+    RDM, we break the correspondence between model representations and object identities
+    while preserving the overall structure of embedding representations.
 
     Args:
-        meg_rdm_timeseries: MEG RDM timeseries of shape (n_times, n_objects, n_objects)
-        embedding_rdm: Embedding RDM of shape (n_objects, n_objects)
-        n_permutations: Number of permutations for baseline (default: 1000)
+        meg_rdm_timeseries: MEG RDM timeseries of shape (n_times, n_objects, n_objects) - FIXED
+        grouped_embeddings: Embedding features grouped by object (n_objects, n_features)
+        distance_metric: Distance metric for RDM computation (e.g., 'correlation', 'mahalanobis')
+        n_permutations: Number of permutations for baseline (default: 30)
 
     Returns:
         baseline_timeseries: Array of shape (n_permutations, n_times) with shuffled RSA correlations
     """
     n_times = meg_rdm_timeseries.shape[0]
-    n_objects = meg_rdm_timeseries.shape[1]
+    n_objects = grouped_embeddings.shape[0]
     baseline_timeseries = np.full((n_permutations, n_times), np.nan)
 
-    # Get upper triangular indices
-    triu_indices = np.triu_indices(n_objects, k=1)
-    embedding_rdm_vec = embedding_rdm[triu_indices]
-
-    # Find valid (non-NaN) entries in embedding RDM
-    valid_embedding_mask = ~np.isnan(embedding_rdm_vec)
-
-    if np.sum(valid_embedding_mask) < 2:
-        logger.warning("Too few valid embedding RDM values for baseline computation")
-        return baseline_timeseries
-
-    logger.info(f"Computing shuffled labels baseline with {n_permutations} permutations...")
+    logger.info(f"Computing shuffled embeddings baseline with {n_permutations} permutations...")
 
     for perm_idx in range(n_permutations):
-        # Shuffle object indices
+        # Shuffle which embeddings belong to which objects
         shuffled_indices = np.random.permutation(n_objects)
+        shuffled_embeddings = grouped_embeddings[shuffled_indices]
 
-        for t in range(n_times):
-            # Permute MEG RDM rows and columns
-            meg_rdm_shuffled = meg_rdm_timeseries[t][np.ix_(shuffled_indices, shuffled_indices)]
-            meg_rdm_vec = meg_rdm_shuffled[triu_indices]
+        # Compute embedding RDM from shuffled embeddings
+        shuffled_embedding_rdm = compute_embedding_rdm(shuffled_embeddings, distance_metric)
 
-            # Find entries that are valid in both RDMs
-            both_valid_mask = valid_embedding_mask & ~np.isnan(meg_rdm_vec)
-
-            if np.sum(both_valid_mask) < 2:
-                continue  # Not enough valid pairs for correlation
-
-            # Compute correlation only on valid entries
-            valid_meg_vec = meg_rdm_vec[both_valid_mask]
-            valid_emb_vec = embedding_rdm_vec[both_valid_mask]
-
-            try:
-                corr, _ = spearmanr(valid_meg_vec, valid_emb_vec)
-                baseline_timeseries[perm_idx, t] = corr if not np.isnan(corr) else np.nan
-            except Exception as e:
-                continue
+        # Compute RSA correlation timeseries with fixed MEG RDM
+        rsa_timeseries = compute_rsa_correlation(meg_rdm_timeseries, shuffled_embedding_rdm)
+        baseline_timeseries[perm_idx, :] = rsa_timeseries
 
     logger.info(f"Computed baseline for {n_permutations} permutations")
     return baseline_timeseries
@@ -530,9 +514,13 @@ def process_subject_sessions(subject_id: int, sessions: List[int],
             embedding_rdm = compute_embedding_rdm(final_embeddings, distance_metric)
             rsa_timeseries = compute_rsa_correlation(meg_rdm_timeseries, embedding_rdm)
 
-            # Compute shuffled labels baseline
-            baseline_timeseries = compute_shuffled_baseline(meg_rdm_timeseries, embedding_rdm,
-                                                           n_permutations=1000)
+            # Compute shuffled embeddings baseline (shuffle before RDM computation)
+            baseline_timeseries = compute_shuffled_baseline(
+                meg_rdm_timeseries,
+                final_embeddings,      # Pass raw embeddings, not RDM
+                distance_metric=distance_metric,
+                n_permutations=30
+            )
 
             embedding_rdms[model_key] = embedding_rdm
             rsa_timeseries_dict[model_key] = rsa_timeseries
@@ -556,7 +544,7 @@ def process_subject_sessions(subject_id: int, sessions: List[int],
                 'times': times,
                 'meg_rdm_timeseries': meg_rdm_timeseries,
                 'embedding_rdm': embedding_rdms[model_key],
-                'baseline_timeseries': baseline_timeseries_dict[model_key],  # Shuffled labels baseline
+                'baseline_timeseries': baseline_timeseries_dict[model_key],  # Shuffled embeddings baseline
                 # Data matching information
                 'epoch_indices': np.arange(total_epochs),
                 'embedding_indices': np.arange(total_epochs),
