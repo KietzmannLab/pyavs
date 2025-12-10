@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --time=4:00:00
+#SBATCH --time=6:00:00
 #SBATCH --nodes=1
-#SBATCH --mem=150G
-#SBATCH --cpus-per-task=30
+#SBATCH --mem=200G
+#SBATCH --cpus-per-task=50
 
 #SBATCH -p klab-cpu
 #SBATCH --job-name=encoding
@@ -41,7 +41,7 @@ python ${script_path}/compute_encoding.py \
     --sessions 1 2 3 4 5 6 7 8 9 10 \
     --model resnet50_ecoset_crop \
     --layer avgpool \
-    --n-jobs 1
+    #--n-jobs 1
 
 echo "==================================================="
 echo "Subject $subject encoding analysis complete"

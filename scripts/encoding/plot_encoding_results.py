@@ -75,8 +75,12 @@ def load_multiple_subjects(results_dir: Path, subjects: list):
 
     for subject_id in subjects:
         # Look for NPZ file matching this subject
-        pattern = f"sub-{subject_id:02d}_*_encoding_results.npz"
-        matching_files = list(results_dir.glob(pattern))
+        # enter the subject sub-directory
+        subject_dir = results_dir / f"sub-{subject_id:02d}"
+        print(f"Searching for results in: {subject_dir}")
+        #model-resnet50_ecoset_crop_layer-avgpool_encoding_results.npz
+        pattern = f"model-*_layer-*_encoding_results.npz"
+        matching_files = list(subject_dir.glob(pattern))
 
         if not matching_files:
             print(f"Warning: No results file found for subject {subject_id} (pattern: {pattern})")
@@ -289,8 +293,8 @@ def main():
     parser.add_argument('--results-file', help='Path to encoding results NPZ file (single subject mode)')
 
     # Multi-subject mode
-    parser.add_argument('--results-dir', help='Directory containing encoding results (multi-subject mode)')
-    parser.add_argument('--subjects', type=int, nargs='+', help='Subject IDs to load (multi-subject mode)')
+    parser.add_argument('--results-dir', help='Directory containing encoding results (multi-subject mode)', default="/share/klab/psulewski/psulewski/pyavs/encoding/encoding_results")
+    parser.add_argument('--subjects', type=int, nargs='+', help='Subject IDs to load (multi-subject mode)', default=[1, 2, 3, 4, 5])
 
     # Output options
     parser.add_argument('--output-dir', help='Output directory for plots', default="/share/klab/psulewski/psulewski/pyavs/encoding")

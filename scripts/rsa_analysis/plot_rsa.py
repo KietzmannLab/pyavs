@@ -702,7 +702,7 @@ def plot_grand_average_rsa(rsa_data_list: List[Dict[str, Any]], output_dir: Path
     # apply a boxcar smoothing (causal) of window size 5
     for i, rsa_data in enumerate(rsa_data_list):
         rsa_timeseries = rsa_data['rsa_timeseries']
-        window_size = 10
+        window_size =  5
         boxcar = np.ones(window_size) / window_size
         smoothed_rsa = np.convolve(rsa_timeseries, boxcar, mode='same')
         all_rsa_timeseries.append(smoothed_rsa)
@@ -715,20 +715,24 @@ def plot_grand_average_rsa(rsa_data_list: List[Dict[str, Any]], output_dir: Path
 
     # Plot group-level baseline if available
     if len(all_baselines) >= 1:
-        # Concatenate baselines from all subjects: (n_subjects * n_permutations, n_times)
-        all_baselines_concat = np.concatenate(all_baselines, axis=0)
-
-        # Compute percentiles across all permutations from all subjects
-        baseline_95 = np.percentile(all_baselines_concat, 95, axis=0)
-        baseline_mean = np.mean(all_baselines_concat, axis=0)
-
-        # Smooth baseline
-        baseline_95_smooth = np.convolve(baseline_95, boxcar, mode='same')
-        baseline_mean_smooth = np.convolve(baseline_mean, boxcar, mode='same')
-
-        # Plot baseline
-        ax.plot(times*1000, baseline_mean_smooth, 'r--', alpha=0.5, linewidth=1.5, label='Baseline (mean)')
-        ax.plot(times*1000, baseline_95_smooth, 'r-', alpha=0.7, linewidth=1, label='Baseline (p<0.05)')
+        # Make df for baseline data: concatenate into shape (n_samples, n_times)
+        baselines_combined = np.concatenate(all_baselines, axis=0)  # shape: (n_samples, n_times)
+        
+        # Create DataFrame with timepoints as rows (index) and each column a permutation/sample
+        df_baselines = pd.DataFrame(baselines_combined.T, index=times * 1000)
+        df_baselines.index.name = 'time'
+        df_baselines = df_baselines.reset_index() 
+        print(df_baselines.head())  # columns: 'time', 0,1,2,...
+        
+        # melt for seaborn so each row is (time, permutation, baseline)
+        df_melted_baseline = df_baselines.melt(id_vars='time', var_name='permutation', value_name='baseline')
+        print(df_melted_baseline.head())  # columns: time, permutation, baseline
+        # plot lineplot with seaborn with 95th percentile shading
+        sns.lineplot(data=df_melted_baseline, x='time', y='baseline', errorbar=("ci", 95), ax=ax,
+                     label='shuffle baseline', color="#62241d", linestyle='--')
+    
+        
+      
         logger.info("Plotted group-level shuffled labels baseline")
 
     # Compute grand average
@@ -767,9 +771,9 @@ def plot_grand_average_rsa(rsa_data_list: List[Dict[str, Any]], output_dir: Path
    
 
     # Set reasonable y limits
-    y_min = 0#max(0.1, np.nanmin(df_melted['rsa']) - 0.05)
+    y_min = -0.1#max(0.1, np.nanmin(df_melted['rsa']) - 0.05)
     y_max = 1#max(0.6, np.nanmax(df_melted['rsa']) + 0.2)
-    ax.set_ylim(y_min, y_max)
+    #ax.set_ylim(y_min, y_max)
     # despine for cleaner look
     sns.despine()
     # no grid

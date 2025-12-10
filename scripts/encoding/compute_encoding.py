@@ -529,11 +529,11 @@ def main():
     # Time subsampling options
     parser.add_argument('--time-window', nargs=2, type=float, metavar=('TMIN', 'TMAX'), default=(-200, 500),
                        help='Time window in milliseconds (e.g., -200 500)')
-    parser.add_argument('--decimate', type=int, default=4,
+    parser.add_argument('--decimate', type=int, default=1,
                        help='Decimation factor: keep every Nth timepoint (default: 1)')
 
     # Optional parameters
-    parser.add_argument('--output-dir', help='Output directory')
+    parser.add_argument('--output-dir', help='Output directory', default="/share/klab/psulewski/psulewski/pyavs/encoding")
     parser.add_argument('--n-jobs', type=int, default=-1, help='Number of parallel jobs')
 
     args = parser.parse_args()
