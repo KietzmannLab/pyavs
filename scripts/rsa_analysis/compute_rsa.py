@@ -609,7 +609,7 @@ def main():
 
     # Required arguments
     parser.add_argument('--data-path', required=False, help='Data directory path', default="/share/klab/datasets/avs/")
-    parser.add_argument('--subjects', type=int, nargs='+', required=False, help='Subject IDs', default=[3,4,5])
+    parser.add_argument('--subjects', type=int, nargs='+', required=False, help='Subject IDs', default=[1])
     parser.add_argument('--sessions', type=int, nargs='+', help='Session numbers', default=[1,2,3,4,5,6,7,8,9,10])
 
     # Model parameters (can specify multiple models)
