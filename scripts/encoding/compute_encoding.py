@@ -148,6 +148,42 @@ def match_epochs_to_embeddings(metadata: pd.DataFrame, file_names: List[str]) ->
     return np.array(epoch_indices), np.array(embedding_indices)
 
 
+def reject_extreme_epochs(epochs_data: np.ndarray, embeddings: np.ndarray,
+                         metadata: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray, pd.DataFrame]:
+    """Reject extreme epochs based on maximum amplitude and correlation to median ERF."""
+
+    print("\nRejecting extreme epochs...")
+
+    # Reject extreme epochs based on maximum amplitude (99th percentile)
+    print("Rejecting epochs with extreme amplitude...")
+    max_per_epoch = np.max(np.abs(epochs_data), axis=(1, 2))
+    threshold = np.percentile(max_per_epoch, 99)
+    good_epochs = max_per_epoch < threshold
+
+    print(f"Rejecting {(~good_epochs).sum()} / {len(good_epochs)} epochs (max amplitude > {threshold:.3f})")
+
+    epochs_data = epochs_data[good_epochs]
+    embeddings = embeddings[good_epochs]
+    metadata = metadata[good_epochs].reset_index(drop=True)
+
+    # Reject epochs with low correlation to median ERF (1st percentile)
+    print("\nRejecting epochs with low correlation to median ERF...")
+    median_erf = np.median(epochs_data, axis=0)
+    correlations = np.array([np.corrcoef(epoch.flatten(), median_erf.flatten())[0, 1] for epoch in epochs_data])
+    correlation_threshold = np.percentile(correlations, 1)
+    good_epochs = correlations > correlation_threshold
+
+    print(f"Rejecting {(~good_epochs).sum()} / {len(good_epochs)} epochs (correlation < {correlation_threshold:.3f})")
+
+    epochs_data = epochs_data[good_epochs]
+    embeddings = embeddings[good_epochs]
+    metadata = metadata[good_epochs].reset_index(drop=True)
+
+    logger.info(f"Final epoch count after rejection: {len(epochs_data)}")
+
+    return epochs_data, embeddings, metadata
+
+
 def clip_outliers_and_filter(epochs_data: np.ndarray, embeddings: np.ndarray,
                             metadata: pd.DataFrame, outlier_percentiles: Tuple[float, float] = (0.05, 99.5)) -> Tuple[np.ndarray, np.ndarray, pd.DataFrame]:
     """Clip outliers in MEG data and return filtered data."""
@@ -376,7 +412,8 @@ def create_mne_epochs_from_results(r_values: np.ndarray, times: np.ndarray,
 
 def process_subject_sessions(subject_id: int, sessions: List[int], model_name: str, layer: str,
                             data_path: str, output_dir: Path, n_jobs: int = -1,
-                            time_window: Tuple[float, float] = None, decimate: int = 1) -> Dict[str, Any]:
+                            time_window: Tuple[float, float] = None, decimate: int = 1,
+                            clip_outliers: bool = False) -> Dict[str, Any]:
     """Process all sessions for a subject and run encoding analysis."""
     try:
         logger.info(f"Processing sub-{subject_id:02d} across {len(sessions)} sessions")
@@ -427,6 +464,11 @@ def process_subject_sessions(subject_id: int, sessions: List[int], model_name: s
 
         logger.info(f"Combined data shape: epochs {combined_epochs_data.shape}, embeddings {combined_embeddings.shape}")
 
+        # Reject extreme epochs before further processing
+        combined_epochs_data, combined_embeddings, combined_metadata = reject_extreme_epochs(
+            combined_epochs_data, combined_embeddings, combined_metadata
+        )
+
         # Apply time subsampling if requested
         if time_window is not None or decimate > 1:
             print("Applying time subsampling...")
@@ -453,10 +495,15 @@ def process_subject_sessions(subject_id: int, sessions: List[int], model_name: s
 
             print(f"Final time range: {times[0]*1000:.0f} to {times[-1]*1000:.0f} ms")
 
-        # Clip outliers in MEG data
-        final_epochs_data, final_embeddings, final_metadata = clip_outliers_and_filter(
-            combined_epochs_data, combined_embeddings, combined_metadata
-        )
+        # Optionally clip outliers in MEG data
+        if clip_outliers:
+            final_epochs_data, final_embeddings, final_metadata = clip_outliers_and_filter(
+                combined_epochs_data, combined_embeddings, combined_metadata
+            )
+        else:
+            final_epochs_data = combined_epochs_data
+            final_embeddings = combined_embeddings
+            final_metadata = combined_metadata
 
         logger.info(f"Final data shape: epochs {final_epochs_data.shape}, embeddings {final_embeddings.shape}")
 
@@ -535,6 +582,7 @@ def main():
     # Optional parameters
     parser.add_argument('--output-dir', help='Output directory', default="/share/klab/psulewski/psulewski/pyavs/encoding")
     parser.add_argument('--n-jobs', type=int, default=-1, help='Number of parallel jobs')
+    parser.add_argument('--clip-outliers', action='store_true', help='Enable point-wise outlier clipping (disabled by default)')
 
     args = parser.parse_args()
 
@@ -563,6 +611,7 @@ def main():
         print(f"Time window: {args.time_window[0]} to {args.time_window[1]} ms")
     if args.decimate > 1:
         print(f"Decimation: every {args.decimate} timepoints")
+    print(f"Outlier clipping: {'enabled' if args.clip_outliers else 'disabled'}")
 
     subject_pbar = tqdm(args.subjects, desc="Subjects", unit="subject", ncols=80)
 
@@ -572,7 +621,8 @@ def main():
         result = process_subject_sessions(
             subject_id, args.sessions, args.model, args.layer, data_path, output_dir, args.n_jobs,
             time_window=tuple(args.time_window) if args.time_window else None,
-            decimate=args.decimate
+            decimate=args.decimate,
+            clip_outliers=args.clip_outliers
         )
         results.append(result)
 
