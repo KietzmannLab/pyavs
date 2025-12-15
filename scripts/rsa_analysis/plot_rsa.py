@@ -1139,7 +1139,7 @@ Examples:
     # Model filtering
     parser.add_argument('--model', '--model-name', dest='model_name',
                        help='Filter by model name (e.g., resnet50_ecoset_crop)', default='resnet50_ecoset_crop')
-    parser.add_argument('--layers', nargs='+', help='Filter by layer names (e.g., layer1 layer2 layer3)', default=['avgpool'])
+    parser.add_argument('--layers', nargs='+', help='Filter by layer names (e.g., layer1 layer2 layer3)', default=['layer1','layer2','avgpool'])
     parser.add_argument('--layer', help='Single layer name (deprecated, use --layers)', default=None)
     
     # Plot options

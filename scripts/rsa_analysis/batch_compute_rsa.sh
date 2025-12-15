@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --time=8:00:00
 #SBATCH --nodes=1
-#SBATCH --mem=200G
+#SBATCH --mem=500G
 #SBATCH --cpus-per-task=50
 
-#SBATCH -p klab-cpu
+#SBATCH -p workq
 #SBATCH --job-name=rsa
 #SBATCH --error=error_rsa_%A_%a.err
 #SBATCH --output=output_rsa_%A_%a.out
@@ -50,12 +50,6 @@ for layer in "${layers[@]}"; do
         --sessions 1 2 3 4 5 6 7 8 9 10 \
         --models resnet50_ecoset_crop \
         --layers $layer
-
-    if [ $? -eq 0 ]; then
-        echo "Layer $layer completed successfully"
-    else
-        echo "ERROR: Layer $layer failed"
-    fi
 done
 
 echo ""

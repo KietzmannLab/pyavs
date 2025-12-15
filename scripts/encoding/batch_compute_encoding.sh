@@ -1,10 +1,10 @@
 #!/bin/bash
-#SBATCH --time=6:00:00
+#SBATCH --time=10:00:00
 #SBATCH --nodes=1
-#SBATCH --mem=200G
-#SBATCH --cpus-per-task=50
+#SBATCH --mem=300G
+#SBATCH --cpus-per-task=80
 
-#SBATCH -p klab-cpu
+#SBATCH -p workq
 #SBATCH --job-name=encoding
 #SBATCH --error=error_encoding_%A_%a.err
 #SBATCH --output=output_encoding_%A_%a.out
@@ -40,7 +40,7 @@ python ${script_path}/compute_encoding.py \
     --subjects $subject \
     --sessions 1 2 3 4 5 6 7 8 9 10 \
     --model resnet50_ecoset_crop \
-    --layer avgpool \
+    --layer layer3 \
     #--n-jobs 1
 
 echo "==================================================="
