@@ -937,6 +937,7 @@ def plot_multi_layer_comparison(data_by_layer: Dict[str, List[Dict[str, Any]]],
                                 output_dir: Path, save_fig: bool = True) -> plt.Figure:
     """
     Plot grand average RSA timeseries comparing multiple layers on the same plot.
+    Matches styling of single-layer grand average plot.
 
     Parameters
     ----------
@@ -957,59 +958,82 @@ def plot_multi_layer_comparison(data_by_layer: Dict[str, List[Dict[str, Any]]],
         return None
 
     sns.set_context("poster")
-    fig, ax = plt.subplots(figsize=(12, 8))
+    fig, ax = plt.subplots(figsize=(10, 8))  # Match single-layer plot size
 
     # Get times from first layer's first subject
     first_layer_data = list(data_by_layer.values())[0]
     times = first_layer_data[0]['times']
+    times_ms = times * 1000
 
     # Use magma colormap for layers
     n_layers = len(data_by_layer)
     colors = plt.cm.magma(np.linspace(0.2, 0.9, n_layers))  # Avoid too light/dark colors
 
-    # Plot each layer
+    # Collect all baselines across all layers for group-level baseline
+    all_baselines = []
+    for layer_name, layer_data_list in data_by_layer.items():
+        for rsa_data in layer_data_list:
+            if 'baseline_timeseries' in rsa_data and rsa_data['baseline_timeseries'] is not None:
+                all_baselines.append(rsa_data['baseline_timeseries'])
+
+    # Plot group-level baseline if available (same as single-layer plot)
+    if len(all_baselines) >= 1:
+        baselines_combined = np.concatenate(all_baselines, axis=0)
+        df_baselines = pd.DataFrame(baselines_combined.T, index=times_ms)
+        df_baselines.index.name = 'time'
+        df_baselines = df_baselines.reset_index()
+        df_melted_baseline = df_baselines.melt(id_vars='time', var_name='permutation', value_name='baseline')
+
+        sns.lineplot(data=df_melted_baseline, x='time', y='baseline', errorbar=("ci", 95), ax=ax,
+                     label='shuffle baseline', color="#62241d", linestyle='--')
+        logger.info("Plotted group-level shuffled labels baseline")
+
+    # Compute inter-layer noise ceiling (aggregate all subjects across all layers)
+    all_subjects_data = []
+    for layer_data_list in data_by_layer.values():
+        all_subjects_data.extend(layer_data_list)
+
+    if len(all_subjects_data) > 1:
+        logger.info("Computing inter-subject noise ceiling across all layers...")
+        nc_lower, nc_upper = compute_intersubject_noise_ceiling(all_subjects_data)
+        ax.fill_between(times_ms, nc_lower, nc_upper, alpha=0.2, color='gray',
+                       label='inter-subject noise ceiling')
+
+    # Plot each layer with seaborn styling
     for (layer_name, layer_data_list), color in zip(sorted(data_by_layer.items()), colors):
-        # Collect all RSA timeseries for this layer
+        # Collect all RSA timeseries for this layer (no smoothing to match single-layer)
         all_rsa = []
         for rsa_data in layer_data_list:
             rsa_timeseries = rsa_data['rsa_timeseries']
-            # Apply smoothing
-            window_size = 5
-            boxcar = np.ones(window_size) / window_size
-            smoothed_rsa = np.convolve(rsa_timeseries, boxcar, mode='same')
-            all_rsa.append(smoothed_rsa)
+            all_rsa.append(rsa_timeseries)
 
-        # Compute statistics
-        all_rsa = np.array(all_rsa)
-        mean_rsa = np.nanmean(all_rsa, axis=0)
-        sem_rsa = np.nanstd(all_rsa, axis=0) / np.sqrt(len(all_rsa))
+        # Create dataframe for seaborn
+        df_layer = pd.DataFrame(all_rsa).T
+        df_layer['time'] = times_ms
+        df_melted = df_layer.melt(id_vars='time', var_name='subject', value_name='rsa')
 
-        # Plot with magma color
-        ax.plot(times * 1000, mean_rsa, linewidth=3, color=color,
-               label=f'{layer_name} (n={len(layer_data_list)})')
-        ax.fill_between(times * 1000, mean_rsa - sem_rsa, mean_rsa + sem_rsa,
-                       alpha=0.3, color=color)
+        # Plot with seaborn lineplot (matching single-layer style)
+        sns.lineplot(data=df_melted, x='time', y='rsa', errorbar=("ci", 95), ax=ax,
+                     label=f'{layer_name} (n={len(layer_data_list)})', color=color, linewidth=2.5)
 
     # Add reference line
     ax.axvline(x=0, color='k', linestyle='--', alpha=0.3, label='fixation onset')
 
-    # Formatting
+    # Formatting (match single-layer plot)
     ax.set_xlabel('time [ms]')
     ax.set_ylabel("RDM similarity [spearman's rho]")
     ax.set_xlim(-200, 500)
     ax.set_ylim(-0.1, 1.0)
 
-    # Get model name from first result
-    first_data = list(data_by_layer.values())[0][0]
-    model_name = first_data['model_name']
-
-    ax.set_title(f'Layer Comparison - {model_name}', fontsize=16)
+    # Legend
     ax.legend(frameon=False, loc='upper right')
     sns.despine()
-
     plt.tight_layout()
 
     if save_fig:
+        # Get model name from first result
+        first_data = list(data_by_layer.values())[0][0]
+        model_name = first_data['model_name']
         filename = f"grand_average_model-{model_name}_all_layers_comparison.pdf"
         fig.savefig(output_dir / filename, dpi=PLOT_CONFIG['figure_dpi'])
         logger.info(f"Saved multi-layer comparison plot: {filename}")
