@@ -933,6 +933,90 @@ def plot_multi_network_rsa(multi_network_data: Dict[str, Any], output_dir: Path,
     return fig
 
 
+def plot_multi_layer_comparison(data_by_layer: Dict[str, List[Dict[str, Any]]],
+                                output_dir: Path, save_fig: bool = True) -> plt.Figure:
+    """
+    Plot grand average RSA timeseries comparing multiple layers on the same plot.
+
+    Parameters
+    ----------
+    data_by_layer : dict
+        Dictionary mapping layer names to lists of RSA data for that layer
+    output_dir : Path
+        Output directory for plots
+    save_fig : bool, default True
+        Whether to save the figure
+
+    Returns
+    -------
+    plt.Figure
+        Created figure
+    """
+    if not data_by_layer or len(data_by_layer) < 2:
+        logger.info("Need at least 2 layers for comparison plot")
+        return None
+
+    sns.set_context("poster")
+    fig, ax = plt.subplots(figsize=(12, 8))
+
+    # Get times from first layer's first subject
+    first_layer_data = list(data_by_layer.values())[0]
+    times = first_layer_data[0]['times']
+
+    # Use magma colormap for layers
+    n_layers = len(data_by_layer)
+    colors = plt.cm.magma(np.linspace(0.2, 0.9, n_layers))  # Avoid too light/dark colors
+
+    # Plot each layer
+    for (layer_name, layer_data_list), color in zip(sorted(data_by_layer.items()), colors):
+        # Collect all RSA timeseries for this layer
+        all_rsa = []
+        for rsa_data in layer_data_list:
+            rsa_timeseries = rsa_data['rsa_timeseries']
+            # Apply smoothing
+            window_size = 5
+            boxcar = np.ones(window_size) / window_size
+            smoothed_rsa = np.convolve(rsa_timeseries, boxcar, mode='same')
+            all_rsa.append(smoothed_rsa)
+
+        # Compute statistics
+        all_rsa = np.array(all_rsa)
+        mean_rsa = np.nanmean(all_rsa, axis=0)
+        sem_rsa = np.nanstd(all_rsa, axis=0) / np.sqrt(len(all_rsa))
+
+        # Plot with magma color
+        ax.plot(times * 1000, mean_rsa, linewidth=3, color=color,
+               label=f'{layer_name} (n={len(layer_data_list)})')
+        ax.fill_between(times * 1000, mean_rsa - sem_rsa, mean_rsa + sem_rsa,
+                       alpha=0.3, color=color)
+
+    # Add reference line
+    ax.axvline(x=0, color='k', linestyle='--', alpha=0.3, label='fixation onset')
+
+    # Formatting
+    ax.set_xlabel('time [ms]')
+    ax.set_ylabel("RDM similarity [spearman's rho]")
+    ax.set_xlim(-200, 500)
+    ax.set_ylim(-0.1, 1.0)
+
+    # Get model name from first result
+    first_data = list(data_by_layer.values())[0][0]
+    model_name = first_data['model_name']
+
+    ax.set_title(f'Layer Comparison - {model_name}', fontsize=16)
+    ax.legend(frameon=False, loc='upper right')
+    sns.despine()
+
+    plt.tight_layout()
+
+    if save_fig:
+        filename = f"grand_average_model-{model_name}_all_layers_comparison.pdf"
+        fig.savefig(output_dir / filename, dpi=PLOT_CONFIG['figure_dpi'])
+        logger.info(f"Saved multi-layer comparison plot: {filename}")
+
+    return fig
+
+
 def plot_multi_network_grand_average(multi_network_data_list: List[Dict[str, Any]],
                                      output_dir: Path, save_fig: bool = True) -> plt.Figure:
     """
@@ -1053,9 +1137,10 @@ Examples:
     parser.add_argument('--sessions', type=int, nargs='+', help='Specific session numbers to plot', default=np.arange(1,11).tolist())
     
     # Model filtering
-    parser.add_argument('--model', '--model-name', dest='model_name', 
+    parser.add_argument('--model', '--model-name', dest='model_name',
                        help='Filter by model name (e.g., resnet50_ecoset_crop)', default='resnet50_ecoset_crop')
-    parser.add_argument('--layer', help='Filter by layer name (e.g., avgpool)', default='avgpool')
+    parser.add_argument('--layers', nargs='+', help='Filter by layer names (e.g., layer1 layer2 layer3)', default=['avgpool'])
+    parser.add_argument('--layer', help='Single layer name (deprecated, use --layers)', default=None)
     
     # Plot options
     parser.add_argument('--output-dir', type=str, help='Output directory for plots', default="/share/klab/psulewski/psulewski/pyavs/rsa")
@@ -1124,66 +1209,98 @@ Examples:
         return 1
     
     logger.info(f"Found {len(rsa_files)} RSA result files")
-    
+
+    # Handle backward compatibility: --layer (single) vs --layers (multiple)
+    layers_to_plot = args.layers if args.layers else []
+    if args.layer:  # If deprecated --layer is used, add it to the list
+        layers_to_plot = [args.layer]
+
+    logger.info(f"Filtering for layers: {layers_to_plot}")
+
     # Load and filter RSA results
     rsa_data_list = []
     for rsa_file in rsa_files:
         try:
             rsa_data = load_rsa_results(rsa_file)
-            
-            
-            
+
+            # Filter by model and layer
+            if args.model_name and rsa_data['model_name'] != args.model_name:
+                continue
+            if layers_to_plot and rsa_data['layer'] not in layers_to_plot:
+                continue
+
             rsa_data_list.append(rsa_data)
-            logger.debug(f"Loaded: Subject {rsa_data['subject_id']}, Session {rsa_data['session']}")
-            
+            logger.debug(f"Loaded: Subject {rsa_data['subject_id']}, Layer {rsa_data['layer']}")
+
         except Exception as e:
             logger.warning(f"Could not load {rsa_file}: {e}")
-    
+
     if not rsa_data_list:
         logger.error("No RSA data matched the specified criteria")
         return 1
-    
-    logger.info(f"Plotting {len(rsa_data_list)} RSA results")
-    
+
+    logger.info(f"Loaded {len(rsa_data_list)} RSA results matching criteria")
+
+    # Group data by layer
+    from collections import defaultdict
+    data_by_layer = defaultdict(list)
+    for rsa_data in rsa_data_list:
+        data_by_layer[rsa_data['layer']].append(rsa_data)
+
+    logger.info(f"Grouped into {len(data_by_layer)} layers: {list(data_by_layer.keys())}")
+
     compute_nc = not args.no_noise_ceiling
-    
-    # Create individual plots if requested
-    if args.save_individual:
-        logger.info("Creating individual subject plots...")
-        for rsa_data in rsa_data_list:
-            plot_single_rsa_timeseries(rsa_data, output_dir, compute_nc=compute_nc)
 
-    # Always create grand average plot if multiple subjects
-    if len(rsa_data_list) > 1:
-        logger.info("Creating grand average plot with inter-subject noise ceiling...")
-        plot_grand_average_rsa(rsa_data_list, output_dir)
-    elif not args.save_individual:
-        # If only one subject and not saving individual, plot it anyway
-        plot_single_rsa_timeseries(rsa_data_list[0], output_dir, compute_nc=compute_nc)
+    # Create plots for each layer
+    for layer, layer_data_list in data_by_layer.items():
+        logger.info(f"\n{'='*60}")
+        logger.info(f"Processing layer: {layer} ({len(layer_data_list)} subjects)")
+        logger.info(f"{'='*60}")
 
-    # Create RDM plots if requested
-    if args.plot_rdms or PLOT_CONFIG.get('plot_rdms', False):
-        timepoint_ms = args.rdm_timepoint if hasattr(args, 'rdm_timepoint') else PLOT_CONFIG.get('rdm_timepoint_ms', 110.0)
-        categorize_level = PLOT_CONFIG.get('categorize_level', 'subcategory')
-        logger.info(f"Creating RDM plots at {timepoint_ms} ms with {categorize_level} categorization...")
-        for rsa_data in rsa_data_list:
-            plot_rdms_at_timepoint(rsa_data, timepoint_ms=timepoint_ms, output_dir=output_dir,
-                                 categorize_level=categorize_level)
-    
-    # Create and save summary statistics
-    if args.save_summary:
-        logger.info("Creating summary statistics...")
-        summary_df = create_summary_dataframe(rsa_data_list)
-        summary_file = output_dir / 'rsa_summary_statistics.csv'
-        summary_df.to_csv(summary_file, index=False)
-        logger.info(f"Saved summary statistics: {summary_file}")
-        
-        # Print some basic statistics
-        print("\nSummary Statistics:")
-        print(f"Number of subjects: {summary_df['subject_id'].nunique()}")
-        print(f"Mean peak RSA: {summary_df['peak_rsa'].mean():.3f} ± {summary_df['peak_rsa'].std():.3f}")
-        print(f"Mean peak time: {summary_df['peak_time'].mean():.3f} ± {summary_df['peak_time'].std():.3f} s")
-    
+        # Create individual plots if requested
+        if args.save_individual:
+            logger.info("Creating individual subject plots...")
+            for rsa_data in layer_data_list:
+                plot_single_rsa_timeseries(rsa_data, output_dir, compute_nc=compute_nc)
+
+        # Always create grand average plot if multiple subjects
+        if len(layer_data_list) > 1:
+            logger.info("Creating grand average plot with inter-subject noise ceiling...")
+            plot_grand_average_rsa(layer_data_list, output_dir)
+        elif not args.save_individual:
+            # If only one subject and not saving individual, plot it anyway
+            plot_single_rsa_timeseries(layer_data_list[0], output_dir, compute_nc=compute_nc)
+
+        # Create RDM plots if requested (per layer)
+        if args.plot_rdms or PLOT_CONFIG.get('plot_rdms', False):
+            timepoint_ms = args.rdm_timepoint if hasattr(args, 'rdm_timepoint') else PLOT_CONFIG.get('rdm_timepoint_ms', 110.0)
+            categorize_level = PLOT_CONFIG.get('categorize_level', 'subcategory')
+            logger.info(f"Creating RDM plots at {timepoint_ms} ms with {categorize_level} categorization...")
+            for rsa_data in layer_data_list:
+                plot_rdms_at_timepoint(rsa_data, timepoint_ms=timepoint_ms, output_dir=output_dir,
+                                     categorize_level=categorize_level)
+
+        # Create and save summary statistics (per layer)
+        if args.save_summary:
+            logger.info(f"Creating summary statistics for layer {layer}...")
+            summary_df = create_summary_dataframe(layer_data_list)
+            summary_file = output_dir / f'rsa_summary_statistics_{layer}.csv'
+            summary_df.to_csv(summary_file, index=False)
+            logger.info(f"Saved summary statistics: {summary_file}")
+
+            # Print some basic statistics
+            print(f"\nSummary Statistics for {layer}:")
+            print(f"Number of subjects: {summary_df['subject_id'].nunique()}")
+            print(f"Mean peak RSA: {summary_df['peak_rsa'].mean():.3f} ± {summary_df['peak_rsa'].std():.3f}")
+            print(f"Mean peak time: {summary_df['peak_time'].mean():.3f} ± {summary_df['peak_time'].std():.3f} s")
+
+    # Create multi-layer comparison plot if we have multiple layers
+    if len(data_by_layer) > 1:
+        logger.info(f"\n{'='*60}")
+        logger.info("Creating multi-layer comparison plot with magma palette...")
+        logger.info(f"{'='*60}")
+        plot_multi_layer_comparison(data_by_layer, output_dir)
+
     logger.info("RSA plotting completed successfully")
     return 0
 
