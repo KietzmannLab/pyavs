@@ -702,12 +702,12 @@ def plot_grand_average_rsa(rsa_data_list: List[Dict[str, Any]], output_dir: Path
     # apply a boxcar smoothing (causal) of window size 5
     for i, rsa_data in enumerate(rsa_data_list):
         rsa_timeseries = rsa_data['rsa_timeseries']
-        window_size =  5
-        boxcar = np.ones(window_size) / window_size
-        smoothed_rsa = np.convolve(rsa_timeseries, boxcar, mode='same')
-        all_rsa_timeseries.append(smoothed_rsa)
+        #window_size =  5
+        #boxcar = np.ones(window_size) / window_size
+        #smoothed_rsa = np.convolve(rsa_timeseries, boxcar, mode='same')
+        all_rsa_timeseries.append(rsa_timeseries)
         #replace
-        rsa_data_list[i]['rsa_timeseries']= smoothed_rsa
+        rsa_data_list[i]['rsa_timeseries']= rsa_timeseries
 
         # Collect baseline if available
         if 'baseline_timeseries' in rsa_data and rsa_data['baseline_timeseries'] is not None:
@@ -1190,20 +1190,22 @@ Examples:
     output_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"Saving plots to: {output_dir}")
     
-    # Find RSA result files with new per-subject structure
-    pattern = str(rsa_dir / "sub-*" / "*_rsa_results.npz")
-    rsa_files = glob(pattern)
+    # loop through the selected subjects and collect the path to the results
+    # Collect RSA files only for requested subjects
+    rsa_files = []
+    # Use single-subject override if provided, otherwise the subjects list
+    subject_list = [args.single_subject] if args.single_subject is not None else list(args.subjects or [])
+    for subj in subject_list:
+        # Match both zero-padded and non-padded folder names (e.g., sub-01 and sub-1)
+        for subj_tag in (f"sub-{subj}", f"sub-{subj:02d}"):
+            for p in rsa_dir.glob(f"{subj_tag}/*_rsa_results.npz"):
+                rsa_files.append(str(p))
 
-    # Also check for old format files for backward compatibility
-    old_pattern = str(rsa_dir / "*_rsa.npz")
-    old_rsa_files = glob(old_pattern)
-    rsa_files.extend(old_rsa_files)
-
-    # Also check for legacy session-based structure
-    legacy_pattern = str(rsa_dir / "sub-*" / "ses-*" / "*_rsa_results.npz")
-    legacy_rsa_files = glob(legacy_pattern)
-    rsa_files.extend(legacy_rsa_files)
+    # Deduplicate and sort
+    rsa_files = sorted(dict.fromkeys(rsa_files))
     
+
+   
     if not rsa_files:
         logger.error(f"No RSA files found in {rsa_dir}")
         return 1

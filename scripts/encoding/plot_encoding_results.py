@@ -133,7 +133,7 @@ def plot_encoding_joint(evoked: mne.EvokedArray, output_dir: Path, metadata: dic
         # pcick only grad channels
         evoked = evoked.copy().pick_types(meg='grad')
              #mask channels in the small topomap that never cross 0.075
-        mask_channels = np.abs(evoked.data).max(axis=1) > 0.1
+        mask_channels = np.abs(evoked.data).max(axis=1) > 0.05
         picks = mne.pick_channels(evoked.info['ch_names'], include=np.array(evoked.info['ch_names'])[mask_channels].tolist())
 
         fig = evoked.plot(scalings=1, show=False, xlim=(-100, 300), time_unit='ms',

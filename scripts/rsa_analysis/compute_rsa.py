@@ -617,7 +617,7 @@ def main():
                        default=['resnet50_ecoset_crop'],
                        help='Model names (can specify multiple)')
     parser.add_argument('--layers', type=str, nargs='+',
-                       default=['avgpool'],
+                       default=['layer1'],
                        help='Model layers (must match number of models)')
 
     # Optional parameters

@@ -270,9 +270,9 @@ Examples:
     # Model and extraction parameters
     parser.add_argument('--model', '--model-name', dest='model_name', default='resnet50_ecoset_crop',
                        help='Model name for feature extraction (default: resnet50_ecoset_crop)')
-    parser.add_argument('--layers', type=str, nargs='+', default=['avgpool'],
+    parser.add_argument('--layers', type=str, nargs='+', default=['layer1', "layer2", "layer3"], 
                        help='Model layers to extract features from (default: avgpool)')
-    parser.add_argument('--crop-size', type=int, nargs=2, metavar=('WIDTH', 'HEIGHT'),
+    parser.add_argument('--crop-size', type=int, nargs=2, metavar=('WIDTH', 'HEIGHT'), default=(112,112),
                        help='Specific crop size to process (if not specified, processes all available sizes)')
     parser.add_argument('--batch-size', type=int, default=64,
                        help='Batch size for processing (default: 64)')
