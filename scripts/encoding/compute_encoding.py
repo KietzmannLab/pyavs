@@ -58,18 +58,12 @@ def load_fixation_epochs(subject_id: int, session: int, data_path: str) -> Tuple
         data_path=data_path
     )
 
-    # Merge mag and grad channels if available
-    if 'mag' in epochs.keys() and 'grad' in epochs.keys():
-        epochs_data = np.concatenate([epochs['mag'], epochs['grad']], axis=1)
-        print(f"Merged mag and grad channels: {epochs_data.shape}")
-    elif 'mag' in epochs.keys():
-        epochs_data = epochs['mag']
-        print(f"Using mag channels only: {epochs_data.shape}")
-    elif 'grad' in epochs.keys():
+    # Use only gradiometer channels
+    if 'grad' in epochs.keys():
         epochs_data = epochs['grad']
         print(f"Using grad channels only: {epochs_data.shape}")
     else:
-        raise ValueError("No valid channel types found in epochs.")
+        raise ValueError("No gradiometer channels found in epochs.")
 
     # Apply per-channel median scaling using MNE
 
@@ -322,9 +316,9 @@ def fit_encoding_model_ridgecv(epochs_data: np.ndarray, embeddings: np.ndarray,
     X_train_scaled = X_scaler.fit_transform(X_train)
     X_test_scaled = X_scaler.transform(X_test)
 
-    # Apply PCA for dimensionality reduction (90% variance)
+    # Apply PCA for dimensionality reduction (70% variance)
     print("Applying PCA for dimensionality reduction...")
-    pca = PCA(n_components=0.90, random_state=42)  # Keep 90% of variance
+    pca = PCA(n_components=0.70, random_state=42)  # Keep 70% of variance
     X_train_pca = pca.fit_transform(X_train_scaled)
     X_test_pca = pca.transform(X_test_scaled)
 
@@ -571,7 +565,7 @@ def main():
 
     # Model parameters
     parser.add_argument('--model', default='resnet50_ecoset_crop', help='Model name')
-    parser.add_argument('--layer', default='avgpool', help='Model layer')
+    parser.add_argument('--layer', default='layer3', help='Model layer')
 
     # Time subsampling options
     parser.add_argument('--time-window', nargs=2, type=float, metavar=('TMIN', 'TMAX'), default=(-200, 500),

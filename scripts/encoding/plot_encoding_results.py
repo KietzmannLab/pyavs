@@ -353,6 +353,17 @@ def main():
          
            
 
+            # IMPORTANT: Reorder channels to match encoding data order (mag first, then grad)
+            # Raw info has interleaved order: [grad, grad, mag, grad, grad, mag, ...]
+            # But encoding data is concatenated: [mag, mag, ..., grad, grad, ...]
+            print("Reordering channels to match encoding data (mag first, then grad)...")
+            ch_types = [mne.io.pick.channel_type(info_raw, i) for i in range(len(info_raw['ch_names']))]
+            mag_indices = [i for i, ch_type in enumerate(ch_types) if ch_type == 'mag']
+            grad_indices = [i for i, ch_type in enumerate(ch_types) if ch_type == 'grad']
+            reorder_indices = mag_indices + grad_indices
+            info_raw = mne.pick_info(info_raw, reorder_indices)
+            print(f"Reordered: {len(mag_indices)} mag + {len(grad_indices)} grad = {len(info_raw['ch_names'])} total channels")
+
             # Create individual plots for each subject
             print("\n" + "="*60)
             print("Creating individual subject plots...")
@@ -399,6 +410,15 @@ def main():
             raw = raw.crop(tmin=20, tmax=30)
             raw.resample(sfreq_inferred, npad="auto")
             info_raw = mne.pick_info(raw.info, mne.pick_types(raw.info, meg=True, eeg=False, exclude='bads'))
+
+            # IMPORTANT: Reorder channels to match encoding data order (mag first, then grad)
+            print("Reordering channels to match encoding data (mag first, then grad)...")
+            ch_types = [mne.io.pick.channel_type(info_raw, i) for i in range(len(info_raw['ch_names']))]
+            mag_indices = [i for i, ch_type in enumerate(ch_types) if ch_type == 'mag']
+            grad_indices = [i for i, ch_type in enumerate(ch_types) if ch_type == 'grad']
+            reorder_indices = mag_indices + grad_indices
+            info_raw = mne.pick_info(info_raw, reorder_indices)
+            print(f"Reordered: {len(mag_indices)} mag + {len(grad_indices)} grad = {len(info_raw['ch_names'])} total channels")
 
             print(f"Inferred sampling frequency: {sfreq_inferred} Hz")
             evoked = create_mne_evoked(r_values, times, sfreq=sfreq_inferred, info=info_raw)
