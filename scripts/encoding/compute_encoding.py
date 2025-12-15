@@ -203,7 +203,7 @@ def clip_outliers_and_filter(epochs_data: np.ndarray, embeddings: np.ndarray,
     return epochs_data_clipped, embeddings, metadata
 
 
-def create_scene_aware_split(metadata: pd.DataFrame, test_size: float = 0.2) -> Tuple[np.ndarray, np.ndarray]:
+def create_scene_aware_split(metadata: pd.DataFrame, test_size: float = 0.1) -> Tuple[np.ndarray, np.ndarray]:
     """Create a single train-test split that respects scene boundaries."""
 
     # Get unique scene IDs
@@ -296,7 +296,7 @@ def fit_encoding_model_ridgecv(epochs_data: np.ndarray, embeddings: np.ndarray,
 
     # Default alpha range for RidgeCV
     if alphas is None:
-        alphas = np.logspace(-3, 3, 25)  # 20 alpha values from 0.001 to 1000
+        alphas = np.logspace(-3, 10, 10)  # 10 alpha values from 0.001 to 10000000000
 
     logger.info(f"Fitting RidgeCV encoding model: {n_epochs} epochs, {n_channels} channels, "
                f"{n_times} timepoints, {n_features} features")
@@ -304,7 +304,7 @@ def fit_encoding_model_ridgecv(epochs_data: np.ndarray, embeddings: np.ndarray,
 
     # Create scene-aware train-test split
     print("Creating train-test split...")
-    train_idx, test_idx = create_scene_aware_split(metadata, test_size=0.2)
+    train_idx, test_idx = create_scene_aware_split(metadata, test_size=0.1)
 
     # Split data
     X_train, X_test = embeddings[train_idx], embeddings[test_idx]
@@ -515,7 +515,7 @@ def process_subject_sessions(subject_id: int, sessions: List[int], model_name: s
 
         # Save results
         output_file = subject_output_dir / f"model-{model_name}_layer-{layer}_encoding_results.npz"
-
+        print(f"Saving encoding results to {output_file}...")
         np.savez_compressed(
             output_file,
             r_values=r_values,
