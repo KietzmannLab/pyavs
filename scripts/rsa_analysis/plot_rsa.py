@@ -920,7 +920,7 @@ def plot_multi_network_rsa(multi_network_data: Dict[str, Any], output_dir: Path,
     # Set reasonable y limits
     all_rsa = np.concatenate([rsa for rsa in rsa_timeseries_dict.values()])
     y_min = max(0.0, np.nanmin(all_rsa) - 0.05)
-    y_max = max(0.6, np.nanmax(all_rsa) + 0.1)
+    y_max = max(0.6, np.nanmax(all_rsa) + 0.05)
     ax.set_ylim(y_min, y_max)
 
     plt.tight_layout()
@@ -985,7 +985,7 @@ def plot_multi_layer_comparison(data_by_layer: Dict[str, List[Dict[str, Any]]],
         df_melted_baseline = df_baselines.melt(id_vars='time', var_name='permutation', value_name='baseline')
 
         sns.lineplot(data=df_melted_baseline, x='time', y='baseline', errorbar=("ci", 95), ax=ax,
-                     label='shuffle baseline', color="#62241d", linestyle='--')
+                     label='shuffle baseline', color="#62241d", linestyle=':')
         logger.info("Plotted group-level shuffled labels baseline")
 
     # Compute inter-layer noise ceiling (aggregate all subjects across all layers)
@@ -994,8 +994,10 @@ def plot_multi_layer_comparison(data_by_layer: Dict[str, List[Dict[str, Any]]],
         all_subjects_data.extend(layer_data_list)
 
     if len(all_subjects_data) > 1:
+        # only take from first layer as this alywas is just MEG
+        nc_data = list(data_by_layer.values())[0]
         logger.info("Computing inter-subject noise ceiling across all layers...")
-        nc_lower, nc_upper = compute_intersubject_noise_ceiling(all_subjects_data)
+        nc_lower, nc_upper = compute_intersubject_noise_ceiling(nc_data)
         ax.fill_between(times_ms, nc_lower, nc_upper, alpha=0.2, color='gray',
                        label='inter-subject noise ceiling')
 
@@ -1014,7 +1016,7 @@ def plot_multi_layer_comparison(data_by_layer: Dict[str, List[Dict[str, Any]]],
 
         # Plot with seaborn lineplot (matching single-layer style)
         sns.lineplot(data=df_melted, x='time', y='rsa', errorbar=("ci", 95), ax=ax,
-                     label=f'{layer_name} (n={len(layer_data_list)})', color=color, linewidth=2.5)
+                     label=f'{layer_name} (n={len(layer_data_list)})', color=color, alpha=0.8)
 
     # Add reference line
     ax.axvline(x=0, color='k', linestyle='--', alpha=0.3, label='fixation onset')
@@ -1022,8 +1024,8 @@ def plot_multi_layer_comparison(data_by_layer: Dict[str, List[Dict[str, Any]]],
     # Formatting (match single-layer plot)
     ax.set_xlabel('time [ms]')
     ax.set_ylabel("RDM similarity [spearman's rho]")
-    ax.set_xlim(-200, 500)
-    ax.set_ylim(-0.1, 1.0)
+    ax.set_xlim(-200, 350)
+    ax.set_ylim(-0.1, .9)
 
     # Legend
     ax.legend(frameon=False, loc='upper right')
@@ -1163,19 +1165,19 @@ Examples:
     # Model filtering
     parser.add_argument('--model', '--model-name', dest='model_name',
                        help='Filter by model name (e.g., resnet50_ecoset_crop)', default='resnet50_ecoset_crop')
-    parser.add_argument('--layers', nargs='+', help='Filter by layer names (e.g., layer1 layer2 layer3)', default=['layer1','layer2','avgpool'])
+    parser.add_argument('--layers', nargs='+', help='Filter by layer names (e.g., layer1 layer2 layer3)', default=['layer1','layer2','layer3','avgpool'])
     parser.add_argument('--layer', help='Single layer name (deprecated, use --layers)', default=None)
     
     # Plot options
     parser.add_argument('--output-dir', type=str, help='Output directory for plots', default="/share/klab/psulewski/psulewski/pyavs/rsa")
     parser.add_argument('--save-individual', action='store_true',
-                       help='Save individual subject plots')
+                       help='Save individual subject plots', default=False)
     parser.add_argument('--no-noise-ceiling', action='store_true',
                        help='Skip noise ceiling computation')
     parser.add_argument('--save-summary', action='store_true',
                        help='Save summary statistics CSV')
     parser.add_argument('--plot-rdms', action='store_true',
-                       help='Plot RDMs at specific timepoint')
+                       help='Plot RDMs at specific timepoint', default=False)
     parser.add_argument('--rdm-timepoint', type=float, default=110.0,
                        help='Timepoint in ms for RDM plotting (default: 110.0)')
     parser.add_argument('--verbose', '-v', action='store_true', help='Increase verbosity')
@@ -1276,6 +1278,28 @@ Examples:
     logger.info(f"Grouped into {len(data_by_layer)} layers: {list(data_by_layer.keys())}")
 
     compute_nc = not args.no_noise_ceiling
+    
+    # lowpass filter RSA data to 30 Hz to reduce high-frequency noise
+    from scipy.signal import medfilt
+    # determine the right kernel size to achieve 30 hz
+    # estimate sampling rate from times array
+    times = rsa_data['times']
+    fs = 1.0 / np.mean(np.diff(times))  # sampling frequency in Hz
+    # kernel size should be odd; approximate cutoff at 30 Hz
+    # median filter kernel ~ fs / cutoff_freq, ensure odd
+    kernel = int(fs / 40)
+    if kernel % 2 == 0:
+        kernel += 1
+    kernel = max(3, kernel)  # minimum kernel size of 3
+            
+    for layer, layer_data_list in data_by_layer.items():
+        for i, rsa_data in enumerate(layer_data_list):
+            rsa_timeseries = rsa_data['rsa_timeseries']
+            # design lowpass filter (median filter)
+            
+            filtered_rsa = medfilt(rsa_timeseries, kernel_size=kernel)
+            # also filter the 
+            data_by_layer[layer][i]['rsa_timeseries'] = filtered_rsa
 
     # Create plots for each layer
     for layer, layer_data_list in data_by_layer.items():
@@ -1290,21 +1314,21 @@ Examples:
                 plot_single_rsa_timeseries(rsa_data, output_dir, compute_nc=compute_nc)
 
         # Always create grand average plot if multiple subjects
-        if len(layer_data_list) > 1:
-            logger.info("Creating grand average plot with inter-subject noise ceiling...")
-            plot_grand_average_rsa(layer_data_list, output_dir)
-        elif not args.save_individual:
-            # If only one subject and not saving individual, plot it anyway
-            plot_single_rsa_timeseries(layer_data_list[0], output_dir, compute_nc=compute_nc)
+        # if len(layer_data_list) > 1:
+        #     logger.info("Creating grand average plot with inter-subject noise ceiling...")
+        #     plot_grand_average_rsa(layer_data_list, output_dir)
+        # elif not args.save_individual:
+        #     # If only one subject and not saving individual, plot it anyway
+        #     plot_single_rsa_timeseries(layer_data_list[0], output_dir, compute_nc=compute_nc)
 
-        # Create RDM plots if requested (per layer)
-        if args.plot_rdms or PLOT_CONFIG.get('plot_rdms', False):
-            timepoint_ms = args.rdm_timepoint if hasattr(args, 'rdm_timepoint') else PLOT_CONFIG.get('rdm_timepoint_ms', 110.0)
-            categorize_level = PLOT_CONFIG.get('categorize_level', 'subcategory')
-            logger.info(f"Creating RDM plots at {timepoint_ms} ms with {categorize_level} categorization...")
-            for rsa_data in layer_data_list:
-                plot_rdms_at_timepoint(rsa_data, timepoint_ms=timepoint_ms, output_dir=output_dir,
-                                     categorize_level=categorize_level)
+        # # Create RDM plots if requested (per layer)
+        # if args.plot_rdms or PLOT_CONFIG.get('plot_rdms', True):
+        #     timepoint_ms = args.rdm_timepoint if hasattr(args, 'rdm_timepoint') else PLOT_CONFIG.get('rdm_timepoint_ms', 110.0)
+        #     categorize_level = PLOT_CONFIG.get('categorize_level', 'subcategory')
+        #     logger.info(f"Creating RDM plots at {timepoint_ms} ms with {categorize_level} categorization...")
+        #     for rsa_data in layer_data_list:
+        #         plot_rdms_at_timepoint(rsa_data, timepoint_ms=timepoint_ms, output_dir=output_dir,
+        #                              categorize_level=categorize_level)
 
         # Create and save summary statistics (per layer)
         if args.save_summary:

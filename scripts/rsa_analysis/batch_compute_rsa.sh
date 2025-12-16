@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --time=8:00:00
 #SBATCH --nodes=1
-#SBATCH --mem=500G
+#SBATCH --mem=600G
 #SBATCH --cpus-per-task=50
 
 #SBATCH -p workq
@@ -27,7 +27,8 @@ data_path="/share/klab/datasets/avs/"
 subject=$SLURM_ARRAY_TASK_ID
 
 # Layers to process
-layers=("layer1" "layer2" "layer3")
+layers=("layer1")
+# "layer2" "layer3")
 
 echo "==================================================="
 echo "Running MEG RSA analysis for subject $subject"

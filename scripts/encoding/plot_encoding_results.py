@@ -79,7 +79,7 @@ def load_multiple_subjects(results_dir: Path, subjects: list):
         subject_dir = results_dir / f"sub-{subject_id:02d}"
         print(f"Searching for results in: {subject_dir}")
         #model-resnet50_ecoset_crop_layer-avgpool_encoding_results.npz
-        pattern = f"model-*_layer-*_encoding_results.npz"
+        pattern = f"model-*_layer-avgpool_encoding_results.npz"
         matching_files = list(subject_dir.glob(pattern))
 
         if not matching_files:
@@ -127,16 +127,21 @@ def plot_encoding_joint(evoked: mne.EvokedArray, output_dir: Path, metadata: dic
    
         import seaborn as sns
         sns.set_context("poster")
-        # filter at 40 Hz for better visualization
-        evoked.filter(None, 30., fir_design='firwin')
+        sigma_ms = 5  # smoothing width in milliseconds
+        sigma_samples = sigma_ms * evoked.info['sfreq'] / 1000
+        evoked_smoothed = evoked.copy()
+        
+        from scipy.ndimage import gaussian_filter1d
+
+        evoked_smoothed.data = gaussian_filter1d(evoked.data, sigma=sigma_samples, axis=1)
         # make pick from mask channels
         # pcick only grad channels
         evoked = evoked.copy().pick_types(meg='grad')
              #mask channels in the small topomap that never cross 0.075
-        mask_channels = np.abs(evoked.data).max(axis=1) > 0.1
+        mask_channels = np.abs(evoked.data).max(axis=1) > np.percentile(np.abs(evoked.data).max(axis=1), 50)
         picks = mne.pick_channels(evoked.info['ch_names'], include=np.array(evoked.info['ch_names'])[mask_channels].tolist())
 
-        fig = evoked.plot(scalings=1, show=False, xlim=(-100, 300), time_unit='ms',
+        fig = evoked_smoothed.plot(scalings=1, show=False, xlim=(-100, 350), time_unit='ms',
                           units=dict(mag='encoding [r]',grad='encoding [r]'), picks=picks,
                           titles=dict(mag='magnetometers', grad='gradiometers'),spatial_colors=True)
                           
@@ -150,9 +155,9 @@ def plot_encoding_joint(evoked: mne.EvokedArray, output_dir: Path, metadata: dic
         for ax in fig.axes[:-1]:
             print(ax, ax.title.get_text())
             for line in ax.get_lines():
-                # if np.any(np.abs(line.get_ydata()) > 0.1):
-                #     line.set_alpha(.8)
-                line.set_linewidth(6)
+                #if np.any(np.abs(line.get_ydata()) < 0.1):
+                #     line.set_alpha(.2)
+                line.set_linewidth(2)
                 line.set_alpha(.4)
         # incease size ot the small topomap
         #ax_topo1 = fig.axes[3]
@@ -293,7 +298,7 @@ def main():
     parser.add_argument('--results-file', help='Path to encoding results NPZ file (single subject mode)')
 
     # Multi-subject mode
-    parser.add_argument('--results-dir', help='Directory containing encoding results (multi-subject mode)', default="/share/klab/psulewski/psulewski/pyavs/encoding/encoding_results")
+    parser.add_argument('--results-dir', help='Directory containing encoding results (multi-subject mode)', default="/share/klab/psulewski/psulewski/pyavs/encoding/")
     parser.add_argument('--subjects', type=int, nargs='+', help='Subject IDs to load (multi-subject mode)', default=[1, 2, 3, 4, 5])
 
     # Output options
@@ -349,20 +354,15 @@ def main():
             raw = mne.io.read_raw_fif(rawdir, preload=False)
             raw = raw.crop(tmin=20, tmax=30)
             raw.resample(sfreq_inferred, npad="auto")
-            info_raw = mne.pick_info(raw.info, mne.pick_types(raw.info, meg=True, eeg=False, exclude='bads'))
-         
+            info_raw = mne.pick_info(raw.info, mne.pick_types(raw.info, meg="grad", eeg=False, exclude='bads',))
+           
            
 
             # IMPORTANT: Reorder channels to match encoding data order (mag first, then grad)
             # Raw info has interleaved order: [grad, grad, mag, grad, grad, mag, ...]
             # But encoding data is concatenated: [mag, mag, ..., grad, grad, ...]
             print("Reordering channels to match encoding data (mag first, then grad)...")
-            ch_types = [mne.io.pick.channel_type(info_raw, i) for i in range(len(info_raw['ch_names']))]
-            mag_indices = [i for i, ch_type in enumerate(ch_types) if ch_type == 'mag']
-            grad_indices = [i for i, ch_type in enumerate(ch_types) if ch_type == 'grad']
-            reorder_indices = mag_indices + grad_indices
-            info_raw = mne.pick_info(info_raw, reorder_indices)
-            print(f"Reordered: {len(mag_indices)} mag + {len(grad_indices)} grad = {len(info_raw['ch_names'])} total channels")
+            
 
             # Create individual plots for each subject
             print("\n" + "="*60)
@@ -370,14 +370,17 @@ def main():
             print("="*60)
             for subj_data in subjects_data:
                 print(f"\nPlotting subject {subj_data['subject_id']}...")
-                evoked = create_mne_evoked(subj_data['r_values'], times, sfreq=sfreq_inferred, info=info_raw)
+                # take only the last 204 result channels (grads)
+                r_grads = subj_data['r_values']#[102:]
+                print(r_grads.shape)
+                evoked = create_mne_evoked(r_grads, times, sfreq=sfreq_inferred, info=info_raw)
                 plot_encoding_joint(evoked, output_dir, subj_data['metadata'])
 
             # Create grand average plot
             print("\n" + "="*60)
             print("Creating grand average plot...")
             print("="*60)
-            plot_grand_average(subjects_data, output_dir, info_raw, sfreq_inferred)
+            #plot_grand_average(subjects_data, output_dir, info_raw, sfreq_inferred)
 
             print("\n" + "="*60)
             print("All plots created successfully!")

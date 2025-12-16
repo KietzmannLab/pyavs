@@ -40,7 +40,7 @@ python ${script_path}/compute_encoding.py \
     --subjects $subject \
     --sessions 1 2 3 4 5 6 7 8 9 10 \
     --model resnet50_ecoset_crop \
-    --layer layer3 \
+    --layer avgpool \
     #--n-jobs 1
 
 echo "==================================================="

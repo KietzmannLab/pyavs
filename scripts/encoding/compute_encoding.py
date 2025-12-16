@@ -304,7 +304,7 @@ def fit_encoding_model_ridgecv(epochs_data: np.ndarray, embeddings: np.ndarray,
 
     # Create scene-aware train-test split
     print("Creating train-test split...")
-    train_idx, test_idx = create_scene_aware_split(metadata, test_size=0.1)
+    train_idx, test_idx = create_scene_aware_split(metadata, test_size=0.2)
 
     # Split data
     X_train, X_test = embeddings[train_idx], embeddings[test_idx]
