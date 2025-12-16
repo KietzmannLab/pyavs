@@ -190,7 +190,8 @@ def plot_encoding_joint(evoked: mne.EvokedArray, output_dir: Path, metadata: dic
 
 def plot_grand_average(subjects_data: list, output_dir: Path, info_raw: mne.Info, sfreq: float):
     """
-    Create grand average plot across subjects with bootstrapped confidence intervals.
+    Create grand average plot across subjects matching individual plot style.
+    Uses statistical masking (t-test against zero) to select significant channels.
 
     Parameters
     ----------
@@ -203,17 +204,17 @@ def plot_grand_average(subjects_data: list, output_dir: Path, info_raw: mne.Info
     sfreq : float
         Sampling frequency
     """
+    from scipy.stats import ttest_1samp
+
     print("Preparing data for grand average plot...")
 
     # Get times from first subject
     times = subjects_data[0]['times']
-    times_ms = times * 1000  # Convert to ms
 
-    # Collect filtered r-values from all subjects
-    all_filtered_data = []
+    # Collect all evoked objects (filtered and grad-only)
+    all_evoked_grad = []
 
     for subj_data in subjects_data:
-        subject_id = subj_data['subject_id']
         r_values = subj_data['r_values']
 
         # Create evoked object
@@ -224,71 +225,87 @@ def plot_grand_average(subjects_data: list, output_dir: Path, info_raw: mne.Info
 
         # Pick only gradiometer channels
         evoked_grad = evoked.copy().pick_types(meg='grad')
+        all_evoked_grad.append(evoked_grad)
 
-        # Mask channels (same as individual plots: max |r| > 0.1)
-        mask_channels = np.abs(evoked_grad.data).max(axis=1) > 0.1
-        filtered_data = evoked_grad.data[mask_channels, :]
+    # Stack all subject data: (n_subjects, n_channels, n_times)
+    all_data = np.array([evoked.data for evoked in all_evoked_grad])
+    n_subjects, n_channels, n_times = all_data.shape
 
-        # Average across channels for this subject
-        mean_across_channels = np.mean(filtered_data, axis=0)
+    print(f"Computing statistical mask across {n_subjects} subjects, {n_channels} channels, {n_times} timepoints")
 
-        # Create dataframe for this subject
-        for t_idx, (t_ms, r_val) in enumerate(zip(times_ms, mean_across_channels)):
-            all_filtered_data.append({
-                'time_ms': t_ms,
-                'r_value': r_val,
-                'subject': subject_id
-            })
+    # Perform t-test against zero for each channel-timepoint combination
+    t_stats = np.zeros((n_channels, n_times))
+    p_values = np.zeros((n_channels, n_times))
 
-    # Convert to dataframe
-    df = pd.DataFrame(all_filtered_data)
+    for ch in range(n_channels):
+        for t in range(n_times):
+            # Get values across subjects for this channel-timepoint
+            values = all_data[:, ch, t]
+            # Two-sided t-test against zero
+            t_stat, p_val = ttest_1samp(values, 0.0)
+            t_stats[ch, t] = t_stat
+            p_values[ch, t] = p_val
 
-    # Filter to time window of interest (-100 to 300 ms)
-    df = df[(df['time_ms'] >= -100) & (df['time_ms'] <= 300)]
+    # Create mask for significant channels (p < 0.05)
+    sig_mask = p_values < 0.05
 
-    print(f"Data shape for plotting: {len(df)} rows, {df['subject'].nunique()} subjects")
+    # Additional mask: only channels that show significance at some timepoint
+    channels_ever_sig = np.any(sig_mask, axis=1)
+    n_sig_channels = np.sum(channels_ever_sig)
 
-    # Create figure
+    print(f"Significant channels: {n_sig_channels} / {n_channels} ({n_sig_channels/n_channels*100:.1f}%)")
+
+    # Compute grand average
+    grand_avg_data = np.mean(all_data, axis=0)
+
+    # Create grand average evoked object
+    grand_avg_evoked = create_mne_evoked(grand_avg_data, times, sfreq=sfreq, info=all_evoked_grad[0].info)
+
+    # Create picks from statistically significant channels
+    sig_channel_names = [grand_avg_evoked.info['ch_names'][i] for i in range(n_channels) if channels_ever_sig[i]]
+    picks = mne.pick_channels(grand_avg_evoked.info['ch_names'], include=sig_channel_names)
+
+    print(f"Plotting grand average with {len(picks)} statistically significant channels")
+
+    # Create plot matching individual subject style
     sns.set_context("poster")
-    fig, ax = plt.subplots(figsize=(8, 6))
+    fig = grand_avg_evoked.plot(scalings=1, show=False, xlim=(-100, 300), time_unit='ms',
+                                units=dict(grad='encoding [r]'), picks=picks,
+                                titles=dict(grad='gradiometers'), spatial_colors=True)
 
-    # Create lineplot with bootstrapped CI
-    sns.lineplot(
-        data=df,
-        x='time_ms',
-        y='r_value',
-        errorbar=('ci', 95),  # 95% confidence interval with bootstrapping
-        n_boot=1000,  # Number of bootstrap iterations
-        ax=ax,
-        linewidth=3,
-        color='#1f77b4'  # Default blue
-    )
-
-    # Styling
-    ax.axvline(x=0, color='grey', linestyle='--', linewidth=2, label='Stimulus onset')
-    ax.axhline(y=0, color='grey', linestyle='-', linewidth=1)
-    ax.set_xlabel('Time (ms)', fontsize=18)
-    ax.set_ylabel('Encoding performance [r]', fontsize=18)
-    ax.set_title(f'Grand Average Encoding (N={df["subject"].nunique()} subjects)', fontsize=20)
-    ax.legend(fontsize=14)
+    # Apply same styling as individual plots
+    fig.set_size_inches(6, 5)
     sns.despine(fig=fig)
 
+    for ax in fig.axes[:-1]:
+        for line in ax.get_lines():
+            line.set_linewidth(6)
+            line.set_alpha(.4)
+
+    # Add reference lines
+    for ax in fig.axes:
+        if 'Time (ms)' in ax.get_xlabel():
+            ax.axvline(x=0, color='grey', linestyle='--')
+            ax.axhline(y=0, color='grey', linestyle='-')
+            ax.set_xlabel('time[ms]')
+            ax.set_title(f'Grand Average (N={n_subjects})')
+
     # Save figure
-    output_file = output_dir / 'grand_average_encoding.png'
-    plt.tight_layout()
+    output_file = output_dir / 'grand_average_encoding_joint.png'
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
-    print(f"Saved grand average plot to {output_file}")
+    print(f"Saved grand average joint plot to {output_file}")
     plt.close()
 
     # Print summary statistics
     print("\nGrand Average Statistics:")
-    summary = df.groupby('time_ms')['r_value'].agg(['mean', 'std', 'sem'])
-    peak_time = summary['mean'].idxmax()
-    peak_r = summary['mean'].max()
+    sig_data = grand_avg_data[channels_ever_sig, :]
+    peak_ch, peak_t = np.unravel_index(np.argmax(sig_data), sig_data.shape)
+    peak_r = sig_data[peak_ch, peak_t]
+    peak_time = times[peak_t] * 1000
     print(f"  - Peak encoding: r={peak_r:.4f} at t={peak_time:.1f} ms")
-    print(f"  - Time window: {df['time_ms'].min():.1f} to {df['time_ms'].max():.1f} ms")
-    print(f"  - Mean r-value: {df['r_value'].mean():.4f}")
-    print(f"  - Number of subjects: {df['subject'].nunique()}")
+    print(f"  - Mean r-value (significant channels): {np.mean(sig_data):.4f}")
+    print(f"  - Significant channels: {n_sig_channels} / {n_channels}")
+    print(f"  - Number of subjects: {n_subjects}")
 
 
 def main():
