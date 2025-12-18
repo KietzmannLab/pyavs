@@ -958,7 +958,7 @@ def plot_multi_layer_comparison(data_by_layer: Dict[str, List[Dict[str, Any]]],
         return None
 
     sns.set_context("poster")
-    fig, ax = plt.subplots(figsize=(10, 8))  # Match single-layer plot size
+    fig, ax = plt.subplots(figsize=(8, 8))  # Match single-layer plot size
 
     # Get times from first layer's first subject
     first_layer_data = list(data_by_layer.values())[0]
@@ -967,7 +967,7 @@ def plot_multi_layer_comparison(data_by_layer: Dict[str, List[Dict[str, Any]]],
 
     # Use magma colormap for layers
     n_layers = len(data_by_layer)
-    colors = plt.cm.magma(np.linspace(0.2, 0.9, n_layers))  # Avoid too light/dark colors
+    colors = plt.cm.magma(np.linspace(0.2, 0.8, n_layers))  # Avoid too light/dark colors
 
     # Collect all baselines across all layers for group-level baseline
     all_baselines = []

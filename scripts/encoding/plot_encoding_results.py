@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-
+from statsmodels.stats.multitest import multipletests
 try:
     import mne
 except ImportError as e:
@@ -221,7 +221,7 @@ def plot_grand_average(subjects_data: list, output_dir: Path, info_raw: mne.Info
         evoked = create_mne_evoked(r_values, times, sfreq=sfreq, info=info_raw)
 
         # Apply same filtering as individual plots
-        evoked.filter(None, 30., fir_design='firwin')
+        evoked.filter(None, 40., fir_design='firwin')
 
         # Pick only gradiometer channels
         evoked_grad = evoked.copy().pick_types(meg='grad')
@@ -237,20 +237,19 @@ def plot_grand_average(subjects_data: list, output_dir: Path, info_raw: mne.Info
     t_stats = np.zeros((n_channels, n_times))
     p_values = np.zeros((n_channels, n_times))
 
-    for ch in range(n_channels):
-        for t in range(n_times):
-            # Get values across subjects for this channel-timepoint
-            values = all_data[:, ch, t]
-            # Two-sided t-test against zero
-            t_stat, p_val = ttest_1samp(values, 0.0)
-            t_stats[ch, t] = t_stat
-            p_values[ch, t] = p_val
+    # Vectorized t-test across subjects for all channels and timepoints (1-sided)
+    t_stats, p_values = ttest_1samp(all_data, 0.0, axis=0, alternative='greater')
+    # p_values shape: (n_channels, n_times)
 
-    # Create mask for significant channels (p < 0.05)
-    sig_mask = p_values < 0.05
-
-    # Additional mask: only channels that show significance at some timepoint
-    channels_ever_sig = np.any(sig_mask, axis=1)
+    # Benjamini-Hochberg (FDR) correction across all channel-timepoints
+    # p_values_flat = p_values.ravel()
+    # reject, pvals_corrected, _, _ = multipletests(p_values_flat, alpha=0.05, method='fdr_bh')
+    # sig_mask = reject.reshape(n_channels, n_times)  # True where significant
+    # just filter by p value
+    sig_mask = p_values < 0.001
+    #print()
+    # Additional mask: only channels that show significance at least at 10 timepoints
+    channels_ever_sig = np.sum(sig_mask, axis=1) >= 20
     n_sig_channels = np.sum(channels_ever_sig)
 
     print(f"Significant channels: {n_sig_channels} / {n_channels} ({n_sig_channels/n_channels*100:.1f}%)")
@@ -262,50 +261,68 @@ def plot_grand_average(subjects_data: list, output_dir: Path, info_raw: mne.Info
     grand_avg_evoked = create_mne_evoked(grand_avg_data, times, sfreq=sfreq, info=all_evoked_grad[0].info)
 
     # Create picks from statistically significant channels
-    sig_channel_names = [grand_avg_evoked.info['ch_names'][i] for i in range(n_channels) if channels_ever_sig[i]]
-    picks = mne.pick_channels(grand_avg_evoked.info['ch_names'], include=sig_channel_names)
-
-    print(f"Plotting grand average with {len(picks)} statistically significant channels")
-
+    picks_ga = mne.pick_channels(grand_avg_evoked.info['ch_names'], include=np.array(grand_avg_evoked.info['ch_names'])[channels_ever_sig].tolist())
+    print(f"Plotting grand average with {len(picks_ga)} statistically significant channels")
+    
     # Create plot matching individual subject style
+    #grand_avg_sig_only = grand_avg_evoked.copy().pick(picks_ga)
     sns.set_context("poster")
-    fig = grand_avg_evoked.plot(scalings=1, show=False, xlim=(-100, 300), time_unit='ms',
-                                units=dict(grad='encoding [r]'), picks=picks,
-                                titles=dict(grad='gradiometers'), spatial_colors=True)
+    fig = grand_avg_evoked.plot(scalings=1, show=False, xlim=(-100, 350), time_unit='ms',
+                                units=dict(grad='ANN encoding [r]'), picks=picks_ga,
+                               spatial_colors=True, selectable=False)
+    # Reshape to long format for seaborn
+    evoked_picked = grand_avg_evoked.copy().pick(picks_ga)
+    df_ga = evoked_picked.data
+    times_ms = evoked_picked.times * 1000
 
+    df_long = pd.DataFrame(df_ga.T, columns=evoked_picked.ch_names)
+    df_long['time'] = times_ms
+    df_long = df_long.melt(id_vars='time', var_name='channel', value_name='encoding [r]')
+    # get ax
+    ax=plt.gca()
+ 
+    # limit the times
+    
+   
+ 
     # Apply same styling as individual plots
-    fig.set_size_inches(6, 5)
+    fig.set_size_inches(8, 8)
     sns.despine(fig=fig)
 
     for ax in fig.axes[:-1]:
         for line in ax.get_lines():
-            line.set_linewidth(6)
+            line.set_linewidth(3)
             line.set_alpha(.4)
 
     # Add reference lines
     for ax in fig.axes:
+        print(ax)
         if 'Time (ms)' in ax.get_xlabel():
+            ax.set_title(None)
             ax.axvline(x=0, color='grey', linestyle='--')
-            ax.axhline(y=0, color='grey', linestyle='-')
+            #ax.axhline(y=0, color='grey', linestyle='-')
             ax.set_xlabel('time[ms]')
-            ax.set_title(f'Grand Average (N={n_subjects})')
+            #ax.set_title(f'Grand Average (N={n_subjects})')
+            sns.lineplot(data=df_long, x='time', y='encoding [r]', 
+                color='black', linewidth=5, errorbar=('ci',95), ax=ax, zorder=1000)
+
 
     # Save figure
-    output_file = output_dir / 'grand_average_encoding_joint.png'
-    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    output_file = output_dir / 'grand_average_encoding_joint.pdf'
+    fig.figure.savefig(output_file, dpi=300, bbox_inches='tight')
     print(f"Saved grand average joint plot to {output_file}")
     plt.close()
 
     # Print summary statistics
     print("\nGrand Average Statistics:")
-    sig_data = grand_avg_data[channels_ever_sig, :]
-    peak_ch, peak_t = np.unravel_index(np.argmax(sig_data), sig_data.shape)
-    peak_r = sig_data[peak_ch, peak_t]
-    peak_time = times[peak_t] * 1000
-    print(f"  - Peak encoding: r={peak_r:.4f} at t={peak_time:.1f} ms")
-    print(f"  - Mean r-value (significant channels): {np.mean(sig_data):.4f}")
-    print(f"  - Significant channels: {n_sig_channels} / {n_channels}")
-    print(f"  - Number of subjects: {n_subjects}")
+    #sig_data = grand_avg_data[channels_ever_sig, :]
+    #peak_ch, peak_t = np.unravel_index(np.argmax(sig_data), sig_data.shape)
+   # peak_r = sig_data[peak_ch, peak_t]
+    #peak_time = times[peak_t] * 1000
+    # print(f"  - Peak encoding: r={peak_r:.4f} at t={peak_time:.1f} ms")
+    # print(f"  - Mean r-value (significant channels): {np.mean(sig_data):.4f}")
+    # print(f"  - Significant channels: {n_sig_channels} / {n_channels}")
+    # print(f"  - Number of subjects: {n_subjects}")
 
 
 def main():
@@ -375,12 +392,7 @@ def main():
            
            
 
-            # IMPORTANT: Reorder channels to match encoding data order (mag first, then grad)
-            # Raw info has interleaved order: [grad, grad, mag, grad, grad, mag, ...]
-            # But encoding data is concatenated: [mag, mag, ..., grad, grad, ...]
-            print("Reordering channels to match encoding data (mag first, then grad)...")
             
-
             # Create individual plots for each subject
             print("\n" + "="*60)
             print("Creating individual subject plots...")
@@ -397,7 +409,7 @@ def main():
             print("\n" + "="*60)
             print("Creating grand average plot...")
             print("="*60)
-            #plot_grand_average(subjects_data, output_dir, info_raw, sfreq_inferred)
+            plot_grand_average(subjects_data, output_dir, info_raw, sfreq_inferred)
 
             print("\n" + "="*60)
             print("All plots created successfully!")
@@ -431,14 +443,14 @@ def main():
             raw.resample(sfreq_inferred, npad="auto")
             info_raw = mne.pick_info(raw.info, mne.pick_types(raw.info, meg=True, eeg=False, exclude='bads'))
 
-            # IMPORTANT: Reorder channels to match encoding data order (mag first, then grad)
-            print("Reordering channels to match encoding data (mag first, then grad)...")
-            ch_types = [mne.io.pick.channel_type(info_raw, i) for i in range(len(info_raw['ch_names']))]
-            mag_indices = [i for i, ch_type in enumerate(ch_types) if ch_type == 'mag']
-            grad_indices = [i for i, ch_type in enumerate(ch_types) if ch_type == 'grad']
-            reorder_indices = mag_indices + grad_indices
-            info_raw = mne.pick_info(info_raw, reorder_indices)
-            print(f"Reordered: {len(mag_indices)} mag + {len(grad_indices)} grad = {len(info_raw['ch_names'])} total channels")
+            # # IMPORTANT: Reorder channels to match encoding data order (mag first, then grad)
+            # print("Reordering channels to match encoding data (mag first, then grad)...")
+            # ch_types = [mne.io.pick.channel_type(info_raw, i) for i in range(len(info_raw['ch_names']))]
+            # mag_indices = [i for i, ch_type in enumerate(ch_types) if ch_type == 'mag']
+            # grad_indices = [i for i, ch_type in enumerate(ch_types) if ch_type == 'grad']
+            # reorder_indices = mag_indices + grad_indices
+            # info_raw = mne.pick_info(info_raw, reorder_indices)
+            # print(f"Reordered: {len(mag_indices)} mag + {len(grad_indices)} grad = {len(info_raw['ch_names'])} total channels")
 
             print(f"Inferred sampling frequency: {sfreq_inferred} Hz")
             evoked = create_mne_evoked(r_values, times, sfreq=sfreq_inferred, info=info_raw)
@@ -460,6 +472,7 @@ def main():
     except Exception as e:
         print(f"Error in plotting pipeline: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
 
