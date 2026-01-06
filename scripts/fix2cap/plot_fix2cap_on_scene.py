@@ -21,14 +21,70 @@ from typing import Optional, List
 # pyAVS imports
 from pyavs.config.config import PyAVSConfig
 from pyavs.utils.logging import get_logger
+from pyavs.captions.load import load_captions
 
 logger = get_logger('scripts.fix2cap')
+
+
+def process_none_style(fix2cap_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Create none_style column from rating data.
+
+    Processing logic (from fix2cap_quality_controls.py):
+    1. Default to 'false' (fixation target not mentioned in any caption)
+    2. If none_from_other_subject != "0.0", set to 'other' (mentioned in another subject's caption)
+    3. If in_caption == True, set to 'self' (mentioned in subject's own caption)
+
+    Parameters
+    ----------
+    fix2cap_df : pd.DataFrame
+        Fix2cap data with rating columns
+
+    Returns
+    -------
+    pd.DataFrame
+        Data with none_style column added/updated
+    """
+    # Check if we have the necessary columns
+    has_in_caption = 'in_caption' in fix2cap_df.columns
+    has_none_from_other = 'none_from_other_subject' in fix2cap_df.columns
+
+    if not (has_in_caption or has_none_from_other):
+        logger.warning("Neither 'in_caption' nor 'none_from_other_subject' columns found. "
+                      "Cannot process none_style from ratings.")
+        return fix2cap_df
+
+    # Create none_style column with correct ordering
+    fix2cap_df['none_style'] = 'false'  # default
+
+    if has_none_from_other:
+        # Set to 'other' if mentioned in another subject's caption
+        fix2cap_df.loc[fix2cap_df['none_from_other_subject'] != "0.0", 'none_style'] = 'other'
+
+    if has_in_caption:
+        # Set to 'self' if mentioned in subject's own caption (overrides 'other')
+        fix2cap_df.loc[fix2cap_df['in_caption'] == True, 'none_style'] = 'self'
+
+    # Convert to categorical with desired order
+    fix2cap_df['none_style'] = pd.Categorical(
+        fix2cap_df['none_style'],
+        categories=['self', 'false', 'other'],
+        ordered=True
+    )
+
+    logger.info("Processed none_style from rating columns")
+    if 'none_style' in fix2cap_df.columns:
+        logger.info(f"none_style distribution after processing:\n{fix2cap_df['none_style'].value_counts()}")
+
+    return fix2cap_df
 
 
 def load_fix2cap_data(
     data_path: str,
     datasets: Optional[List[str]] = None,
     filter_done: bool = True,
+    subject_id: Optional[int] = None,
+    process_ratings: bool = True,
     verbose: bool = True
 ) -> pd.DataFrame:
     """
@@ -42,6 +98,11 @@ def load_fix2cap_data(
         Which datasets to load: ["ld", "og"]. If None, loads both.
     filter_done : bool
         If True, filter to fix2cap_done==True (default: True)
+    subject_id : Optional[int]
+        If provided, filter to single subject (default: None, includes all)
+    process_ratings : bool
+        If True, create/update none_style from rating columns
+        (in_caption, none_from_other_subject) (default: True)
     verbose : bool
         Print loading information
 
@@ -94,10 +155,33 @@ def load_fix2cap_data(
             logger.info(f"Filtered to fix2cap_done==True: {n_after}/{n_before} "
                        f"({n_after/n_before*100:.1f}%)")
 
+    # Process none_style from ratings if requested
+    if process_ratings:
+        if verbose:
+            logger.info("Processing none_style from rating columns...")
+        fix2cap = process_none_style(fix2cap)
+
+    # Filter to specific subject if requested
+    if subject_id is not None:
+        if 'subject' in fix2cap.columns:
+            n_before = len(fix2cap)
+            fix2cap = fix2cap[fix2cap['subject'] == subject_id].copy()
+            n_after = len(fix2cap)
+
+            if verbose:
+                logger.info(f"Filtered to subject {subject_id}: {n_after}/{n_before} fixations")
+
+            if n_after == 0:
+                logger.warning(f"No fixations found for subject {subject_id}")
+        else:
+            logger.warning("'subject' column not found, cannot filter by subject")
+
     if verbose:
         logger.info(f"Unique scenes: {fix2cap['sceneID'].nunique()}")
+        if subject_id is not None and 'subject' in fix2cap.columns:
+            logger.info(f"Unique subjects: {fix2cap['subject'].nunique()}")
         if 'none_style' in fix2cap.columns:
-            logger.info(f"none_style distribution:\n{fix2cap['none_style'].value_counts()}")
+            logger.info(f"none_style distribution after all processing:\n{fix2cap['none_style'].value_counts()}")
 
     return fix2cap
 
@@ -323,7 +407,8 @@ def plot_fix2cap_on_scene(
     max_fixations: int = 100,
     marker_size: float = 500,
     alpha: float = 0.6,
-    show_inset_bar: bool = True
+    show_inset_bar: bool = True,
+    captions_df: Optional[pd.DataFrame] = None
 ) -> None:
     """
     Plot fix2cap fixations on a scene image, colored by none_style.
@@ -353,6 +438,9 @@ def plot_fix2cap_on_scene(
         Transparency (default: 0.6)
     show_inset_bar : bool
         Show small inset bar chart with condition fractions (default: True)
+    captions_df : Optional[pd.DataFrame]
+        DataFrame with caption data (from load_captions). If provided,
+        displays transcribed caption below the scene.
     """
     # Filter fixations for this scene
     scene_fixations = fix2cap_df[fix2cap_df['sceneID'] == scene_id].copy()
@@ -478,6 +566,23 @@ def plot_fix2cap_on_scene(
     # Turn off axis (same as et_viz)
     ax.axis('off')
 
+    # Add caption below image if provided
+    if captions_df is not None and len(captions_df) > 0:
+        # Find caption for this scene
+        scene_captions = captions_df[captions_df['scene_ID'] == scene_id]
+
+        if len(scene_captions) > 0:
+            # Get the first transcribed caption for this scene
+            caption_text = scene_captions.iloc[0]['transcribed_caption']
+
+            if pd.notna(caption_text) and str(caption_text).strip():
+                # Add caption text below the image
+                # Position: centered below the image in figure coordinates
+                fig.text(0.5, 0.02, f'"{caption_text}"',
+                        ha='center', va='bottom',
+                        fontsize=12, style='italic',
+                        wrap=True)
+
     # Ensure tight layout
     plt.tight_layout()
 
@@ -500,9 +605,15 @@ def plot_fix2cap_on_scene(
     plt.close()
 
 
-def main():
+def main(subject_id: Optional[int] = None):
     """
     Main function demonstrating fix2cap visualization.
+
+    Parameters
+    ----------
+    subject_id : Optional[int]
+        Subject ID to visualize. If None, uses all subjects.
+        Default: None
     """
     logger.info("=== Fix2cap Visualization ===\n")
 
@@ -510,6 +621,11 @@ def main():
     config = PyAVSConfig()
     config.data_path = "/share/klab/datasets/avs/"
     plots_dir = "/share/klab/psulewski/psulewski/pyavs/fix2cap_output"
+
+    # Use default subject if not provided
+    if subject_id is None:
+        subject_id = 4  # Default subject for demonstration
+        logger.info(f"No subject specified, using default subject {subject_id}")
 
     MSCOCO_IMAGE_DIR = os.path.join(config.data_path, "AVS-UTILS", "avs_scenes")
 
@@ -529,21 +645,45 @@ def main():
         logger.error(f"MSCOCO image directory not found: {MSCOCO_IMAGE_DIR}")
         return
 
-    # Step 1: Load fix2cap data
-    logger.info(f"Step 1: Loading fix2cap data")
+    # Step 1: Load fix2cap data for specific subject
+    logger.info(f"Step 1: Loading fix2cap data for subject {subject_id}")
     try:
         fix2cap_df = load_fix2cap_data(
             data_path=config.data_path,
             datasets=["ld", "og"],
             filter_done=True,
+            subject_id=subject_id,
+            process_ratings=True,  # Process none_style from rating columns
             verbose=True
         )
     except Exception as e:
         logger.error(f"Error loading fix2cap data: {e}")
         return
 
-    # Step 2: Select scenes to plot
-    logger.info(f"\nStep 2: Selecting scenes to plot")
+    # Step 2: Load captions for the subject
+    logger.info(f"\nStep 2: Loading captions for subject {subject_id}")
+    try:
+        # Determine which sessions this subject has
+        if 'session' in fix2cap_df.columns:
+            sessions = fix2cap_df['session'].unique().tolist()
+        else:
+            # Default to all sessions if column not found
+            sessions = list(range(1, 11))
+
+        captions_df = load_captions(
+            subjects=subject_id,
+            sessions=sessions,
+            data_path=config.data_path,
+            use_coco=False  # Use parsed captions for speed
+        )
+        logger.info(f"Loaded {len(captions_df)} captions")
+    except Exception as e:
+        logger.error(f"Error loading captions: {e}")
+        logger.warning("Continuing without caption display")
+        captions_df = None
+
+    # Step 3: Select scenes to plot
+    logger.info(f"\nStep 3: Selecting scenes to plot")
     selected_scenes = select_scenes(
         fix2cap_df,
         strategy="random",
@@ -552,15 +692,15 @@ def main():
     )
     logger.info(f"Selected {len(selected_scenes)} scenes for visualization")
 
-    # Step 3: Create overall condition summary
-    logger.info(f"\nStep 3: Creating overall condition summary")
+    # Step 4: Create overall condition summary
+    logger.info(f"\nStep 4: Creating overall condition summary")
     try:
         plot_condition_summary(fix2cap_df, output_dir=plots_dir)
     except Exception as e:
         logger.error(f"Error creating summary plot: {e}")
 
-    # Step 4: Create scene visualizations
-    logger.info(f"\nStep 4: Creating scene visualizations")
+    # Step 5: Create scene visualizations
+    logger.info(f"\nStep 5: Creating scene visualizations")
 
     for scene_id in selected_scenes:
         scene_id_int = int(scene_id)
@@ -572,7 +712,8 @@ def main():
                 fix2cap_df,
                 MSCOCO_IMAGE_DIR,
                 config,
-                output_dir=plots_dir
+                output_dir=plots_dir,
+                captions_df=captions_df
             )
         except Exception as e:
             logger.error(f"Error plotting scene {scene_id_int}: {e}")

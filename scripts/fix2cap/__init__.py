@@ -16,7 +16,8 @@ from .plot_fix2cap_on_scene import (
     get_color_for_condition,
     select_scenes,
     plot_condition_summary,
-    get_condition_fractions
+    get_condition_fractions,
+    process_none_style
 )
 
 __all__ = [
@@ -25,5 +26,6 @@ __all__ = [
     'get_color_for_condition',
     'select_scenes',
     'plot_condition_summary',
-    'get_condition_fractions'
+    'get_condition_fractions',
+    'process_none_style'
 ]

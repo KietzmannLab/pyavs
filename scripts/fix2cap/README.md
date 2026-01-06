@@ -15,6 +15,9 @@ The `fix2cap` module visualizes human annotation data from the fixation-to-capti
 ## Features
 
 - Loads fix2cap rating data from both raters (ld and og datasets)
+- **Single subject filtering**: Visualize data for a specific subject
+- **Automatic none_style processing**: Derives condition categories from rating data (in_caption, none_from_other_subject)
+- **Caption display**: Shows transcribed captions below each scene image
 - Plots fixations on scene images with large semi-transparent markers
 - Color-coded by caption mention category
 - **Minimalistic stacked bar plots** showing condition fractions:
@@ -43,21 +46,34 @@ By default, both datasets are loaded and concatenated.
 
 ## Usage
 
-### Basic Usage
+### Basic Usage (Single Subject)
 
 ```python
 from pyavs.scripts.fix2cap import plot_fix2cap_on_scene, load_fix2cap_data
+from pyavs.captions.load import load_captions
 from pyavs.config.config import PyAVSConfig
 
 # Setup
 config = PyAVSConfig()
 config.data_path = "/share/klab/datasets/avs/"
+subject_id = 4
 
-# Load fix2cap data (both ld and og datasets)
+# Load fix2cap data for a specific subject
+# This will automatically process none_style from rating columns
 fix2cap_df = load_fix2cap_data(
     data_path=config.data_path,
     datasets=["ld", "og"],
-    filter_done=True
+    filter_done=True,
+    subject_id=subject_id,
+    process_ratings=True  # Derive none_style from in_caption & none_from_other_subject
+)
+
+# Load captions for the subject (optional, for display below scenes)
+sessions = fix2cap_df['session'].unique().tolist()
+captions_df = load_captions(
+    subjects=subject_id,
+    sessions=sessions,
+    data_path=config.data_path
 )
 
 # Plot a specific scene
@@ -66,8 +82,18 @@ plot_fix2cap_on_scene(
     fix2cap_df=fix2cap_df,
     mscoco_image_dir="/share/klab/datasets/avs/AVS-UTILS/avs_scenes",
     config=config,
-    output_dir="./fix2cap_plots"
+    output_dir="./fix2cap_plots",
+    captions_df=captions_df  # Optional: displays caption below scene
 )
+```
+
+### Quick Start with Main Function
+
+```python
+from pyavs.scripts.fix2cap.plot_fix2cap_on_scene import main
+
+# Run for a specific subject (default: subject 4, 30 random scenes)
+main(subject_id=4)
 ```
 
 ### Create Condition Summary Plot
@@ -103,13 +129,21 @@ scenes = select_scenes(fix2cap_df, strategy="specific", scene_ids=[123, 456, 789
 scenes = select_scenes(fix2cap_df, strategy="all")
 ```
 
-### Run Main Visualization Script
+### Process none_style from Ratings
+
+The `process_ratings=True` parameter derives the condition category from rating data:
 
 ```python
-from pyavs.scripts.fix2cap.plot_fix2cap_on_scene import main
+# Manual none_style processing
+from pyavs.scripts.fix2cap import process_none_style
 
-# Run with default parameters (30 random scenes)
-main()
+# Process none_style column from in_caption and none_from_other_subject columns
+fix2cap_df = process_none_style(fix2cap_df)
+
+# Processing logic:
+# 1. Default: 'false' (not mentioned in any caption)
+# 2. If none_from_other_subject != "0.0": 'other' (mentioned in another subject's caption)
+# 3. If in_caption == True: 'self' (mentioned in subject's own caption)
 ```
 
 ### Custom Plotting Parameters
@@ -136,6 +170,8 @@ Edit the following in `plot_fix2cap_on_scene.py` or pass to `load_fix2cap_data()
 
 - `datasets`: List of datasets to load, e.g., `["ld"]`, `["og"]`, or `["ld", "og"]` (default: both)
 - `filter_done`: If True, only include completed ratings (default: True)
+- `subject_id`: Filter to specific subject ID (default: None, includes all subjects)
+- `process_ratings`: If True, derive none_style from in_caption and none_from_other_subject columns (default: True)
 
 ### Visualization Parameters
 
@@ -145,6 +181,7 @@ Edit the following in `plot_fix2cap_on_scene.py` or pass to `plot_fix2cap_on_sce
 - `alpha`: Transparency level 0-1 (default: 0.6)
 - `max_fixations`: Maximum fixations per scene for readability (default: 100)
 - `show_inset_bar`: Show small bar chart on each scene (default: True)
+- `captions_df`: DataFrame with caption data (from load_captions); displays transcribed caption below scene if provided (default: None)
 - `output_dir`: Directory for saving plots
 
 For `plot_condition_summary()`:
@@ -197,7 +234,9 @@ Both formats use:
 The fix2cap CSV files contain:
 - `subject`, `session`, `trial`, `sceneID`: Identifiers
 - `mean_gx`, `mean_gy`: Fixation screen coordinates
-- `none_style`: Caption mention category (self/false/other)
+- `in_caption`: Boolean, whether fixation target was mentioned in subject's own caption
+- `none_from_other_subject`: String, ID of other subject who mentioned the target (or "0.0" if none)
+- `none_style`: Caption mention category (self/false/other) - derived from in_caption and none_from_other_subject if process_ratings=True
 - `fix2cap_done`: Whether rating is complete
 - `rater_id`: Added during loading (ld or og)
 
@@ -209,6 +248,16 @@ The fix2cap CSV files contain:
   y = mean_gy - screen_height/2
   ```
 - Scene images are rescaled using `config.get_rescaled_scene_size()`
+
+### none_style Processing
+The `process_none_style()` function derives condition categories from rating data:
+
+**Processing logic** (matching fix2cap_quality_controls.py):
+1. **Default**: 'false' (fixation target not mentioned in any caption)
+2. **If none_from_other_subject != "0.0"**: 'other' (mentioned in another subject's caption)
+3. **If in_caption == True**: 'self' (mentioned in subject's own caption, overrides 'other')
+
+The result is converted to an ordered categorical: ['self', 'false', 'other']
 
 ### Color Mapping Robustness
 The `get_color_for_condition()` function handles various none_style values:

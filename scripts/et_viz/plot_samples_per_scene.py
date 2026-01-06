@@ -145,7 +145,7 @@ def plot_samples_on_scene(scene_id: int,
         style=scene_samples['type'],
         markers=markerstyle,
         s=marker_size,
-        ax=ax, legend=False, edgecolor='none', alpha=0.5
+        ax=ax, legend=False, edgecolor='none', alpha=0.8
     )
             
 
