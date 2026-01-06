@@ -33,8 +33,8 @@ def plot_samples_on_scene(scene_id: int,
                           mscoco_image_dir: str,
                           config: PyAVSConfig,
                           output_dir: str = "plots",
-                          max_samples: int = 500,
-                          marker_size: float = 50) -> None:
+                          max_samples: int = 2500,
+                          marker_size: float = 400) -> None:
     """
     Plot eye tracking sample datapoints on a scene image, colored by event type.
 
@@ -74,6 +74,7 @@ def plot_samples_on_scene(scene_id: int,
         indices = np.linspace(0, len(scene_samples)-1, max_samples, dtype=int)
         scene_samples = scene_samples.iloc[indices]
         logger.info(f"Downsampled to {max_samples} samples for scene {scene_id}")
+        logger.info(f"Fraction of samples plotted: {max_samples / len(scene_samples):.3f}")
 
     # Find and load the scene image
     scene_id_str = str(int(scene_id)).zfill(12) + "_MEG_size"
@@ -93,24 +94,18 @@ def plot_samples_on_scene(scene_id: int,
 
     img_width, img_height = rescaled_size
 
-    # Set publication-quality matplotlib parameters (same as example)
-    plt.rcParams.update({
-        'font.size': 12,
-        'axes.linewidth': 1.5,
-        'xtick.major.width': 1.5,
-        'ytick.major.width': 1.5,
-        'figure.dpi': 300
-    })
+    # Set publication-quality conetct poster 
+    import seaborn as sns
+    sns.set_context("poster")
 
     # Create plot with publication-quality size (same as example: 10x7.5 at 300 DPI)
     fig, ax = plt.subplots(1, 1, figsize=(10, 7.5))
 
-    # Define colors for fixation, saccade, and blink
-    colors = {
-        'fixation': '#1f77b4',  # Blue
-        'saccade': '#ff7f0e',   # Orange
-        'blink': '#d62728',     # Red
-        'unknown': '#7f7f7f'    # Gray (for NaN or other types)
+    # Define markerstyle for fixation, saccade, and blink
+    markerstyle = {
+        'fixation': 'o',
+        'saccade': '.',
+        'blink': 'D'
     }
 
     # Set image extent to center coordinate system (same as example)
@@ -133,27 +128,29 @@ def plot_samples_on_scene(scene_id: int,
                     "Ensure samples are from EyeLink/pyEDF with event type annotations.")
         return
 
-    # Plot samples by event type
-    for event_type in ['fixation', 'saccade', 'blink']:
-        type_samples = scene_samples[scene_samples['type'] == event_type]
+   
 
-        if len(type_samples) == 0:
-            continue
+    # Transform screen coordinates to centered image coordinates (same as example)
+    x_screen = scene_samples[x_col].values
+    y_screen = scene_samples[y_col].values
 
-        # Transform screen coordinates to centered image coordinates (same as example)
-        x_screen = type_samples[x_col].values
-        y_screen = type_samples[y_col].values
+    x = x_screen - config.screen_size_pixels[0]//2
+    y = y_screen - config.screen_size_pixels[1]//2
 
-        x = x_screen - config.screen_size_pixels[0]//2
-        y = y_screen - config.screen_size_pixels[1]//2
-
-        # Plot sample points with appropriate color
-        ax.scatter(x, y, c=colors[event_type], s=marker_size, alpha=0.6,
-                  edgecolors='white', linewidth=0.5, label=event_type.capitalize(),
-                  zorder=10)
+    # Plot sample points with appropriate color (colored by time_order in e.g. magma)
+    sns.scatterplot(
+        x=x,
+        y=y, hue=scene_samples.index,
+        palette='magma', 
+        style=scene_samples['type'],
+        markers=markerstyle,
+        s=marker_size,
+        ax=ax, legend=False, edgecolor='none', alpha=0.5
+    )
+            
 
     # Add legend
-    ax.legend(loc='upper right', fontsize=14, framealpha=0.9)
+    ax.legend(loc='upper right', frameon=False)
 
     # Turn off axis (same as example)
     ax.axis('off')
@@ -192,10 +189,11 @@ def main():
     plots_dir = "/share/klab/psulewski/psulewski/pyavs/et_viz_output"
 
     # Configuration
-    SUBJECT_ID = 4
-    SESSION_ID = 10
+    SUBJECT_ID = 60
+    SESSION_ID = 1
     DATA_PATH = config.data_path
     MSCOCO_IMAGE_DIR = os.path.join(DATA_PATH, "AVS-UTILS", "avs_scenes")
+    plots_dir = os.path.join(plots_dir, f"as{SUBJECT_ID:02d}_{SESSION_ID:02d}_samples_per_scene")   
 
     logger.info(f"Using standardized visual parameters:")
     logger.info(f"  Screen size: {config.screen_size_pixels} pixels")
@@ -239,13 +237,15 @@ def main():
     # Step 3: Create visualizations for selected scenes
     logger.info(f"\nStep 3: Creating visualizations")
 
-    # Get scenes with sufficient samples
-    scene_sample_counts = samples_typed.groupby('sceneID').size()
-    selected_scenes = scene_sample_counts[scene_sample_counts > 100].sort_values(ascending=False).index.tolist()
-
-    # Plot top scenes
-    top_scenes = selected_scenes[:10]
-    logger.info(f"Plotting top {len(top_scenes)} scenes with most samples")
+    # draw 30 random scenes 
+    unique_scenes = samples_typed['sceneID'].unique()
+    rng = np.random.default_rng(seed=17)
+    if len(unique_scenes) <= 30:
+        top_scenes = unique_scenes
+    else:
+        top_scenes = rng.choice(unique_scenes, size=30, replace=False)
+    
+    # This criterion is not super sensible, but for demonstration purposes it suffices.
 
     for scene_id in top_scenes:
         scene_id_int = int(scene_id)

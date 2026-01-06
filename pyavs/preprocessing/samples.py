@@ -196,8 +196,8 @@ def _load_avs_files(data_path: str, subject_id: int, session: int, verbose: bool
     """Load messages and experimental log files using pyAVS naming conventions."""
     
     # Get subject-session identifier
-    sub_sess_id = get_subject_session_id(subject_id, session)
-    session_dir = os.path.join(data_path, 'rawdir', sub_sess_id)
+    sub_sess_id_results_dir = "as{:02d}_{:02d}".format(subject_id, session)
+    session_dir = os.path.join(data_path, 'results', sub_sess_id_results_dir)
     
     # Messages file path
     msgs_fname = os.path.join(
@@ -441,27 +441,23 @@ def load_samples_with_scenes(subject_id: int, session: int,
     if data_path is None:
         from ..utils.config import get_data_path
         data_path = get_data_path()
+        # exchange rawdir with "results" in the path
+       
         if data_path is None:
             raise ValueError("No data path configured. Use pyavs.set_data_path() or provide data_path parameter")
-    
+
     # Auto-detect samples file if not provided
     if samples_file is None:
-        sub_sess_id = get_subject_session_id(subject_id, session)
-        session_dir = os.path.join(data_path, 'rawdir', sub_sess_id)
+        sub_sess_id_results_dir = "as{:02d}_{:02d}".format(subject_id, session)
+        session_dir = os.path.join(data_path, 'results', sub_sess_id_results_dir)
+        #as_s5_el_cleaned_samples.csv  as_s5_el_events.csv  as_s5_el_msgs.csv  as_s5_el_samples.csv
+        # (avs) [psulewski@klab-2 preprocessed]$ pwd
+        # /share/klab/datasets/avs/results/as05_03/preprocessed
+        samples_file = os.path.join(
+            session_dir, 'preprocessed', 
+            f"as_s{subject_id}_el_samples.csv")
         
-        # Try common naming patterns
-        possible_names = [
-            f"as_s{subject_id}_samples.csv",
-            f"sub-{subject_id:02d}_ses-{session:02d}_samples.csv",
-            f"samples_s{subject_id}_sess{session}.csv",
-            "samples.csv"
-        ]
         
-        for name in possible_names:
-            candidate_path = os.path.join(session_dir, 'preprocessed', name)
-            if os.path.exists(candidate_path):
-                samples_file = candidate_path
-                break
         
         if samples_file is None:
             raise FileNotFoundError(f"Could not find samples file for subject {subject_id}, session {session}. "
