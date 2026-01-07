@@ -3,7 +3,7 @@ Fix2cap visualization per scene.
 
 This script visualizes fixation-to-caption human rating data on scene images.
 Fixations are colored by whether the target was mentioned in the subject's caption
-(self=white), another subject's caption (other=cyan), or not mentioned (false/none=magenta).
+(self=lightgrey), another subject's caption (other=cyan), or not mentioned (false/none=magenta).
 
 Mirrors the et_viz sample plotting aesthetics with large semi-transparent markers.
 
@@ -190,10 +190,7 @@ def get_color_for_condition(none_style) -> str:
     """
     Map none_style values to colors.
 
-    Color mapping:
-    - self: white (#ffffff)
-    - other: cyan (#00ffff)
-    - false/none/other values: magenta (#ff00ff)
+   
 
     Parameters
     ----------
@@ -206,16 +203,18 @@ def get_color_for_condition(none_style) -> str:
         Color code as hex string
     """
     if pd.isna(none_style):
-        return '#ff00ff'  # magenta for NaN
+        # lightgrey for missing values
+        
+        return '#d3d3d3'
 
     none_style_str = str(none_style).lower().strip()
 
     if none_style_str == 'self':
-        return '#ffffff'  # white
+        return  '#ff00ff'  
     elif none_style_str == 'other':
-        return '#00ffff'  # cyan
+        return '#00ffff' 
     else:  # 'false', 'none', '0.0', etc.
-        return '#ff00ff'  # magenta
+        return '#d3d3d3'
 
 
 def get_condition_fractions(fix2cap_df: pd.DataFrame) -> dict:
@@ -255,7 +254,7 @@ def get_condition_fractions(fix2cap_df: pd.DataFrame) -> dict:
 def plot_condition_summary(
     fix2cap_df: pd.DataFrame,
     output_dir: str = "plots",
-    figsize: tuple = (4, 6)
+    figsize: tuple = (3, 7.5)
 ) -> None:
     """
     Create a minimalistic stacked bar plot showing condition fractions.
@@ -277,58 +276,37 @@ def plot_condition_summary(
     # Create figure
     fig, ax = plt.subplots(figsize=figsize)
 
-    # Colors matching the scatter plot
-    colors = {
-        'self': '#ffffff',
-        'false': '#ff00ff',
-        'other': '#00ffff'
-    }
-
-    # Create stacked bar
-    conditions = ['self', 'false', 'other']
-    values = [fractions[c] for c in conditions]
-    bar_colors = [colors[c] for c in conditions]
-
-    # Plot horizontal stacked bar
+    # Create stacked bar plot
     bottom = 0
-    for i, (condition, value, color) in enumerate(zip(conditions, values, bar_colors)):
-        # Add edge for white bars
-        edgecolor = 'black' if condition == 'self' else 'none'
-        linewidth = 2 if condition == 'self' else 0
+    for condition in ['self', 'other', 'false']:
+        fraction = fractions[condition]
+        color = get_color_for_condition(condition)
 
-        ax.barh(0, value, left=bottom, color=color,
-                edgecolor=edgecolor, linewidth=linewidth,
-                label=condition.capitalize())
-
-        # Add percentage text in center of bar if large enough
-        if value > 0.05:
-            text_x = bottom + value/2
-            ax.text(text_x, 0, f'{value*100:.0f}%',
-                   ha='center', va='center', fontsize=16, fontweight='bold')
-
-        bottom += value
-
-    # Format
-    ax.set_xlim(0, 1)
-    ax.set_ylim(-0.5, 0.5)
-    ax.set_xlabel('Fraction of Fixations', fontsize=14)
-    ax.set_yticks([])
-    ax.spines['left'].set_visible(False)
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-
-    # Legend
-    ax.legend(loc='upper center', bbox_to_anchor=(0.5, 1.15),
-             ncol=3, frameon=False, fontsize=12)
-
+        ax.bar(
+            x=0,
+            height=fraction,
+            width=0.25,
+            bottom=bottom,
+            color=color,
+            edgecolor='darkgray'
+        )
+        bottom += fraction
+    # Customize plot
+    ax.set_xticks([])
+    ax.set_yticks([0.0, 0.5, 1.0])
+    ax.set_yticklabels(['0', '50', '100'])
+    ax.set_ylabel('share of ratings [%]')
+    # despine
+    sns.despine(ax=ax, left=True, bottom=True)
     plt.tight_layout()
+
 
     # Save
     os.makedirs(output_dir, exist_ok=True)
     png_file = os.path.join(output_dir, "fix2cap_condition_summary.png")
     pdf_file = os.path.join(output_dir, "fix2cap_condition_summary.pdf")
 
-    plt.savefig(png_file, dpi=300, bbox_inches='tight',
+    plt.savefig(png_file, dpi=300, bbox_inches='tight', 
                 facecolor='white', edgecolor='none')
     plt.savefig(pdf_file, format='pdf', bbox_inches='tight',
                 facecolor='white', edgecolor='none')
@@ -404,19 +382,16 @@ def plot_fix2cap_on_scene(
     mscoco_image_dir: str,
     config: PyAVSConfig,
     output_dir: str = "plots",
-    max_fixations: int = 100,
-    marker_size: float = 500,
-    alpha: float = 0.6,
-    show_inset_bar: bool = True,
+    max_fixations: int = 500,
+    marker_size: float = 700,
+    alpha: float = 1,
+    show_inset_bar: bool = False,
     captions_df: Optional[pd.DataFrame] = None
 ) -> None:
     """
     Plot fix2cap fixations on a scene image, colored by none_style.
 
     Color mapping:
-    - self: white
-    - false/none: magenta
-    - other: cyan
 
     Parameters
     ----------
@@ -451,10 +426,10 @@ def plot_fix2cap_on_scene(
 
     logger.info(f"Scene {scene_id}: {len(scene_fixations)} fixations")
 
-    # Limit number of fixations for readability
-    if len(scene_fixations) > max_fixations:
-        scene_fixations = scene_fixations.head(max_fixations)
-        logger.info(f"  Limited to {max_fixations} fixations for readability")
+    # # Limit number of fixations for readability
+    # if len(scene_fixations) > max_fixations:
+    #     scene_fixations = scene_fixations.head(max_fixations)
+    #     logger.info(f"  Limited to {max_fixations} fixations for readability")
 
     # Find and load the scene image
     scene_id_str = str(int(scene_id)).zfill(12) + "_MEG_size"
@@ -513,59 +488,13 @@ def plot_fix2cap_on_scene(
         c=colors,
         s=marker_size,
         alpha=alpha,
-        edgecolors='none',
+        edgecolors='darkgray',
         zorder=10
     )
 
-    # Create custom legend
-    from matplotlib.patches import Patch
-    legend_elements = [
-        Patch(facecolor='#ffffff', edgecolor='black', label='Self', linewidth=2),
-        Patch(facecolor='#ff00ff', label='False/None'),
-        Patch(facecolor='#00ffff', label='Other')
-    ]
-    ax.legend(handles=legend_elements, loc='upper right', frameon=False,
-              fontsize=14)
 
-    # Add small inset bar chart showing condition fractions for this scene
-    if show_inset_bar:
-        # Calculate fractions for this scene
-        scene_fractions = get_condition_fractions(scene_fixations)
 
-        # Create inset axes (bottom left corner)
-        from mpl_toolkits.axes_grid1.inset_locator import inset_axes
-        ax_inset = inset_axes(ax, width="25%", height="8%", loc='lower left',
-                             bbox_to_anchor=(0.02, 0.02, 1, 1),
-                             bbox_transform=ax.transAxes, borderpad=0)
-
-        # Create horizontal stacked bar
-        conditions = ['self', 'false', 'other']
-        values = [scene_fractions[c] for c in conditions]
-        bar_colors = ['#ffffff', '#ff00ff', '#00ffff']
-
-        bottom = 0
-        for condition, value, color in zip(conditions, values, bar_colors):
-            edgecolor = 'black' if condition == 'self' else 'none'
-            linewidth = 1.5 if condition == 'self' else 0
-
-            ax_inset.barh(0, value, left=bottom, color=color,
-                         edgecolor=edgecolor, linewidth=linewidth)
-            bottom += value
-
-        # Format inset
-        ax_inset.set_xlim(0, 1)
-        ax_inset.set_ylim(-0.5, 0.5)
-        ax_inset.set_xticks([])
-        ax_inset.set_yticks([])
-        ax_inset.spines['top'].set_visible(False)
-        ax_inset.spines['right'].set_visible(False)
-        ax_inset.spines['bottom'].set_visible(False)
-        ax_inset.spines['left'].set_visible(False)
-        ax_inset.patch.set_alpha(0.8)
-
-    # Turn off axis (same as et_viz)
-    ax.axis('off')
-
+    
     # Add caption below image if provided
     if captions_df is not None and len(captions_df) > 0:
         # Find caption for this scene
@@ -580,11 +509,19 @@ def plot_fix2cap_on_scene(
                 # Position: centered below the image in figure coordinates
                 fig.text(0.5, 0.02, f'"{caption_text}"',
                         ha='center', va='bottom',
-                        fontsize=12, style='italic',
+                        style='italic',
                         wrap=True)
+    # despine and remove axes
+    sns.despine(ax=ax, left=True, bottom=True)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_xlabel('')
+    ax.set_ylabel('')
 
     # Ensure tight layout
     plt.tight_layout()
+    
+    
 
     # Save plot in both PNG and PDF formats (same as et_viz)
     os.makedirs(output_dir, exist_ok=True)
@@ -650,7 +587,7 @@ def main(subject_id: Optional[int] = None):
     try:
         fix2cap_df = load_fix2cap_data(
             data_path=config.data_path,
-            datasets=["ld", "og"],
+            datasets=["og"],#, "ld"],
             filter_done=True,
             subject_id=subject_id,
             process_ratings=True,  # Process none_style from rating columns
@@ -688,7 +625,7 @@ def main(subject_id: Optional[int] = None):
         fix2cap_df,
         strategy="random",
         n_scenes=30,
-        random_seed=42
+        random_seed=1337
     )
     logger.info(f"Selected {len(selected_scenes)} scenes for visualization")
 

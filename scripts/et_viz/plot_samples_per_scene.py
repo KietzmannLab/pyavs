@@ -145,7 +145,7 @@ def plot_samples_on_scene(scene_id: int,
         style=scene_samples['type'],
         markers=markerstyle,
         s=marker_size,
-        ax=ax, legend=False, edgecolor='none', alpha=0.8
+        ax=ax, legend=False, edgecolor='none', alpha=1
     )
             
 
@@ -239,11 +239,11 @@ def main():
 
     # draw 30 random scenes 
     unique_scenes = samples_typed['sceneID'].unique()
-    rng = np.random.default_rng(seed=17)
+    rng = np.random.default_rng(seed=52)
     if len(unique_scenes) <= 30:
         top_scenes = unique_scenes
     else:
-        top_scenes = rng.choice(unique_scenes, size=30, replace=False)
+        top_scenes = rng.choice(unique_scenes, size=50, replace=False)
     
     # This criterion is not super sensible, but for demonstration purposes it suffices.
 
