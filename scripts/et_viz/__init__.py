@@ -7,7 +7,8 @@ This module provides visualization tools for eye tracking data per scene:
 """
 
 from .plot_samples_per_scene import (
-    plot_samples_on_scene
+    plot_samples_on_scene,
+    plot_samples_on_caption_task
 )
 
 from .plot_fixation_events_with_objects import (
@@ -20,6 +21,7 @@ from .plot_fixation_events_with_objects import (
 __all__ = [
     # Sample visualization
     'plot_samples_on_scene',
+    'plot_samples_on_caption_task',
     # Event visualization
     'plot_fixations_on_scene',
     'add_object_labels_to_data',

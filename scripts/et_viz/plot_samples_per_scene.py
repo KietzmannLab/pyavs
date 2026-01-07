@@ -17,8 +17,6 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from PIL import Image
-from typing import Optional, List
-import warnings
 
 # pyAVS imports
 from pyavs.preprocessing.samples import load_samples_with_scenes
@@ -177,9 +175,183 @@ def plot_samples_on_scene(scene_id: int,
     plt.close()
 
 
-def main():
+def plot_samples_on_caption_task(
+    trial: int,
+    samples_df: pd.DataFrame,
+    config: PyAVSConfig,
+    output_dir: str = "plots",
+    max_samples: int = 2500,
+    marker_size: float = 400,
+    grey_value: float = 0.5
+) -> None:
     """
-    Main function demonstrating eye tracking sample visualization per scene.
+    Plot eye tracking sample datapoints during caption recording task.
+
+    Plots samples on a uniform grey background (no scene image) to visualize
+    gaze patterns during verbal caption production. Filename includes scene ID
+    for matching with scene viewing plots.
+
+    Parameters
+    ----------
+    trial : int
+        Trial number to plot
+    samples_df : pd.DataFrame
+        Samples dataframe with 'type' column (from EyeLink preprocessing)
+    config : PyAVSConfig
+        Configuration with visual system parameters (required)
+    output_dir : str, optional
+        Output directory for plots (default: "plots")
+    max_samples : int, optional
+        Maximum number of samples to plot for readability (default: 2500)
+    marker_size : float, optional
+        Size of sample markers (default: 400)
+    grey_value : float, optional
+        Grey level for background (0=black, 1=white, default: 0.5 for 50% grey)
+    """
+    # Filter samples for this trial during caption recording
+    caption_samples = samples_df[samples_df['trial'] == trial].copy()
+    caption_samples = caption_samples[caption_samples['recording'] == 'caption']
+
+    if len(caption_samples) == 0:
+        logger.warning(f"No caption recording samples found for trial {trial}")
+        return
+
+    # Get scene ID for this trial
+    if 'sceneID' in caption_samples.columns:
+        scene_ids = caption_samples['sceneID'].unique()
+        if len(scene_ids) > 0:
+            scene_id = int(scene_ids[0])
+        else:
+            logger.warning(f"No scene ID found for trial {trial}")
+            scene_id = None
+    else:
+        logger.warning("'sceneID' column not found in samples dataframe")
+        scene_id = None
+
+    logger.info(f"Trial {trial} (Scene {scene_id}): {len(caption_samples)} caption samples")
+
+    # Limit number of samples for readability
+    if len(caption_samples) > max_samples:
+        # Sample uniformly to maintain temporal distribution
+        indices = np.linspace(0, len(caption_samples)-1, max_samples, dtype=int)
+        caption_samples = caption_samples.iloc[indices]
+        logger.info(f"Downsampled to {max_samples} samples for trial {trial}")
+        logger.info(f"Fraction of samples plotted: {max_samples / len(caption_samples):.3f}")
+
+    # Create grey background image using screen size
+    screen_width, screen_height = config.screen_size_pixels
+
+    # Create grey image (RGB with same value for all channels)
+    grey_rgb = int(grey_value * 255)
+    grey_image = Image.new('RGB', (screen_width, screen_height),
+                           color=(grey_rgb, grey_rgb, grey_rgb))
+
+    # Set publication-quality context
+    import seaborn as sns
+    sns.set_context("poster")
+
+    # Create plot with publication-quality size (same as scene plotting)
+    fig, ax = plt.subplots(1, 1, figsize=(10, 7.5))
+
+    # Define markerstyle for fixation, saccade, and blink
+    markerstyle = {
+        'fixation': 'o',
+        'saccade': '.',
+        'blink': 'D'
+    }
+
+    # Set image extent to center coordinate system
+    ax.imshow(grey_image, extent=[-screen_width/2, screen_width/2,
+                                   -screen_height/2, screen_height/2])
+
+    # Check which gaze coordinate columns are available
+    if 'gx' in caption_samples.columns and 'gy' in caption_samples.columns:
+        x_col, y_col = 'gx', 'gy'
+    elif 'mean_gx' in caption_samples.columns and 'mean_gy' in caption_samples.columns:
+        x_col, y_col = 'mean_gx', 'mean_gy'
+    elif 'gaze_x' in caption_samples.columns and 'gaze_y' in caption_samples.columns:
+        x_col, y_col = 'gaze_x', 'gaze_y'
+    else:
+        logger.error("Could not find gaze coordinate columns in samples dataframe")
+        return
+
+    # Check if 'type' column exists
+    if 'type' not in caption_samples.columns:
+        logger.error("Samples dataframe missing 'type' column. "
+                    "Ensure samples are from EyeLink/pyEDF with event type annotations.")
+        return
+
+    # Transform screen coordinates to centered image coordinates
+    x_screen = caption_samples[x_col].values
+    y_screen = caption_samples[y_col].values
+
+    x = x_screen - config.screen_size_pixels[0]//2
+    y = y_screen - config.screen_size_pixels[1]//2
+
+    # Plot sample points colored by temporal order
+    sns.scatterplot(
+        x=x,
+        y=y,
+        hue=caption_samples.index,
+        palette='magma',
+        style=caption_samples['type'],
+        markers=markerstyle,
+        s=marker_size,
+        ax=ax,
+        legend=False,
+        edgecolor='none',
+        alpha=1
+    )
+
+    # Add legend
+    ax.legend(loc='upper right', frameon=False)
+
+    # Turn off axis
+    ax.axis('off')
+
+    # Add title indicating this is caption recording
+    if scene_id is not None:
+        ax.set_title(f'Caption Recording - Trial {trial} (Scene {scene_id})', fontsize=16, pad=10)
+    else:
+        ax.set_title(f'Caption Recording - Trial {trial}', fontsize=16, pad=10)
+
+    # Ensure tight layout
+    plt.tight_layout()
+
+    # Save plot in both PNG and PDF formats
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Create filename with scene ID for matching with scene viewing plots
+    if scene_id is not None:
+        base_filename = f"trial_{trial}_scene_{scene_id}_caption_samples"
+    else:
+        base_filename = f"trial_{trial}_caption_samples"
+
+    # Save as high-resolution PNG
+    png_file = os.path.join(output_dir, f"{base_filename}.png")
+    plt.savefig(png_file, dpi=300, bbox_inches='tight', facecolor='white', edgecolor='none')
+
+    # Save as PDF for publications
+    pdf_file = os.path.join(output_dir, f"{base_filename}.pdf")
+    plt.savefig(pdf_file, format='pdf', bbox_inches='tight', facecolor='white', edgecolor='none')
+
+    logger.info(f"Saved caption sample plots:")
+    logger.info(f"  PNG: {png_file}")
+    logger.info(f"  PDF: {pdf_file}")
+
+    plt.show()
+    plt.close()
+
+
+def main(plot_captions: bool = False):
+    """
+    Main function demonstrating eye tracking sample visualization.
+
+    Parameters
+    ----------
+    plot_captions : bool
+        If True, plot caption recording samples on grey background.
+        If False (default), plot scene viewing samples on scene images.
     """
     logger.info("=== Eye Tracking Sample Visualization ===\n")
 
@@ -193,7 +365,13 @@ def main():
     SESSION_ID = 1
     DATA_PATH = config.data_path
     MSCOCO_IMAGE_DIR = os.path.join(DATA_PATH, "AVS-UTILS", "avs_scenes")
-    plots_dir = os.path.join(plots_dir, f"as{SUBJECT_ID:02d}_{SESSION_ID:02d}_samples_per_scene")   
+
+    if plot_captions:
+        plots_dir = os.path.join(plots_dir, f"as{SUBJECT_ID:02d}_{SESSION_ID:02d}_caption_samples")
+        logger.info("Mode: Caption Recording Visualization")
+    else:
+        plots_dir = os.path.join(plots_dir, f"as{SUBJECT_ID:02d}_{SESSION_ID:02d}_samples_per_scene")
+        logger.info("Mode: Scene Viewing Visualization")   
 
     logger.info(f"Using standardized visual parameters:")
     logger.info(f"  Screen size: {config.screen_size_pixels} pixels")
@@ -234,33 +412,73 @@ def main():
     logger.info(f"  Fixation samples: {(samples_typed['type'] == 'fixation').sum()}")
     logger.info(f"  Saccade samples: {(samples_typed['type'] == 'saccade').sum()}")
 
-    # Step 3: Create visualizations for selected scenes
+    # Step 3: Create visualizations
     logger.info(f"\nStep 3: Creating visualizations")
 
-    # draw 30 random scenes 
-    unique_scenes = samples_typed['sceneID'].unique()
-    rng = np.random.default_rng(seed=52)
-    if len(unique_scenes) <= 30:
-        top_scenes = unique_scenes
+    if plot_captions:
+        # Plot caption recording samples
+        caption_samples = samples_typed[samples_typed['recording'] == 'caption'].copy()
+        logger.info(f"Caption recording samples: {len(caption_samples)}")
+
+        if len(caption_samples) == 0:
+            logger.warning("No caption recording samples found")
+            return
+
+        # Get unique trials
+        unique_trials = caption_samples['trial'].unique()
+        rng = np.random.default_rng(seed=52)
+
+        if len(unique_trials) <= 30:
+            selected_trials = unique_trials
+        else:
+            selected_trials = rng.choice(unique_trials, size=30, replace=False)
+
+        logger.info(f"Plotting {len(selected_trials)} caption recording trials")
+
+        for trial in selected_trials:
+            trial_int = int(trial)
+            logger.info(f"\nPlotting caption samples for trial {trial_int}")
+
+            try:
+                plot_samples_on_caption_task(
+                    trial_int,
+                    samples_typed,
+                    config,
+                    output_dir=plots_dir
+                )
+            except Exception as e:
+                logger.error(f"Error plotting trial {trial_int}: {e}")
+
     else:
-        top_scenes = rng.choice(unique_scenes, size=50, replace=False)
-    
-    # This criterion is not super sensible, but for demonstration purposes it suffices.
+        # Plot scene viewing samples (original behavior)
+        scene_samples = samples_typed[samples_typed['recording'] == 'scene'].copy()
+        logger.info(f"Scene viewing samples: {len(scene_samples)}")
 
-    for scene_id in top_scenes:
-        scene_id_int = int(scene_id)
-        logger.info(f"\nPlotting samples for scene {scene_id_int}")
+        # Select random scenes
+        unique_scenes = scene_samples['sceneID'].unique()
+        rng = np.random.default_rng(seed=52)
 
-        try:
-            plot_samples_on_scene(
-                scene_id_int,
-                samples_typed,
-                MSCOCO_IMAGE_DIR,
-                config,
-                output_dir=plots_dir
-            )
-        except Exception as e:
-            logger.error(f"Error plotting scene {scene_id_int}: {e}")
+        if len(unique_scenes) <= 30:
+            top_scenes = unique_scenes
+        else:
+            top_scenes = rng.choice(unique_scenes, size=50, replace=False)
+
+        logger.info(f"Plotting {len(top_scenes)} scenes")
+
+        for scene_id in top_scenes:
+            scene_id_int = int(scene_id)
+            logger.info(f"\nPlotting samples for scene {scene_id_int}")
+
+            try:
+                plot_samples_on_scene(
+                    scene_id_int,
+                    samples_typed,
+                    MSCOCO_IMAGE_DIR,
+                    config,
+                    output_dir=plots_dir
+                )
+            except Exception as e:
+                logger.error(f"Error plotting scene {scene_id_int}: {e}")
 
     # Print final summary
     logger.info(f"\n=== Summary ===")
@@ -269,7 +487,14 @@ def main():
     logger.info(f"Samples visualized: {len(samples_typed)}")
     logger.info(f"  Fixation samples: {(samples_typed['type'] == 'fixation').sum()}")
     logger.info(f"  Saccade samples: {(samples_typed['type'] == 'saccade').sum()}")
-    logger.info(f"Unique scenes: {len(samples_typed['sceneID'].unique())}")
+
+    if plot_captions:
+        caption_samples = samples_typed[samples_typed['recording'] == 'caption']
+        logger.info(f"Unique trials (caption): {len(caption_samples['trial'].unique())}")
+    else:
+        scene_samples = samples_typed[samples_typed['recording'] == 'scene']
+        logger.info(f"Unique scenes: {len(scene_samples['sceneID'].unique())}")
+
     logger.info(f"Plots saved to: {plots_dir}")
 
 
