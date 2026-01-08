@@ -358,44 +358,149 @@ def load_fixation_crops(metadata_df: pd.DataFrame, subject_id: int,
     return crop_images, valid_indices
 
 
+def check_crop_existence(metadata_df: pd.DataFrame, subject_id: int,
+                        data_path: str, crop_size: tuple = (112, 112)):
+    """
+    Check which crops exist without loading images.
+
+    This function rapidly checks file existence without loading image data,
+    enabling efficient filtering before subsampling.
+
+    Parameters
+    ----------
+    metadata_df : pd.DataFrame
+        Metadata dataframe with trial, fix_sequence, sceneID, session columns
+    subject_id : int
+        Subject ID
+    data_path : str
+        Path to AVS data directory
+    crop_size : tuple, optional
+        Crop size (width, height) (default: (112, 112))
+
+    Returns
+    -------
+    valid_indices : list
+        List of DataFrame indices where crops exist
+    """
+    logger.info(f"Checking crop existence for {len(metadata_df)} fixations...")
+
+    valid_indices = []
+    missing_count = 0
+
+    for idx, row in metadata_df.iterrows():
+        # Extract session from metadata (may be from multi-session concatenation)
+        session = int(row['session']) if 'session' in row else 1
+
+        crop_path = get_crop_path(
+            subject_id=subject_id,
+            session=session,
+            trial=int(row['trial']),
+            fix_sequence=int(row['fix_sequence']),
+            scene_id=int(row['sceneID']),
+            start_time=row['start_time'],
+            crop_size=crop_size,
+            data_path=data_path
+        )
+
+        if crop_path.exists():
+            valid_indices.append(idx)
+        else:
+            missing_count += 1
+
+    logger.info(f"Found {len(valid_indices)} fixations with available crops")
+    logger.info(f"Missing crops: {missing_count}")
+
+    return valid_indices
+
+
+def load_crops_from_metadata(metadata_df: pd.DataFrame, data_path: str,
+                             crop_size: tuple = (112, 112)):
+    """
+    Load crop images for specific metadata rows.
+
+    This function loads ONLY the crops specified in the metadata DataFrame,
+    assuming all crops exist (use check_crop_existence first to filter).
+
+    Parameters
+    ----------
+    metadata_df : pd.DataFrame
+        Metadata dataframe with trial, fix_sequence, sceneID, session, subject columns
+    data_path : str
+        Path to AVS data directory
+    crop_size : tuple, optional
+        Crop size (width, height) (default: (112, 112))
+
+    Returns
+    -------
+    crop_images : list
+        List of crop image arrays (one per metadata row)
+    """
+    logger.info(f"Loading {len(metadata_df)} crop images...")
+
+    crop_images = []
+
+    for idx, (df_idx, row) in enumerate(metadata_df.iterrows()):
+        if (idx + 1) % 100 == 0:
+            logger.info(f"  Loading crop {idx + 1}/{len(metadata_df)}")
+
+        # Extract session and subject from metadata
+        session = int(row['session']) if 'session' in row else 1
+        subject_id = int(row['subject']) if 'subject' in row else 1
+
+        crop_path = get_crop_path(
+            subject_id=subject_id,
+            session=session,
+            trial=int(row['trial']),
+            fix_sequence=int(row['fix_sequence']),
+            scene_id=int(row['sceneID']),
+            start_time=row['start_time'],
+            crop_size=crop_size,
+            data_path=data_path
+        )
+
+        crop_img = Image.open(crop_path)
+        crop_array = np.array(crop_img)
+        crop_images.append(crop_array)
+
+    logger.info(f"Loaded {len(crop_images)} crop images")
+
+    return crop_images
+
+
 def plot_umap_with_crops(umap_coords: np.ndarray, crop_images: list,
                          metadata: pd.DataFrame, output_dir: str,
-                         subject_id: int, session: int,
+                         subject_id: int, session: str,
                          max_display: int = 500):
     """
     Create UMAP visualization with fixation crop images.
 
+    Note: This function assumes crops are already subsampled before calling.
+    No additional subsampling is performed.
+
     Parameters
     ----------
     umap_coords : np.ndarray
-        UMAP coordinates (n_samples, 2)
+        UMAP coordinates (n_samples, 2) - already subsampled
     crop_images : list
-        List of crop image arrays
+        List of crop image arrays - already subsampled
     metadata : pd.DataFrame
         Metadata for each sample
     output_dir : str
         Output directory for plots
     subject_id : int
         Subject ID
-    session : int
-        Session number
+    session : str
+        Session identifier (e.g., "01" or "01-10" for multi-session)
     max_display : int, optional
-        Maximum number of crops to display (default: 500)
+        Maximum number of crops to display (unused, kept for backward compatibility)
     """
     logger.info("Creating UMAP visualization with crop images...")
-    print(f"Total crops available: {len(crop_images)}")
-    print(f"UMAP coordinates shape: {umap_coords.shape}")
-    # Subsample if too many samples
-    if len(crop_images) > max_display:
-        logger.info(f"Subsampling to {max_display} crops for visualization")
-        rng = np.random.default_rng(seed=42)
-        subsample_indices = rng.choice(len(crop_images), size=max_display, replace=False)
+    logger.info(f"  Total crops to plot: {len(crop_images)}")
+    logger.info(f"  UMAP coordinates shape: {umap_coords.shape}")
 
-        umap_coords_plot = umap_coords[subsample_indices]
-        crop_images_plot = [crop_images[i] for i in subsample_indices]
-    else:
-        umap_coords_plot = umap_coords
-        crop_images_plot = crop_images
+    # No subsampling needed - already done before loading crops
+    umap_coords_plot = umap_coords
+    crop_images_plot = crop_images
 
     # Create figure
     sns.set_context("poster")
@@ -423,7 +528,7 @@ def plot_umap_with_crops(umap_coords: np.ndarray, crop_images: list,
     # Formatting
     ax.set_xlabel('UMAP Dimension 1', fontsize=20)
     ax.set_ylabel('UMAP Dimension 2', fontsize=20)
-    ax.set_title(f'Fixation Epoch UMAP (Subject {subject_id}, Session {session})',
+    ax.set_title(f'Fixation Epoch UMAP (Subject {subject_id}, Sessions {session})',
                  fontsize=22, pad=20)
     #ax.tick_params(labelsize=16)
     #ax.grid(alpha=0.3)
@@ -435,9 +540,9 @@ def plot_umap_with_crops(umap_coords: np.ndarray, crop_images: list,
     # Save
     os.makedirs(output_dir, exist_ok=True)
     png_file = os.path.join(output_dir,
-                           f"sub-{subject_id:02d}_ses-{session:02d}_fixation_umap.png")
+                           f"sub-{subject_id:02d}_ses-{session}_fixation_umap.png")
     pdf_file = os.path.join(output_dir,
-                           f"sub-{subject_id:02d}_ses-{session:02d}_fixation_umap.pdf")
+                           f"sub-{subject_id:02d}_ses-{session}_fixation_umap.pdf")
 
     logger.info("Saving visualization...")
     plt.savefig(png_file, dpi=300, bbox_inches='tight', facecolor='white')
@@ -454,7 +559,7 @@ def save_umap_results(umap_coords: np.ndarray, features_pca: np.ndarray,
                      features: np.ndarray, times: np.ndarray, n_sensors: int,
                      n_times: int, valid_indices: list,
                      metadata_filtered: pd.DataFrame, pca_obj, umap_obj,
-                     subject_id: int, session: int, output_dir: str):
+                     subject_id: int, session: str, output_dir: str):
     """
     Save UMAP results and metadata.
 
@@ -482,8 +587,8 @@ def save_umap_results(umap_coords: np.ndarray, features_pca: np.ndarray,
         Fitted UMAP object
     subject_id : int
         Subject ID
-    session : int
-        Session number
+    session : str
+        Session identifier (e.g., "01" or "01-10" for multi-session)
     output_dir : str
         Output directory
     """
@@ -493,7 +598,7 @@ def save_umap_results(umap_coords: np.ndarray, features_pca: np.ndarray,
 
     # Save results as NPZ
     results_file = os.path.join(output_dir,
-                               f"sub-{subject_id:02d}_ses-{session:02d}_fixation_umap_results.npz")
+                               f"sub-{subject_id:02d}_ses-{session}_fixation_umap_results.npz")
 
     np.savez(
         results_file,
@@ -519,7 +624,7 @@ def save_umap_results(umap_coords: np.ndarray, features_pca: np.ndarray,
 
     # Save metadata CSV
     metadata_file = os.path.join(output_dir,
-                                f"sub-{subject_id:02d}_ses-{session:02d}_fixation_umap_metadata.csv")
+                                f"sub-{subject_id:02d}_ses-{session}_fixation_umap_metadata.csv")
     metadata_filtered.to_csv(metadata_file, index=False)
 
     logger.info(f"Saved metadata CSV: {metadata_file}")
@@ -604,73 +709,144 @@ def main():
     config.data_path = "/share/klab/datasets/avs/"
 
     SUBJECT_ID = 4
-    SESSION = 1
+    SESSIONS = list(range(1, 11))  # All 10 sessions
     CROP_SIZE = (112, 112)
-    PCA_VARIANCE = 0.8  # 95% of variance
+    PCA_VARIANCE = 0.8  # 80% of variance
     N_NEIGHBORS = 15
     MIN_DIST = 0.1
     TMIN = -0.05  # -50ms
-    TMAX = 0.300  # 250ms
+    TMAX = 0.300  # 300ms
+    MAX_DISPLAY_CROPS = 500  # Maximum crops to load and display
     RECOMPUTE_UMAP = True  # Set to True to recompute UMAP, False to load existing
 
     logger.info(f"Configuration:")
-    logger.info(f"  Subject: {SUBJECT_ID}, Session: {SESSION}")
+    logger.info(f"  Subject: {SUBJECT_ID}")
+    logger.info(f"  Sessions: {SESSIONS[0]}-{SESSIONS[-1]} ({len(SESSIONS)} total)")
     logger.info(f"  Data path: {config.data_path}")
     logger.info(f"  Time window: [{TMIN*1000:.0f}, {TMAX*1000:.0f}] ms")
     logger.info(f"  Crop size: {CROP_SIZE}")
+    logger.info(f"  Max display crops: {MAX_DISPLAY_CROPS}")
     logger.info(f"  PCA variance threshold: {PCA_VARIANCE*100:.0f}%")
     logger.info(f"  UMAP n_neighbors: {N_NEIGHBORS}")
     logger.info(f"  UMAP min_dist: {MIN_DIST}")
     logger.info(f"  Recompute UMAP: {RECOMPUTE_UMAP}\n")
 
+    # Output directory for multi-session results
+    session_str = f"{SESSIONS[0]:02d}-{SESSIONS[-1]:02d}" if len(SESSIONS) > 1 else f"{SESSIONS[0]:02d}"
     output_dir = os.path.join(config.data_path, 'derivatives', 'pyavs',
-                             f'sub-{SUBJECT_ID:02d}', f'ses-{SESSION:02d}', 'umap')
+                             f'sub-{SUBJECT_ID:02d}', f'ses-{session_str}', 'umap')
 
     # Check if we should load existing results or recompute
     if not RECOMPUTE_UMAP:
         logger.info("Attempting to load existing UMAP results...")
-        existing_results = load_umap_results(SUBJECT_ID, SESSION, config.data_path)
 
-        if existing_results is not None:
+        # For multi-session, construct path with session_str
+        results_file = os.path.join(output_dir,
+                                   f"sub-{SUBJECT_ID:02d}_ses-{session_str}_fixation_umap_results.npz")
+        metadata_file = os.path.join(output_dir,
+                                    f"sub-{SUBJECT_ID:02d}_ses-{session_str}_fixation_umap_metadata.csv")
+
+        if os.path.exists(results_file):
+            logger.info(f"Loading existing UMAP results from: {results_file}")
+
+            # Load NPZ and metadata
+            data = np.load(results_file)
+            metadata_df = pd.read_csv(metadata_file)
+
+            umap_coords_filtered = data['umap_coords']
+            n_sensors = int(data['n_sensors'])
+            n_times = int(data['n_times'])
+            times = data['times']
+
             logger.info("Using existing UMAP results for visualization")
-            umap_coords_filtered = existing_results['umap_coords']
-            metadata_df = existing_results['metadata_df']
-            n_sensors = existing_results['n_sensors']
-            n_times = existing_results['n_times']
-            times = existing_results['times']
+            logger.info(f"  UMAP coords shape: {umap_coords_filtered.shape}")
+            logger.info(f"  Metadata entries: {len(metadata_df)}")
 
-            # Skip to visualization
-            logger.info("\nLoading fixation crop images...")
-            crop_images, valid_indices = load_fixation_crops(
-                metadata_df, SUBJECT_ID, SESSION,
-                config.data_path, CROP_SIZE
+            # Optimized crop loading workflow (same as in compute path)
+            logger.info("\nOptimized crop loading for visualization...")
+
+            # Step 1: Check which crops exist
+            logger.info("  Checking which crops exist...")
+            valid_indices = check_crop_existence(
+                metadata_df, SUBJECT_ID, config.data_path, CROP_SIZE
+            )
+
+            # Filter to valid indices
+            umap_coords_for_viz = umap_coords_filtered[valid_indices]
+            metadata_for_viz = metadata_df.iloc[valid_indices].copy()
+
+            # Step 2: Subsample before loading
+            logger.info(f"  Subsampling to {MAX_DISPLAY_CROPS} crops...")
+            if len(metadata_for_viz) > MAX_DISPLAY_CROPS:
+                rng = np.random.default_rng(seed=config.random_seed)
+                subsample_indices = rng.choice(len(metadata_for_viz), size=MAX_DISPLAY_CROPS, replace=False)
+                metadata_to_load = metadata_for_viz.iloc[subsample_indices].copy()
+                umap_coords_to_plot = umap_coords_for_viz[subsample_indices]
+            else:
+                metadata_to_load = metadata_for_viz
+                umap_coords_to_plot = umap_coords_for_viz
+
+            # Step 3: Load only subsampled crops
+            logger.info(f"  Loading {len(metadata_to_load)} crop images...")
+            crop_images = load_crops_from_metadata(
+                metadata_to_load, config.data_path, CROP_SIZE
             )
 
             # Visualize
             logger.info("\nCreating UMAP visualization...")
             plot_umap_with_crops(
-                umap_coords_filtered, crop_images, metadata_df,
-                output_dir, SUBJECT_ID, SESSION
+                umap_coords_to_plot, crop_images, metadata_to_load,
+                output_dir, SUBJECT_ID, session_str
             )
 
             # Summary
             logger.info(f"\n=== Summary ===")
-            logger.info(f"Subject: {SUBJECT_ID}, Session: {SESSION}")
+            logger.info(f"Subject: {SUBJECT_ID}")
+            logger.info(f"Sessions: {session_str}")
             logger.info(f"Loaded existing UMAP embedding")
-            logger.info(f"Fixations with crops: {len(crop_images)}")
-            logger.info(f"PCA components: {existing_results['n_components_pca']}")
+            logger.info(f"Total fixations with crops: {len(valid_indices)}")
+            logger.info(f"Crops visualized: {len(crop_images)}")
+            logger.info(f"PCA components: {int(data['n_components_pca'])}")
             logger.info(f"Results directory: {output_dir}")
 
             return
 
         else:
-            logger.info("No existing results found. Computing UMAP...")
+            logger.info(f"No existing results found at: {results_file}")
+            logger.info("Computing UMAP...")
 
     # Compute UMAP (either RECOMPUTE_UMAP=True or no existing results)
-    logger.info("Step 1: Loading fixation epochs...")
-    epochs_grad, metadata_df, times, n_sensors, n_times = load_fixation_epochs(
-        SUBJECT_ID, SESSION, config.data_path, tmin=TMIN, tmax=TMAX
-    )
+    logger.info("Step 1: Loading fixation epochs from all sessions...")
+
+    # Load and concatenate epochs from all sessions
+    all_epochs = []
+    all_metadata = []
+
+    for session in SESSIONS:
+        logger.info(f"  Loading session {session}...")
+        epochs_grad_session, metadata_df_session, times, n_sensors, n_times = load_fixation_epochs(
+            SUBJECT_ID, session, config.data_path, tmin=TMIN, tmax=TMAX
+        )
+
+        # Add session and subject columns if not present
+        if 'session' not in metadata_df_session.columns:
+            metadata_df_session['session'] = session
+        if 'subject' not in metadata_df_session.columns:
+            metadata_df_session['subject'] = SUBJECT_ID
+
+        all_epochs.append(epochs_grad_session)
+        all_metadata.append(metadata_df_session)
+
+        logger.info(f"    Session {session}: {epochs_grad_session.shape[0]} epochs")
+
+    # Concatenate across sessions
+    epochs_grad = np.concatenate(all_epochs, axis=0)
+    metadata_df = pd.concat(all_metadata, ignore_index=True)
+
+    logger.info(f"\nCombined data from {len(SESSIONS)} sessions:")
+    logger.info(f"  Total epochs: {epochs_grad.shape[0]}")
+    logger.info(f"  Epochs shape: {epochs_grad.shape}")
+    logger.info(f"  Metadata entries: {len(metadata_df)}")
 
     # Step 2: Flatten and scale
     logger.info("\nStep 2: Flattening and scaling features...")
@@ -690,40 +866,67 @@ def main():
         random_state=config.random_seed
     )
 
-    # Step 5: Load fixation crops
-    logger.info("\nStep 5: Loading fixation crop images...")
-    crop_images, valid_indices = load_fixation_crops(
-        metadata_df, SUBJECT_ID, SESSION,
-        config.data_path, CROP_SIZE
+    # Step 5: Optimized crop loading with subsampling BEFORE loading images
+    logger.info("\nStep 5: Optimized crop loading workflow...")
+
+    # Step 5a: Check which crops exist (fast path check, no image loading)
+    logger.info("\nStep 5a: Checking which crops exist...")
+    valid_indices = check_crop_existence(
+        metadata_df, SUBJECT_ID, config.data_path, CROP_SIZE
     )
 
-    # Filter to valid indices
+    # Filter UMAP coords and metadata to valid indices
     umap_coords_filtered = umap_coords[valid_indices]
     metadata_filtered = metadata_df.iloc[valid_indices].copy()
 
     logger.info(f"Filtered from {len(metadata_df)} to {len(valid_indices)} fixations with crops")
 
-    # Step 6: Save results
+    # Step 5b: Subsample for visualization BEFORE loading images
+    logger.info(f"\nStep 5b: Subsampling to {MAX_DISPLAY_CROPS} crops for visualization...")
+    if len(metadata_filtered) > MAX_DISPLAY_CROPS:
+        rng = np.random.default_rng(seed=config.random_seed)
+        subsample_indices = rng.choice(len(metadata_filtered), size=MAX_DISPLAY_CROPS, replace=False)
+
+        metadata_to_load = metadata_filtered.iloc[subsample_indices].copy()
+        umap_coords_to_plot = umap_coords_filtered[subsample_indices]
+
+        logger.info(f"  Subsampled from {len(metadata_filtered)} to {len(metadata_to_load)} crops")
+    else:
+        metadata_to_load = metadata_filtered
+        umap_coords_to_plot = umap_coords_filtered
+        logger.info(f"  No subsampling needed ({len(metadata_filtered)} <= {MAX_DISPLAY_CROPS})")
+
+    # Step 5c: Load ONLY the subsampled crops
+    logger.info(f"\nStep 5c: Loading {len(metadata_to_load)} crop images...")
+    crop_images = load_crops_from_metadata(
+        metadata_to_load, config.data_path, CROP_SIZE
+    )
+
+    logger.info(f"Successfully loaded {len(crop_images)} crops for visualization")
+
+    # Step 6: Save results (save ALL valid crops, not just subsampled)
     logger.info("\nStep 6: Saving UMAP results...")
     save_umap_results(
         umap_coords_filtered, features_pca, features_scaled, times,
         n_sensors, n_times, valid_indices, metadata_filtered,
-        pca_obj, umap_obj, SUBJECT_ID, SESSION, output_dir
+        pca_obj, umap_obj, SUBJECT_ID, session_str, output_dir
     )
 
-    # Step 7: Visualize
+    # Step 7: Visualize (use subsampled crops and coordinates)
     logger.info("\nStep 7: Creating UMAP visualization...")
     plot_umap_with_crops(
-        umap_coords_filtered, crop_images, metadata_filtered,
-        output_dir, SUBJECT_ID, SESSION
+        umap_coords_to_plot, crop_images, metadata_to_load,
+        output_dir, SUBJECT_ID, session_str
     )
 
     # Summary
     logger.info(f"\n=== Summary ===")
-    logger.info(f"Subject: {SUBJECT_ID}, Session: {SESSION}")
+    logger.info(f"Subject: {SUBJECT_ID}")
+    logger.info(f"Sessions: {SESSIONS[0]}-{SESSIONS[-1]} ({len(SESSIONS)} total)")
     logger.info(f"Time window: [{TMIN*1000:.0f}, {TMAX*1000:.0f}] ms")
     logger.info(f"Total fixation epochs: {len(metadata_df)}")
     logger.info(f"Fixations with crops: {len(valid_indices)}")
+    logger.info(f"Crops visualized: {len(crop_images)}")
     logger.info(f"Original feature dimensionality: {features_scaled.shape[1]}")
     logger.info(f"  (n_sensors × n_times = {n_sensors} × {n_times})")
     logger.info(f"PCA-reduced dimensionality: {features_pca.shape[1]} components")
