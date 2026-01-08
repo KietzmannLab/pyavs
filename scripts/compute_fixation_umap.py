@@ -29,7 +29,8 @@ from pyavs.utils.logging import get_logger
 logger = get_logger('scripts.fixation_umap')
 
 
-def load_fixation_epochs(subject_id: int, session: int, data_path: str):
+def load_fixation_epochs(subject_id: int, session: int, data_path: str,
+                         tmin: float = -0.05, tmax: float = 0.25):
     """
     Load fixation epochs (gradiometers only).
 
@@ -41,6 +42,10 @@ def load_fixation_epochs(subject_id: int, session: int, data_path: str):
         Session number
     data_path : str
         Path to AVS data directory
+    tmin : float, optional
+        Start time in seconds (default: -0.05, i.e., -50ms)
+    tmax : float, optional
+        End time in seconds (default: 0.25, i.e., 250ms)
 
     Returns
     -------
@@ -68,17 +73,31 @@ def load_fixation_epochs(subject_id: int, session: int, data_path: str):
     # Extract gradiometers only
     if 'grad' in epochs_data.keys():
         epochs_grad = epochs_data['grad']  # Shape: (n_epochs, n_grad, n_times)
-        n_epochs, n_sensors, n_times = epochs_grad.shape
+        n_epochs, n_sensors, n_times_full = epochs_grad.shape
         logger.info(f"Loaded gradiometer epochs: {epochs_grad.shape}")
-        logger.info(f"  n_epochs: {n_epochs}")
-        logger.info(f"  n_sensors: {n_sensors}")
-        logger.info(f"  n_times: {n_times}")
     else:
         raise ValueError("Gradiometer data not found in epochs")
 
     # Get timepoints
-    times = meta_h5['times'][:]
-    logger.info(f"Time range: {times[0]:.3f} to {times[-1]:.3f} seconds")
+    times_full = meta_h5['times'][:]
+    logger.info(f"Full time range: {times_full[0]:.3f} to {times_full[-1]:.3f} seconds")
+
+    # Crop to specified time window
+    time_mask = (times_full >= tmin) & (times_full <= tmax)
+    time_indices = np.where(time_mask)[0]
+
+    if len(time_indices) == 0:
+        raise ValueError(f"No timepoints found in range [{tmin}, {tmax}]")
+
+    epochs_grad = epochs_grad[:, :, time_indices]
+    times = times_full[time_indices]
+
+    n_epochs, n_sensors, n_times = epochs_grad.shape
+    logger.info(f"Cropped to time window [{tmin:.3f}, {tmax:.3f}] seconds")
+    logger.info(f"  Cropped epochs shape: {epochs_grad.shape}")
+    logger.info(f"  n_epochs: {n_epochs}")
+    logger.info(f"  n_sensors: {n_sensors}")
+    logger.info(f"  n_times: {n_times}")
 
     return epochs_grad, metadata_df, times, n_sensors, n_times
 
@@ -475,6 +494,72 @@ def save_umap_results(umap_coords: np.ndarray, features_pca: np.ndarray,
     logger.info(f"Saved metadata CSV: {metadata_file}")
 
 
+def load_umap_results(subject_id: int, session: int, data_path: str):
+    """
+    Load previously computed UMAP results.
+
+    Parameters
+    ----------
+    subject_id : int
+        Subject ID
+    session : int
+        Session number
+    data_path : str
+        Path to AVS data directory
+
+    Returns
+    -------
+    results : dict or None
+        Dictionary with UMAP results, or None if file doesn't exist
+    """
+    output_dir = os.path.join(
+        data_path, 'derivatives', 'pyavs',
+        f'sub-{subject_id:02d}', f'ses-{session:02d}', 'umap'
+    )
+
+    results_file = os.path.join(output_dir,
+                               f"sub-{subject_id:02d}_ses-{session:02d}_fixation_umap_results.npz")
+    metadata_file = os.path.join(output_dir,
+                                f"sub-{subject_id:02d}_ses-{session:02d}_fixation_umap_metadata.csv")
+
+    if not os.path.exists(results_file):
+        logger.info(f"No existing UMAP results found at: {results_file}")
+        return None
+
+    logger.info(f"Loading existing UMAP results from: {results_file}")
+
+    # Load NPZ file
+    data = np.load(results_file)
+
+    # Load metadata
+    metadata_df = pd.read_csv(metadata_file)
+
+    results = {
+        'umap_coords': data['umap_coords'],
+        'features_pca': data['features_pca'],
+        'features': data['features'],
+        'times': data['times'],
+        'n_sensors': int(data['n_sensors']),
+        'n_times': int(data['n_times']),
+        'metadata_indices': data['metadata_indices'],
+        'metadata_df': metadata_df,
+        'subject_id': int(data['subject_id']),
+        'session': int(data['session']),
+        'n_components_pca': int(data['n_components_pca']),
+        'explained_variance_ratio': data['explained_variance_ratio'],
+        'n_neighbors': int(data['n_neighbors']),
+        'min_dist': float(data['min_dist']),
+        'metric': str(data['metric'])
+    }
+
+    logger.info(f"Loaded UMAP results:")
+    logger.info(f"  UMAP coords shape: {results['umap_coords'].shape}")
+    logger.info(f"  PCA components: {results['n_components_pca']}")
+    logger.info(f"  Metadata entries: {len(results['metadata_df'])}")
+
+    return results
+
+
 def main():
     """Main analysis pipeline."""
     logger.info("=== Fixation Epoch UMAP Analysis ===\n")
@@ -489,19 +574,67 @@ def main():
     PCA_VARIANCE = 0.95  # 95% of variance
     N_NEIGHBORS = 15
     MIN_DIST = 0.1
+    TMIN = -0.05  # -50ms
+    TMAX = 0.25   # 250ms
+    RECOMPUTE_UMAP = False  # Set to True to recompute UMAP, False to load existing
 
     logger.info(f"Configuration:")
     logger.info(f"  Subject: {SUBJECT_ID}, Session: {SESSION}")
     logger.info(f"  Data path: {config.data_path}")
+    logger.info(f"  Time window: [{TMIN*1000:.0f}, {TMAX*1000:.0f}] ms")
     logger.info(f"  Crop size: {CROP_SIZE}")
     logger.info(f"  PCA variance threshold: {PCA_VARIANCE*100:.0f}%")
     logger.info(f"  UMAP n_neighbors: {N_NEIGHBORS}")
-    logger.info(f"  UMAP min_dist: {MIN_DIST}\n")
+    logger.info(f"  UMAP min_dist: {MIN_DIST}")
+    logger.info(f"  Recompute UMAP: {RECOMPUTE_UMAP}\n")
 
-    # Step 1: Load epochs
+    output_dir = os.path.join(config.data_path, 'derivatives', 'pyavs',
+                             f'sub-{SUBJECT_ID:02d}', f'ses-{SESSION:02d}', 'umap')
+
+    # Check if we should load existing results or recompute
+    if not RECOMPUTE_UMAP:
+        logger.info("Attempting to load existing UMAP results...")
+        existing_results = load_umap_results(SUBJECT_ID, SESSION, config.data_path)
+
+        if existing_results is not None:
+            logger.info("Using existing UMAP results for visualization")
+            umap_coords_filtered = existing_results['umap_coords']
+            metadata_df = existing_results['metadata_df']
+            n_sensors = existing_results['n_sensors']
+            n_times = existing_results['n_times']
+            times = existing_results['times']
+
+            # Skip to visualization
+            logger.info("\nLoading fixation crop images...")
+            crop_images, valid_indices = load_fixation_crops(
+                metadata_df, SUBJECT_ID, SESSION,
+                config.data_path, CROP_SIZE
+            )
+
+            # Visualize
+            logger.info("\nCreating UMAP visualization...")
+            plot_umap_with_crops(
+                umap_coords_filtered, crop_images, metadata_df,
+                output_dir, SUBJECT_ID, SESSION
+            )
+
+            # Summary
+            logger.info(f"\n=== Summary ===")
+            logger.info(f"Subject: {SUBJECT_ID}, Session: {SESSION}")
+            logger.info(f"Loaded existing UMAP embedding")
+            logger.info(f"Fixations with crops: {len(crop_images)}")
+            logger.info(f"PCA components: {existing_results['n_components_pca']}")
+            logger.info(f"Results directory: {output_dir}")
+
+            return
+
+        else:
+            logger.info("No existing results found. Computing UMAP...")
+
+    # Compute UMAP (either RECOMPUTE_UMAP=True or no existing results)
     logger.info("Step 1: Loading fixation epochs...")
     epochs_grad, metadata_df, times, n_sensors, n_times = load_fixation_epochs(
-        SUBJECT_ID, SESSION, config.data_path
+        SUBJECT_ID, SESSION, config.data_path, tmin=TMIN, tmax=TMAX
     )
 
     # Step 2: Flatten and scale
@@ -535,27 +668,25 @@ def main():
 
     logger.info(f"Filtered from {len(metadata_df)} to {len(valid_indices)} fixations with crops")
 
-    # Step 6: Visualize
-    logger.info("\nStep 6: Creating UMAP visualization...")
-    output_dir = os.path.join(config.data_path, 'derivatives', 'pyavs',
-                             f'sub-{SUBJECT_ID:02d}', f'ses-{SESSION:02d}', 'umap')
-
-    plot_umap_with_crops(
-        umap_coords_filtered, crop_images, metadata_filtered,
-        output_dir, SUBJECT_ID, SESSION
-    )
-
-    # Step 7: Save results
-    logger.info("\nStep 7: Saving results...")
+    # Step 6: Save results
+    logger.info("\nStep 6: Saving UMAP results...")
     save_umap_results(
         umap_coords_filtered, features_pca, features_scaled, times,
         n_sensors, n_times, valid_indices, metadata_filtered,
         pca_obj, umap_obj, SUBJECT_ID, SESSION, output_dir
     )
 
+    # Step 7: Visualize
+    logger.info("\nStep 7: Creating UMAP visualization...")
+    plot_umap_with_crops(
+        umap_coords_filtered, crop_images, metadata_filtered,
+        output_dir, SUBJECT_ID, SESSION
+    )
+
     # Summary
     logger.info(f"\n=== Summary ===")
     logger.info(f"Subject: {SUBJECT_ID}, Session: {SESSION}")
+    logger.info(f"Time window: [{TMIN*1000:.0f}, {TMAX*1000:.0f}] ms")
     logger.info(f"Total fixation epochs: {len(metadata_df)}")
     logger.info(f"Fixations with crops: {len(valid_indices)}")
     logger.info(f"Original feature dimensionality: {features_scaled.shape[1]}")
