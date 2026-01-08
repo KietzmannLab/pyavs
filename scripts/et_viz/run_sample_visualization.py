@@ -11,6 +11,7 @@ Author: P. Sulewski (psulewski@uos.de)
 import argparse
 from plot_samples_per_scene import (
     plot_samples_on_scene,
+    plot_samples_on_caption_task,
     logger
 )
 from pyavs.preprocessing.samples import load_samples_with_scenes
@@ -28,6 +29,9 @@ def run_visualization(subject_id: int,
     """
     Run sample visualization for a subject and session.
 
+    Creates both scene viewing and caption recording plots for each trial.
+    Only trials with both recording types are included in the visualization.
+
     Parameters
     ----------
     subject_id : int
@@ -39,11 +43,18 @@ def run_visualization(subject_id: int,
     output_dir : str
         Output directory for plots
     n_scenes : int
-        Number of scenes to plot (default: 10)
+        Number of trials to plot (default: 10).
+        For each trial, both scene viewing and caption recording plots are created.
     max_samples : int
-        Maximum samples per scene (default: 500)
+        Maximum samples per plot (default: 500)
     marker_size : float
         Size of sample markers (default: 50)
+
+    Notes
+    -----
+    For each trial, two separate plots are created:
+    - scene_{scene_id}_samples.png/pdf: Scene viewing samples on actual image
+    - trial_{trial}_scene_{scene_id}_caption_samples.png/pdf: Caption samples on grey background
     """
     logger.info("=== Eye Tracking Sample Visualization ===\n")
 
@@ -74,39 +85,72 @@ def run_visualization(subject_id: int,
     logger.info(f"  Fixation samples: {(samples_typed['type'] == 'fixation').sum()}")
     logger.info(f"  Saccade samples: {(samples_typed['type'] == 'saccade').sum()}")
 
-    # Select scenes to plot
-    scene_counts = samples_typed.groupby('sceneID').size()
-    selected_scenes = scene_counts[scene_counts > 100].sort_values(ascending=False).index.tolist()
-    top_scenes = selected_scenes[:n_scenes]
+    # Filter to trials that have both scene viewing and caption recording samples
+    logger.info("\nStep 3: Filtering trials with both recording types...")
+    trials_with_scene = samples_typed[samples_typed['recording'] == 'scene']['trial'].unique()
+    trials_with_caption = samples_typed[samples_typed['recording'] == 'caption']['trial'].unique()
+    trials_with_both = set(trials_with_scene).intersection(set(trials_with_caption))
+
+    logger.info(f"  Trials with scene viewing: {len(trials_with_scene)}")
+    logger.info(f"  Trials with caption recording: {len(trials_with_caption)}")
+    logger.info(f"  Trials with BOTH: {len(trials_with_both)}")
+
+    # Filter samples to only these trials
+    samples_both = samples_typed[samples_typed['trial'].isin(trials_with_both)].copy()
+
+    # Group by trial and get associated scene IDs
+    trial_scene_mapping = samples_both.groupby('trial')['sceneID'].first()
+
+    # Select top N trials by sample count
+    trial_counts = samples_both.groupby('trial').size()
+    selected_trials = trial_counts.sort_values(ascending=False).index.tolist()[:n_scenes]
 
     # Create plots
-    logger.info(f"\nStep 3: Creating visualizations for {len(top_scenes)} scenes...")
+    logger.info(f"\nStep 4: Creating visualizations for {len(selected_trials)} trials...")
     os.makedirs(output_dir, exist_ok=True)
 
-    for scene_id in top_scenes:
-        scene_id_int = int(scene_id)
-        logger.info(f"\nPlotting scene {scene_id_int}...")
+    for trial in selected_trials:
+        trial_int = int(trial)
+        scene_id = int(trial_scene_mapping[trial])
+
+        logger.info(f"\nProcessing trial {trial_int} (Scene {scene_id})...")
 
         try:
+            # Plot scene viewing samples
+            logger.info(f"  Creating scene viewing plot...")
             plot_samples_on_scene(
-                scene_id_int,
-                samples_typed,
+                scene_id,
+                samples_both,
                 mscoco_image_dir,
                 config,
                 output_dir=output_dir,
                 max_samples=max_samples,
                 marker_size=marker_size
             )
+
+            # Plot caption recording samples
+            logger.info(f"  Creating caption recording plot...")
+            plot_samples_on_caption_task(
+                trial_int,
+                samples_both,
+                config,
+                output_dir=output_dir,
+                max_samples=max_samples,
+                marker_size=marker_size
+            )
+
         except Exception as e:
-            logger.error(f"Error plotting scene {scene_id_int}: {e}")
+            logger.error(f"Error plotting trial {trial_int}: {e}")
 
     # Summary
     logger.info(f"\n=== Summary ===")
     logger.info(f"Total samples loaded: {len(samples_df)}")
-    logger.info(f"Samples visualized: {len(samples_typed)}")
-    logger.info(f"  Fixation: {(samples_typed['type'] == 'fixation').sum()}")
-    logger.info(f"  Saccade: {(samples_typed['type'] == 'saccade').sum()}")
-    logger.info(f"Scenes plotted: {len(top_scenes)}")
+    logger.info(f"Trials with both recording types: {len(trials_with_both)}")
+    logger.info(f"Samples visualized: {len(samples_both)}")
+    logger.info(f"  Fixation: {(samples_both['type'] == 'fixation').sum()}")
+    logger.info(f"  Saccade: {(samples_both['type'] == 'saccade').sum()}")
+    logger.info(f"Trials plotted: {len(selected_trials)}")
+    logger.info(f"Total plots created: {len(selected_trials) * 2} (scene + caption for each trial)")
     logger.info(f"Plots saved to: {output_dir}")
 
 

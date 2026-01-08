@@ -25,9 +25,13 @@ from .validation import (
     validate_data_integrity
 )
 
+from .eye_tracking import (
+    match_saccades_to_fixations
+)
+
 __all__ = [
     'set_data_path',
-    'get_data_path', 
+    'get_data_path',
     'setup_data_directory',
     'get_config',
     'update_config',
@@ -37,5 +41,6 @@ __all__ = [
     'convert_session_to_letter',
     'validate_subject_id',
     'validate_session',
-    'validate_data_integrity'
+    'validate_data_integrity',
+    'match_saccades_to_fixations'
 ]
