@@ -343,7 +343,7 @@ def plot_samples_on_caption_task(
     plt.close()
 
 
-def main(plot_captions: bool = False):
+def main(plot_captions: bool = True):
     """
     Main function demonstrating eye tracking sample visualization.
 

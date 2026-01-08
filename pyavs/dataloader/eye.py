@@ -27,7 +27,8 @@ def load_and_enrich_eye_events(subjects: List[int], sessions: List[int],
                               fix_multi_saccades: bool = True,
                               verbose: bool = True,
                               include_fixation_zero: bool = False,
-                              offset_scene_triggers_ms: int = 20,
+                              offset_scene_triggers_ms: int = 20, 
+                              add_event_sequence_positions: bool = True,
                               **kwargs
                               ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
@@ -108,6 +109,9 @@ def load_and_enrich_eye_events(subjects: List[int], sessions: List[int],
                 if verbose:
                     logger.info(f'After fixing: {len(events[events.recording == "scene"])} scene events')
             
+            if add_event_sequence_positions:
+                events = add_fixation_sequence_position(events, verbose=verbose)
+            
             # Combine with previous subjects/sessions
             if events_all is None:
                 events_all = events.copy(deep=True)
@@ -115,6 +119,7 @@ def load_and_enrich_eye_events(subjects: List[int], sessions: List[int],
             else:
                 events_all = pd.concat([events_all, events], ignore_index=True)
                 explog_all = pd.concat([explog_all, explog], ignore_index=True)
+                
     
     if verbose:
         logger.info(f'Total events loaded: {len(events_all)}')
@@ -144,7 +149,7 @@ def _process_messages(events: pd.DataFrame, messages: pd.DataFrame, explog: pd.D
                 
                 scene_offset = messages.ENDTRIALID_time[i] # depending on the recording type, this might be the end of the scene, mic or caption
                 # print the messages row for debugging
-                print(messages.loc[i])
+                #print(messages.loc[i])
             
                 # Extract trial ID
                 trialid = messages.loc[i, 'trialid '].split(' ')

@@ -24,8 +24,8 @@ from pyavs.utils.eye_tracking import match_saccades_to_fixations
 logger = get_logger('scripts.saccade_fixation_duration')
 
 # Configuration
-SUBJECTS = [1, 2, 3, 4, 5]
-SESSIONS = list(range(1, 11))
+SUBJECTS = [1,2,3,4,5] #TODO: add more subjects
+SESSIONS = list(range(1, 11)) #TODO: add more sessions
 DATA_PATH = "/share/klab/datasets/avs/"
 OUTPUT_DIR = "/share/klab/psulewski/psulewski/pyavs/saccade_fixation_output/"
 
@@ -145,44 +145,47 @@ def plot_duration_heatmap(
 
     # Create figure
     sns.set_context("poster")
-    fig, ax = plt.subplots(figsize=(12, 10))
+    fig, ax = plt.subplots(figsize=(9, 9))
 
-    # Create 2D histogram
-    counts, xedges, yedges, im = ax.hist2d(
-        saccade_durations,
-        fixation_durations,
-        bins=bins,
-        cmap='viridis',
-        cmin=1  # Don't show empty bins
+    # Create 2D histogram (sns kdeplot with fill)
+    
+    g = sns.JointGrid(y=fixation_durations, x=saccade_durations,marginal_ticks=True)
+
+    # KDE for the joint
+    g.plot_joint(
+    sns.kdeplot,
+    fill=True,
+    cmap="viridis",
+    bw_adjust=0.5,
+    levels=50,
+    thresh=0.05
     )
 
-    # Add colorbar
-    cbar = plt.colorbar(im, ax=ax)
-    cbar.set_label('Count', rotation=270, labelpad=30, fontsize=18)
-    cbar.ax.tick_params(labelsize=14)
-
+    # Histograms for the marginals
+    g.plot_marginals(sns.histplot, bins=30, kde=True, color="gray")
+    #
     # Labels and title
-    ax.set_xlabel('Saccade duration (ms)', fontsize=20)
-    ax.set_ylabel('Associated fixation duration (ms)', fontsize=20)
+    g.ax_joint.set_xlabel('saccade duration [ms]')
+    g.ax_joint.set_ylabel('fixation duration [ms]')
 
-    title_text = f'Saccade-Fixation Duration Relationship ({saccade_type})'
-    ax.set_title(title_text, fontsize=22, pad=20)
+    ##title_text = f'Saccade-Fixation Duration Relationship ({saccade_type})'
+    #ax.set_title(title_text, fontsize=22, pad=20)
 
     # Add statistics text
-    stats_text = (f'n = {len(saccade_durations)}\n'
-                  f'Saccade: {saccade_durations.mean():.1f}±{saccade_durations.std():.1f}ms\n'
-                  f'Fixation: {fixation_durations.mean():.1f}±{fixation_durations.std():.1f}ms')
-    ax.text(0.02, 0.98, stats_text,
-            transform=ax.transAxes,
-            verticalalignment='top',
-            bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
-            fontsize=14)
+    # stats_text = (f'n = {len(saccade_durations)}\n'
+    #               f'Saccade: {saccade_durations.mean():.1f}±{saccade_durations.std():.1f}ms\n'
+    #               f'Fixation: {fixation_durations.mean():.1f}±{fixation_durations.std():.1f}ms')
+    # ax.text(0.02, 0.98, stats_text,
+    #         transform=ax.transAxes,
+    #         verticalalignment='top',
+    #         bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
+    #         fontsize=14)
 
     # Ticks
-    ax.tick_params(labelsize=16)
-    ax.grid(alpha=0.3)
+    #ax.tick_params(labelsize=16)
+    #ax.grid(alpha=0.3)
 
-    plt.tight_layout()
+    #plt.tight_layout()
 
     # Save
     os.makedirs(output_dir, exist_ok=True)
@@ -233,6 +236,12 @@ def main():
     logger.info("\nStep 2: Separating saccades and fixations...")
     saccades_df = events_df[events_df['type'] == 'saccade'].copy()
     fixations_df = events_df[events_df['type'] == 'fixation'].copy()
+    
+    # filter out the extreme 2 percentiles of saccade durations, and fixation durations
+    cutoff_saccade_high = np.percentile(saccades_df['duration'], 98)
+    cutoff_fixation_high = np.percentile(fixations_df['duration'], 98)
+    saccades_df = saccades_df[saccades_df['duration'] <= cutoff_saccade_high]
+    fixations_df = fixations_df[fixations_df['duration'] <= cutoff_fixation_high]
 
     logger.info(f"Saccades: {len(saccades_df)}")
     logger.info(f"Fixations: {len(fixations_df)}")
