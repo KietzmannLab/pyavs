@@ -22,7 +22,7 @@ import seaborn as sns
 import mne
 
 # pyAVS imports
-from pyavs.io.read import load_epochs_h5
+from pyavs.io.read import load_epochs_h5, load_metadata_csv
 from pyavs.config.config import PyAVSConfig
 from pyavs.utils.logging import get_logger
 
@@ -63,12 +63,19 @@ def load_fixation_epochs(subject_id: int, session: int, data_path: str,
     logger.info(f"Loading fixation epochs for subject {subject_id}, session {session}")
 
     # Load fixation epochs
-    epochs_data, metadata_df, meta_h5 = load_epochs_h5(
+    epochs_data, _, meta_h5 = load_epochs_h5(
         subject_id=subject_id,
         session=session,
         event_type='fixation_scene',  # fixation during scene viewing
         data_path=data_path
     )
+    metadata_df = load_metadata_csv(
+        subject_id=subject_id,
+        session=session,
+        event_type='fixation',
+        data_path=data_path
+    )
+    print(metadata_df.head())
 
     # Extract gradiometers only
     if 'grad' in epochs_data.keys():
@@ -221,8 +228,8 @@ def compute_umap_embedding(features: np.ndarray, n_neighbors: int = 15,
         min_dist=min_dist,
         n_components=n_components,
         metric=metric,
-        random_state=random_state,
-        verbose=True
+        #random_state=random_state,
+        verbose=True, n_jobs=-1
     )
 
     # Compute embedding
@@ -234,8 +241,8 @@ def compute_umap_embedding(features: np.ndarray, n_neighbors: int = 15,
     return reducer, umap_coords
 
 
-def get_crop_path(subject_id: int, session: int, trial: int, fix_sequence: int,
-                  scene_id: int, crop_size: tuple = (112, 112),
+def get_crop_path(subject_id: int, session: int, trial: int, fix_sequence: int, start_time: float,
+                  scene_id: int, crop_size: tuple = (112, 112), 
                   data_path: str = None):
     """
     Get path to fixation crop image.
@@ -269,8 +276,18 @@ def get_crop_path(subject_id: int, session: int, trial: int, fix_sequence: int,
     )
 
     # Crop ID format from crops.py line 130
-    crop_id = f"sub{subject_id:02d}_trial{trial:04d}_fix{fix_sequence:03d}_scene{scene_id}"
-    crop_path = crops_dir / f"{crop_id}.png"
+    #01_0201_06_0095752040_0044358.png
+    #            crop_identifier = f"{subject_id:02d}_{fixation['trial']:04d}_{fixation['fix_sequence']:02d}_{start_time:010d}_{scene_id:07d}"
+    print(f"start_time before int conversion: {start_time}")
+    start_time_fname = int(start_time * 1000)
+    crop_id = f"{subject_id:02d}_{trial:04d}_{fix_sequence:02d}_{start_time_fname:010d}_{scene_id:07d}"
+    #print(crop_id)
+    # use regex to find the file matching the pattern
+    matching_files = list(crops_dir.glob(f"{crop_id}.png"))
+    if not matching_files:
+        crop_path = crops_dir / f"{crop_id}.png"  # non-existing path
+    else:
+        crop_path = matching_files[0]
 
     return crop_path
 
@@ -306,14 +323,20 @@ def load_fixation_crops(metadata_df: pd.DataFrame, subject_id: int,
     crop_images = []
     valid_indices = []
     missing_count = 0
+    
+    print(metadata_df.columns)
+    print(metadata_df.head()    )
 
     for idx, row in metadata_df.iterrows():
+        if idx % 100 == 0:
+            logger.info(f"  Processing fixation {idx + 1}/{len(metadata_df)}")
         crop_path = get_crop_path(
             subject_id=subject_id,
             session=session,
             trial=int(row['trial']),
             fix_sequence=int(row['fix_sequence']),
             scene_id=int(row['sceneID']),
+            start_time=row['start_time'],
             crop_size=crop_size,
             data_path=data_path
         )
@@ -323,7 +346,10 @@ def load_fixation_crops(metadata_df: pd.DataFrame, subject_id: int,
             crop_array = np.array(crop_img)
             crop_images.append(crop_array)
             valid_indices.append(idx)
+            if (idx + 1) % 100 == 0:
+                logger.info(f"Loaded {len(crop_images)} crops so far")
         else:
+            logger.warning(f"Missing crop image: {crop_path}")
             missing_count += 1
 
     logger.info(f"Loaded {len(crop_images)} crop images")
@@ -357,7 +383,8 @@ def plot_umap_with_crops(umap_coords: np.ndarray, crop_images: list,
         Maximum number of crops to display (default: 500)
     """
     logger.info("Creating UMAP visualization with crop images...")
-
+    print(f"Total crops available: {len(crop_images)}")
+    print(f"UMAP coordinates shape: {umap_coords.shape}")
     # Subsample if too many samples
     if len(crop_images) > max_display:
         logger.info(f"Subsampling to {max_display} crops for visualization")
@@ -376,6 +403,8 @@ def plot_umap_with_crops(umap_coords: np.ndarray, crop_images: list,
 
     # Plot each crop image at its UMAP coordinate
     logger.info(f"Plotting {len(crop_images_plot)} crop images...")
+    # also plot the scatter points for reference
+    ax.scatter(umap_coords_plot[:, 0], umap_coords_plot[:, 1], s=5, alpha=0.5, color='gray')
     for i, (coords, crop_img) in enumerate(zip(umap_coords_plot, crop_images_plot)):
         x, y = coords
 
@@ -396,8 +425,10 @@ def plot_umap_with_crops(umap_coords: np.ndarray, crop_images: list,
     ax.set_ylabel('UMAP Dimension 2', fontsize=20)
     ax.set_title(f'Fixation Epoch UMAP (Subject {subject_id}, Session {session})',
                  fontsize=22, pad=20)
-    ax.tick_params(labelsize=16)
-    ax.grid(alpha=0.3)
+    #ax.tick_params(labelsize=16)
+    #ax.grid(alpha=0.3)
+    # despine from seaborn
+    #sns.despine(ax=ax, offset=10, trim=True)
 
     plt.tight_layout()
 
@@ -530,6 +561,10 @@ def load_umap_results(subject_id: int, session: int, data_path: str):
 
     # Load NPZ file
     data = np.load(results_file)
+    
+    logger.info(f"Loaded UMAP results NPZ file.") 
+    logger.info(f"  UMAP coords shape: {data['umap_coords'].shape}")
+    logger.info(f"Loading metadata CSV file from: {metadata_file}")
 
     # Load metadata
     metadata_df = pd.read_csv(metadata_file)
@@ -568,15 +603,15 @@ def main():
     config = PyAVSConfig()
     config.data_path = "/share/klab/datasets/avs/"
 
-    SUBJECT_ID = 1
+    SUBJECT_ID = 4
     SESSION = 1
     CROP_SIZE = (112, 112)
-    PCA_VARIANCE = 0.95  # 95% of variance
+    PCA_VARIANCE = 0.8  # 95% of variance
     N_NEIGHBORS = 15
     MIN_DIST = 0.1
     TMIN = -0.05  # -50ms
-    TMAX = 0.25   # 250ms
-    RECOMPUTE_UMAP = False  # Set to True to recompute UMAP, False to load existing
+    TMAX = 0.300  # 250ms
+    RECOMPUTE_UMAP = True  # Set to True to recompute UMAP, False to load existing
 
     logger.info(f"Configuration:")
     logger.info(f"  Subject: {SUBJECT_ID}, Session: {SESSION}")
