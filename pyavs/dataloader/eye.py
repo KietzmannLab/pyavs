@@ -136,6 +136,34 @@ def _process_messages(events: pd.DataFrame, messages: pd.DataFrame, explog: pd.D
     sanity_var = "msg_time" if preprocessed else "trialid_time"
     duration_prev_scene = 4
     duration_prev_mic = 1
+    # # print messages header for debugging
+
+    # # isolate et calibration and drift correction messages
+    # # Index(['METAEX', 'METAEX_time', 'SUBJECT', 'SUBJECT_time', 'SESSION',
+    # #    'SESSION_time', 'STARTEXP', 'STARTEXP_time', 'ERROR', 'ERROR_time',
+    # #    '!CAL', '!CAL_time', 'VALIDATE', 'VALIDATE_time', 'RECCFG',
+    # #    'RECCFG_time', 'ELCLCFG', 'ELCLCFG_time', 'GAZE_COORDS',
+    # #    'GAZE_COORDS_time', 'THRESHOLDS', 'THRESHOLDS_time',
+    # #    'ELCL_WINDOW_SIZES', 'ELCL_WINDOW_SIZES_time',
+    # #    'CAMERA_LENS_FOCAL_LENGTH', 'CAMERA_LENS_FOCAL_LENGTH_time',
+    # #    'PUPIL_DATA_TYPE', 'PUPIL_DATA_TYPE_time', 'ELCL_PROC',
+    # #    'ELCL_PROC_time', 'ELCL_EFIT_PARAMS', 'ELCL_EFIT_PARAMS_time', '!MODE',
+    # #    '!MODE_time', 'BLOCKID', 'BLOCKID_time', 'DRIFTCORRECT', 'SYNCTIME',
+    # #    'SYNCTIME_start', 'py_trial_marker', 'trialid ', 'SCENEID',
+    # #    'SCENEID_time', 'TYPE', 'TYPE_time', 'ENDTRIALID', 'ENDTRIALID_time',
+    # #    'ENDBLOCKID', 'ENDBLOCKID_time', 'ENDEXP', 'ENDEXP_time', 'msg_time'],
+    # # pick all columsn containing 'CAL' or 'VAL' in their name
+    # qual_cols = [col for col in messages.columns if 'DRIFT' in col]# or 'CAL' in col or 'VAL' in col]
+    # # pick the columns that contain eye tracking quality messages
+    # #et_quality_mask = pd.pick_columns(messages, qual_cols).notnull().any(axis=1)
+    # #messages_et_quality = messages[et_quality_mask]
+    # print("Eye tracking calibration and validation messages:")
+    # print(messages[qual_cols].dropna(how='all'))
+    # # write into a log file
+    # with open(f'et_quality_log_drift.txt', 'a') as f:
+    #     for col in qual_cols:
+    #         f.write(f"{col}:\n")
+    #         f.write(f"{messages[[col]].dropna(how='all').to_string()}\n\n")
     for i in messages.index:
         if not is_list_like(messages.loc[i, sanity_var]):
             if not pd.isna(messages.loc[i, sanity_var]):

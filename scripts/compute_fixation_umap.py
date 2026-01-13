@@ -144,12 +144,15 @@ def flatten_and_scale_epochs(epochs_grad: np.ndarray):
 
     # Apply scaling (maintains 3D shape)
     features_scaled_3d = scaler.fit_transform(epochs_grad)
+    
+    # subsample times for faster computation
+    features_scaled_3d = features_scaled_3d[:, :, ::2]  # take every 2nd timepoint
 
     # Flatten to 1D features per epoch
-    features_scaled = features_scaled_3d.reshape(n_epochs, n_sensors * n_times)
+    features_scaled = features_scaled_3d.reshape(n_epochs, n_sensors * (n_times // 2))
 
     logger.info(f"Flattened features shape: {features_scaled.shape}")
-    logger.info(f"  Feature dimensionality: {n_sensors * n_times} ({n_sensors} sensors × {n_times} timepoints)")
+    logger.info(f"  Feature dimensionality: {n_sensors * (n_times // 2)} ({n_sensors} sensors × {n_times // 2} timepoints)")
 
     return features_scaled
 
@@ -288,7 +291,7 @@ def get_crop_path(subject_id: int, session: int, trial: int, fix_sequence: int, 
     # Crop ID format from crops.py line 130
     #01_0201_06_0095752040_0044358.png
     #            crop_identifier = f"{subject_id:02d}_{fixation['trial']:04d}_{fixation['fix_sequence']:02d}_{start_time:010d}_{scene_id:07d}"
-    print(f"start_time before int conversion: {start_time}")
+    #print(f"start_time before int conversion: {start_time}")
     start_time_fname = int(start_time * 1000)
     crop_id = f"{subject_id:02d}_{trial:04d}_{fix_sequence:02d}_{start_time_fname:010d}_{scene_id:07d}"
     #print(crop_id)
@@ -821,14 +824,13 @@ def main():
     SUBJECT_ID = 4
     SESSIONS = list(range(1, 11))  # All 10 sessions
     CROP_SIZE = (112, 112)
-    PCA_VARIANCE = 0.8  # 80% of variance
+    PCA_VARIANCE = 150  # 80% of variance
     N_NEIGHBORS = 15
     MIN_DIST = 0.1
     TMIN = -0.05  # -50ms
     TMAX = 0.300  # 300ms
-    MAX_DISPLAY_CROPS = 500  # Maximum crops to load and display
-    N_JOBS = -1  # Number of parallel jobs (-1 = all CPUs)
-    RECOMPUTE_UMAP = True  # Set to True to recompute UMAP, False to load existing
+    MAX_DISPLAY_CROPS = 1000  # Maximum crops to load and display
+    RECOMPUTE_UMAP = False  # Set to True to recompute UMAP, False to load existing
 
     logger.info(f"Configuration:")
     logger.info(f"  Subject: {SUBJECT_ID}")
@@ -955,12 +957,12 @@ def main():
     logger.info(f"  Metadata entries: {len(metadata_df)}")
     logger.info(f"  Note: Each session was median-scaled independently before concatenation")
 
-    # Step 2: Flatten features (already scaled per session)
-    logger.info("\nStep 2: Flattening features...")
-    n_epochs, n_sensors, n_times = epochs_grad.shape
-    features_scaled = epochs_grad.reshape(n_epochs, n_sensors * n_times)
-    logger.info(f"Flattened features shape: {features_scaled.shape}")
-    logger.info(f"  Feature dimensionality: {n_sensors * n_times} ({n_sensors} sensors × {n_times} timepoints)")
+    # Step 2: Flatten and scale
+    logger.info("\nStep 2: Flattening and scaling features...")
+    features_scaled = flatten_and_scale_epochs(epochs_grad)
+    
+    # make float32 to save memory
+    features_scaled = features_scaled.astype(np.float32)
 
     # Step 3: Apply PCA
     logger.info("\nStep 3: Applying PCA dimensionality reduction...")
