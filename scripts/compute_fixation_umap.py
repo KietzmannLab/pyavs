@@ -7,6 +7,15 @@ by flattening the sensor × time representation and applying UMAP. The resulting
 2D embedding is visualized by plotting the actual fixation crop images at each
 UMAP coordinate.
 
+Pipeline:
+1. Load fixation epochs from multiple sessions (parallelized)
+2. Apply median scaling PER SESSION (important for session-specific baselines)
+3. Concatenate scaled epochs across sessions
+4. Flatten to (n_epochs, n_sensors × n_times)
+5. Apply PCA (95% variance threshold)
+6. Compute UMAP embedding
+7. Visualize with actual fixation crop images
+
 Author: P. Sulewski (psulewski@uos.de)
 """
 
@@ -20,6 +29,7 @@ from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 import umap
 import seaborn as sns
 import mne
+from joblib import Parallel, delayed
 
 # pyAVS imports
 from pyavs.io.read import load_epochs_h5, load_metadata_csv
@@ -358,10 +368,49 @@ def load_fixation_crops(metadata_df: pd.DataFrame, subject_id: int,
     return crop_images, valid_indices
 
 
-def check_crop_existence(metadata_df: pd.DataFrame, subject_id: int,
-                        data_path: str, crop_size: tuple = (112, 112)):
+def _check_single_crop_exists(idx_row_tuple, subject_id: int, data_path: str,
+                             crop_size: tuple):
     """
-    Check which crops exist without loading images.
+    Helper function to check if a single crop exists (for parallel processing).
+
+    Parameters
+    ----------
+    idx_row_tuple : tuple
+        (index, row) tuple from DataFrame.iterrows()
+    subject_id : int
+        Subject ID
+    data_path : str
+        Path to AVS data directory
+    crop_size : tuple
+        Crop size (width, height)
+
+    Returns
+    -------
+    tuple
+        (idx, exists) where exists is bool
+    """
+    idx, row = idx_row_tuple
+    session = int(row['session']) if 'session' in row else 1
+
+    crop_path = get_crop_path(
+        subject_id=subject_id,
+        session=session,
+        trial=int(row['trial']),
+        fix_sequence=int(row['fix_sequence']),
+        scene_id=int(row['sceneID']),
+        start_time=row['start_time'],
+        crop_size=crop_size,
+        data_path=data_path
+    )
+
+    return idx, crop_path.exists()
+
+
+def check_crop_existence(metadata_df: pd.DataFrame, subject_id: int,
+                        data_path: str, crop_size: tuple = (112, 112),
+                        n_jobs: int = -1):
+    """
+    Check which crops exist without loading images (parallelized).
 
     This function rapidly checks file existence without loading image data,
     enabling efficient filtering before subsampling.
@@ -376,36 +425,27 @@ def check_crop_existence(metadata_df: pd.DataFrame, subject_id: int,
         Path to AVS data directory
     crop_size : tuple, optional
         Crop size (width, height) (default: (112, 112))
+    n_jobs : int, optional
+        Number of parallel jobs (default: -1 for all CPUs)
 
     Returns
     -------
     valid_indices : list
         List of DataFrame indices where crops exist
     """
-    logger.info(f"Checking crop existence for {len(metadata_df)} fixations...")
+    logger.info(f"Checking crop existence for {len(metadata_df)} fixations (in parallel)...")
 
-    valid_indices = []
-    missing_count = 0
-
-    for idx, row in metadata_df.iterrows():
-        # Extract session from metadata (may be from multi-session concatenation)
-        session = int(row['session']) if 'session' in row else 1
-
-        crop_path = get_crop_path(
-            subject_id=subject_id,
-            session=session,
-            trial=int(row['trial']),
-            fix_sequence=int(row['fix_sequence']),
-            scene_id=int(row['sceneID']),
-            start_time=row['start_time'],
-            crop_size=crop_size,
-            data_path=data_path
+    # Check existence in parallel
+    results = Parallel(n_jobs=n_jobs, verbose=5)(
+        delayed(_check_single_crop_exists)(
+            (idx, row), subject_id, data_path, crop_size
         )
+        for idx, row in metadata_df.iterrows()
+    )
 
-        if crop_path.exists():
-            valid_indices.append(idx)
-        else:
-            missing_count += 1
+    # Extract valid indices
+    valid_indices = [idx for idx, exists in results if exists]
+    missing_count = len(results) - len(valid_indices)
 
     logger.info(f"Found {len(valid_indices)} fixations with available crops")
     logger.info(f"Missing crops: {missing_count}")
@@ -413,10 +453,51 @@ def check_crop_existence(metadata_df: pd.DataFrame, subject_id: int,
     return valid_indices
 
 
-def load_crops_from_metadata(metadata_df: pd.DataFrame, data_path: str,
-                             crop_size: tuple = (112, 112)):
+def _load_single_crop(idx_row_tuple, data_path: str, crop_size: tuple):
     """
-    Load crop images for specific metadata rows.
+    Helper function to load a single crop image (for parallel processing).
+
+    Parameters
+    ----------
+    idx_row_tuple : tuple
+        (index, row) tuple from DataFrame.iterrows()
+    data_path : str
+        Path to AVS data directory
+    crop_size : tuple
+        Crop size (width, height)
+
+    Returns
+    -------
+    np.ndarray
+        Crop image array
+    """
+    idx, row = idx_row_tuple
+
+    # Extract session and subject from metadata
+    session = int(row['session']) if 'session' in row else 1
+    subject_id = int(row['subject']) if 'subject' in row else 1
+
+    crop_path = get_crop_path(
+        subject_id=subject_id,
+        session=session,
+        trial=int(row['trial']),
+        fix_sequence=int(row['fix_sequence']),
+        scene_id=int(row['sceneID']),
+        start_time=row['start_time'],
+        crop_size=crop_size,
+        data_path=data_path
+    )
+
+    crop_img = Image.open(crop_path)
+    crop_array = np.array(crop_img)
+
+    return crop_array
+
+
+def load_crops_from_metadata(metadata_df: pd.DataFrame, data_path: str,
+                             crop_size: tuple = (112, 112), n_jobs: int = -1):
+    """
+    Load crop images for specific metadata rows (parallelized).
 
     This function loads ONLY the crops specified in the metadata DataFrame,
     assuming all crops exist (use check_crop_existence first to filter).
@@ -429,38 +510,23 @@ def load_crops_from_metadata(metadata_df: pd.DataFrame, data_path: str,
         Path to AVS data directory
     crop_size : tuple, optional
         Crop size (width, height) (default: (112, 112))
+    n_jobs : int, optional
+        Number of parallel jobs (default: -1 for all CPUs)
 
     Returns
     -------
     crop_images : list
         List of crop image arrays (one per metadata row)
     """
-    logger.info(f"Loading {len(metadata_df)} crop images...")
+    logger.info(f"Loading {len(metadata_df)} crop images (in parallel)...")
 
-    crop_images = []
-
-    for idx, (df_idx, row) in enumerate(metadata_df.iterrows()):
-        if (idx + 1) % 100 == 0:
-            logger.info(f"  Loading crop {idx + 1}/{len(metadata_df)}")
-
-        # Extract session and subject from metadata
-        session = int(row['session']) if 'session' in row else 1
-        subject_id = int(row['subject']) if 'subject' in row else 1
-
-        crop_path = get_crop_path(
-            subject_id=subject_id,
-            session=session,
-            trial=int(row['trial']),
-            fix_sequence=int(row['fix_sequence']),
-            scene_id=int(row['sceneID']),
-            start_time=row['start_time'],
-            crop_size=crop_size,
-            data_path=data_path
+    # Load crops in parallel
+    crop_images = Parallel(n_jobs=n_jobs, verbose=5)(
+        delayed(_load_single_crop)(
+            (idx, row), data_path, crop_size
         )
-
-        crop_img = Image.open(crop_path)
-        crop_array = np.array(crop_img)
-        crop_images.append(crop_array)
+        for idx, row in metadata_df.iterrows()
+    )
 
     logger.info(f"Loaded {len(crop_images)} crop images")
 
@@ -700,6 +766,50 @@ def load_umap_results(subject_id: int, session: int, data_path: str):
     return results
 
 
+def load_session_data(session: int, subject_id: int, data_path: str,
+                      tmin: float, tmax: float):
+    """
+    Helper function to load and scale data from a single session (for parallel processing).
+
+    Note: Median scaling is applied PER SESSION before concatenation to account
+    for session-specific baseline differences.
+
+    Parameters
+    ----------
+    session : int
+        Session number
+    subject_id : int
+        Subject ID
+    data_path : str
+        Path to AVS data directory
+    tmin : float
+        Start time in seconds
+    tmax : float
+        End time in seconds
+
+    Returns
+    -------
+    tuple
+        (epochs_grad_scaled, metadata_df, times, n_sensors, n_times)
+    """
+    epochs_grad, metadata_df, times, n_sensors, n_times = load_fixation_epochs(
+        subject_id, session, data_path, tmin=tmin, tmax=tmax
+    )
+
+    # Add session and subject columns
+    if 'session' not in metadata_df.columns:
+        metadata_df['session'] = session
+    if 'subject' not in metadata_df.columns:
+        metadata_df['subject'] = subject_id
+
+    # Apply median scaling PER SESSION
+    logger.info(f"  Applying median scaling to session {session}...")
+    scaler = mne.decoding.Scaler(scalings='median', with_std=True)
+    epochs_grad_scaled = scaler.fit_transform(epochs_grad)
+
+    return epochs_grad_scaled, metadata_df, times, n_sensors, n_times
+
+
 def main():
     """Main analysis pipeline."""
     logger.info("=== Fixation Epoch UMAP Analysis ===\n")
@@ -717,6 +827,7 @@ def main():
     TMIN = -0.05  # -50ms
     TMAX = 0.300  # 300ms
     MAX_DISPLAY_CROPS = 500  # Maximum crops to load and display
+    N_JOBS = -1  # Number of parallel jobs (-1 = all CPUs)
     RECOMPUTE_UMAP = True  # Set to True to recompute UMAP, False to load existing
 
     logger.info(f"Configuration:")
@@ -729,6 +840,7 @@ def main():
     logger.info(f"  PCA variance threshold: {PCA_VARIANCE*100:.0f}%")
     logger.info(f"  UMAP n_neighbors: {N_NEIGHBORS}")
     logger.info(f"  UMAP min_dist: {MIN_DIST}")
+    logger.info(f"  Parallel jobs: {N_JOBS} (all CPUs)" if N_JOBS == -1 else f"  Parallel jobs: {N_JOBS}")
     logger.info(f"  Recompute UMAP: {RECOMPUTE_UMAP}\n")
 
     # Output directory for multi-session results
@@ -768,7 +880,7 @@ def main():
             # Step 1: Check which crops exist
             logger.info("  Checking which crops exist...")
             valid_indices = check_crop_existence(
-                metadata_df, SUBJECT_ID, config.data_path, CROP_SIZE
+                metadata_df, SUBJECT_ID, config.data_path, CROP_SIZE, n_jobs=N_JOBS
             )
 
             # Filter to valid indices
@@ -789,7 +901,7 @@ def main():
             # Step 3: Load only subsampled crops
             logger.info(f"  Loading {len(metadata_to_load)} crop images...")
             crop_images = load_crops_from_metadata(
-                metadata_to_load, config.data_path, CROP_SIZE
+                metadata_to_load, config.data_path, CROP_SIZE, n_jobs=N_JOBS
             )
 
             # Visualize
@@ -816,28 +928,22 @@ def main():
             logger.info("Computing UMAP...")
 
     # Compute UMAP (either RECOMPUTE_UMAP=True or no existing results)
-    logger.info("Step 1: Loading fixation epochs from all sessions...")
+    logger.info("Step 1: Loading fixation epochs from all sessions (in parallel)...")
 
-    # Load and concatenate epochs from all sessions
+    # Load sessions in parallel
+    logger.info(f"  Using {N_JOBS if N_JOBS > 0 else 'all'} parallel jobs")
+    session_results = Parallel(n_jobs=N_JOBS, verbose=10)(
+        delayed(load_session_data)(session, SUBJECT_ID, config.data_path, TMIN, TMAX)
+        for session in SESSIONS
+    )
+
+    # Unpack results
     all_epochs = []
     all_metadata = []
-
-    for session in SESSIONS:
-        logger.info(f"  Loading session {session}...")
-        epochs_grad_session, metadata_df_session, times, n_sensors, n_times = load_fixation_epochs(
-            SUBJECT_ID, session, config.data_path, tmin=TMIN, tmax=TMAX
-        )
-
-        # Add session and subject columns if not present
-        if 'session' not in metadata_df_session.columns:
-            metadata_df_session['session'] = session
-        if 'subject' not in metadata_df_session.columns:
-            metadata_df_session['subject'] = SUBJECT_ID
-
+    for session, (epochs_grad_session, metadata_df_session, times, n_sensors, n_times) in zip(SESSIONS, session_results):
         all_epochs.append(epochs_grad_session)
         all_metadata.append(metadata_df_session)
-
-        logger.info(f"    Session {session}: {epochs_grad_session.shape[0]} epochs")
+        logger.info(f"  Session {session}: {epochs_grad_session.shape[0]} epochs")
 
     # Concatenate across sessions
     epochs_grad = np.concatenate(all_epochs, axis=0)
@@ -847,10 +953,14 @@ def main():
     logger.info(f"  Total epochs: {epochs_grad.shape[0]}")
     logger.info(f"  Epochs shape: {epochs_grad.shape}")
     logger.info(f"  Metadata entries: {len(metadata_df)}")
+    logger.info(f"  Note: Each session was median-scaled independently before concatenation")
 
-    # Step 2: Flatten and scale
-    logger.info("\nStep 2: Flattening and scaling features...")
-    features_scaled = flatten_and_scale_epochs(epochs_grad)
+    # Step 2: Flatten features (already scaled per session)
+    logger.info("\nStep 2: Flattening features...")
+    n_epochs, n_sensors, n_times = epochs_grad.shape
+    features_scaled = epochs_grad.reshape(n_epochs, n_sensors * n_times)
+    logger.info(f"Flattened features shape: {features_scaled.shape}")
+    logger.info(f"  Feature dimensionality: {n_sensors * n_times} ({n_sensors} sensors × {n_times} timepoints)")
 
     # Step 3: Apply PCA
     logger.info("\nStep 3: Applying PCA dimensionality reduction...")
@@ -872,7 +982,7 @@ def main():
     # Step 5a: Check which crops exist (fast path check, no image loading)
     logger.info("\nStep 5a: Checking which crops exist...")
     valid_indices = check_crop_existence(
-        metadata_df, SUBJECT_ID, config.data_path, CROP_SIZE
+        metadata_df, SUBJECT_ID, config.data_path, CROP_SIZE, n_jobs=N_JOBS
     )
 
     # Filter UMAP coords and metadata to valid indices
@@ -899,7 +1009,7 @@ def main():
     # Step 5c: Load ONLY the subsampled crops
     logger.info(f"\nStep 5c: Loading {len(metadata_to_load)} crop images...")
     crop_images = load_crops_from_metadata(
-        metadata_to_load, config.data_path, CROP_SIZE
+        metadata_to_load, config.data_path, CROP_SIZE, n_jobs=N_JOBS
     )
 
     logger.info(f"Successfully loaded {len(crop_images)} crops for visualization")
