@@ -119,10 +119,10 @@ def plot_calibration_quality(cal_df: pd.DataFrame, output_dir: str,
 
     # Setup styling
     sns.set_context("poster")
-    sns.set_style("white")
+    #sns.set_style("white")
 
     # Create figure
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(6,7))
 
     # Filter out unknown quality
     cal_plot = cal_df[cal_df['quality'].isin(['GOOD', 'FAIR', 'POOR'])].copy()
@@ -137,11 +137,11 @@ def plot_calibration_quality(cal_df: pd.DataFrame, output_dir: str,
     )
 
     # Add threshold line
-    plt.axhline(0.5, ls='--', color='red', linewidth=2, alpha=0.7)
+    #plt.axhline(0.5, ls='--', color='red', linewidth=2, alpha=0.7)
 
     # Labels
-    plt.ylabel('Average Calibration Error [°]')
-    plt.xlabel('Calibration Quality')
+    plt.ylabel('average 9-point calibration\nerror [°]')
+    plt.xlabel('calibration quality')
     plt.grid(axis='y', alpha=0.3)
 
     plt.tight_layout()
@@ -180,26 +180,27 @@ def plot_drift_histogram(drift_df: pd.DataFrame, output_dir: str,
 
     # Setup styling
     sns.set_context("poster")
-    sns.set_style("white")
+    #sns.set_style("white")
 
     # Create figure
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(6,7))
 
     # Get drift magnitudes
     drift_magnitudes = drift_df['offset_total_deg'].dropna()
 
     # Histogram
-    plt.hist(drift_magnitudes, bins=20, range=(0, 2),
-            color='steelblue', edgecolor='white', linewidth=0.5)
+    sns.histplot(drift_magnitudes, color='cornflowerblue',
+                edgecolor='white', bins=20)
 
     # Add exclusion threshold line
-    plt.axvline(1.0, ls='--', color='red', linewidth=2)
+    #plt.axvline(1.0, ls='--', color='red', linewidth=2)
 
     # Labels
-    plt.xlabel('Drift Correction Magnitude [°]')
-    plt.ylabel('Frequency [count]')
-    plt.grid(axis='y', alpha=0.3)
-
+    plt.xlabel('pre-scene drift correction\nmagnitude [°]')
+    plt.ylabel('frequency [count]')
+    #plt.grid(axis='y', alpha=0.3)
+    # despine
+    sns.despine()
     plt.tight_layout()
 
     # Save figure
@@ -236,10 +237,10 @@ def plot_drift_cdf(drift_df: pd.DataFrame, output_dir: str,
 
     # Setup styling
     sns.set_context("poster")
-    sns.set_style("white")
+    #sns.set_style("white")
 
     # Create figure
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(6,7))
 
     # Get drift magnitudes
     drift_magnitudes = drift_df['offset_total_deg'].dropna()
@@ -258,12 +259,12 @@ def plot_drift_cdf(drift_df: pd.DataFrame, output_dir: str,
     plt.axvline(1.0, ls='--', color='red', linewidth=2, alpha=0.7)
 
     # Labels
-    plt.xlabel('Drift Correction Magnitude [°]')
-    plt.ylabel('Cumulative Probability')
+    plt.xlabel('drift correction magnitude [°]')
+    plt.ylabel('cumulative Probability')
     plt.xlim(0, min(2.0, sorted_drifts.max()))
     plt.ylim(0, 1)
-    plt.grid(alpha=0.3)
-
+    #plt.grid(alpha=0.3)
+    sns.despine()
     plt.tight_layout()
 
     # Save figure
@@ -300,26 +301,25 @@ def plot_calibration_avg_error_hist(cal_df: pd.DataFrame, output_dir: str,
 
     # Setup styling
     sns.set_context("poster")
-    sns.set_style("white")
-
+  
     # Create figure
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(6,7))
 
     # Get average errors
     avg_errors = cal_df['avg_error_deg'].dropna()
 
     # Histogram with KDE
-    sns.histplot(avg_errors, bins=20, kde=True, color='steelblue',
-                edgecolor='white', linewidth=0.5)
+    sns.histplot(avg_errors, color='steelblue',
+                edgecolor='white', bins=20)
 
     # Add threshold line
-    plt.axvline(0.5, ls='--', color='red', linewidth=2)
+    #plt.axvline(0.5, ls='--', color='red', linewidth=2)
 
     # Labels
-    plt.xlabel('Average Calibration Error [°]')
-    plt.ylabel('Frequency [count]')
-    plt.grid(axis='y', alpha=0.3)
-
+    plt.xlabel('average 9-point calibration\nerror [°]')
+    plt.ylabel('frequency [count]')
+    #plt.grid(axis='y', alpha=0.3)
+    sns.despine()
     plt.tight_layout()
 
     # Save figure
@@ -356,26 +356,26 @@ def plot_calibration_max_error_hist(cal_df: pd.DataFrame, output_dir: str,
 
     # Setup styling
     sns.set_context("poster")
-    sns.set_style("white")
+    #sns.set_style("white")
 
     # Create figure
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(6,7))
 
     # Get maximum errors
     max_errors = cal_df['max_error_deg'].dropna()
 
     # Histogram with KDE
-    sns.histplot(max_errors, bins=20, kde=True, color='steelblue',
-                edgecolor='white', linewidth=0.5)
+    sns.histplot(max_errors, color='steelblue',
+                edgecolor='white', bins=20)
 
     # Add threshold line
-    plt.axvline(1.0, ls='--', color='red', linewidth=2)
+    #plt.axvline(1.0, ls='--', color='red', linewidth=2)
 
     # Labels
-    plt.xlabel('Maximum Calibration Error [°]')
-    plt.ylabel('Frequency [count]')
-    plt.grid(axis='y', alpha=0.3)
-
+    plt.xlabel('maximum 9-point calibration\nerror [°]')
+    plt.ylabel('frequency [count]')
+    #plt.grid(axis='y', alpha=0.3)
+    sns.despine()
     plt.tight_layout()
 
     # Save figure
@@ -412,7 +412,7 @@ def plot_session_heatmap(summary_df: pd.DataFrame, output_dir: str,
 
     # Setup styling
     sns.set_context("poster")
-    sns.set_style("white")
+    #sns.set_style("white")
 
     # Create pivot table
     pivot_table = summary_df.pivot(index='subject', columns='session',
@@ -444,6 +444,7 @@ def plot_session_heatmap(summary_df: pd.DataFrame, output_dir: str,
         logger.info(f"Saved: {pdf_file}")
 
     plt.close()
+
 
 
 def generate_all_figures(derivatives_dir: str, output_dir: str,
