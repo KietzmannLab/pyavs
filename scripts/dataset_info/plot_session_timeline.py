@@ -77,30 +77,6 @@ def get_subject_session_id(subject: int, session: int) -> str:
     return f"as{subject:02d}{session_letter}"
 
 
-def get_first_block_for_session(session: int) -> int:
-    """
-    Calculate first block number for a given session.
-
-    Session 1 has 10 blocks (1-10), all other sessions have 14 blocks.
-    Session 1 → block 1
-    Session 2 → block 11 (1 + 10)
-    Session 3 → block 25 (1 + 10 + 14)
-
-    Parameters
-    ----------
-    session : int
-        Session number (1-10)
-
-    Returns
-    -------
-    int
-        First block number for the session
-    """
-    if session == 1:
-        return 1
-    # Session 1 has 10 blocks, others have 14
-    return 1 + 10 + (session - 2) * 14
-
 
 def build_meg_file_path(data_path: str, subject: int, session: int, block: int) -> str:
     """
@@ -129,7 +105,9 @@ def build_meg_file_path(data_path: str, subject: int, session: int, block: int) 
     """
     sub_sess_id = get_subject_session_id(subject, session)
     session_dir = os.path.join(data_path, "rawdir", sub_sess_id)
+
     meg_file = os.path.join(session_dir, f"{sub_sess_id}{block:02d}.fif")
+    print(meg_file)
     return meg_file
 
 
@@ -166,7 +144,7 @@ def extract_session_timestamps(data_path: str, subjects: List[int],
     for subject in subjects:
         for session in sessions:
             # Get first block for this session
-            block = get_first_block_for_session(session)
+            block = 1
             meg_file = build_meg_file_path(data_path, subject, session, block)
 
             if verbose:
@@ -242,7 +220,7 @@ def calculate_days_from_first(timestamps_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def plot_session_timeline(data_df: pd.DataFrame, output_dir: str,
-                          dpi: int = 300, fmt: str = 'png'):
+                          dpi: int = 300, fmt: str = 'pdf'):
     """
     Create scatter plot showing session temporal spacing.
 
@@ -260,7 +238,7 @@ def plot_session_timeline(data_df: pd.DataFrame, output_dir: str,
     logger.info("Creating figure: Session temporal spacing")
 
     # Create figure
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(8, 5))
 
     # Scatter plot with session coloring
     scatter = plt.scatter(
@@ -268,16 +246,17 @@ def plot_session_timeline(data_df: pd.DataFrame, output_dir: str,
         data_df['subject'],
         c=data_df['session'],
         cmap='magma',
-        s=100,
-        alpha=0.8,
+        s=300,
+        alpha=0.9,
         vmin=1,
         vmax=10,
-        edgecolors='white',
-        linewidth=0.5
+        edgecolors='black',
+        #linewidth=0
+    
     )
 
     # Labels (lowercase)
-    plt.xlabel('days from first session')
+    plt.xlabel('time from first session [days]')
     plt.ylabel('participant')
 
     # Y-axis formatting
@@ -380,6 +359,7 @@ def main():
     parser.add_argument(
         '--recompute',
         action='store_true',
+        
         help='Force re-extraction of timestamps (ignore cache)'
     )
 
@@ -399,19 +379,6 @@ def main():
         help='Sessions to include (default: 1 2 3 4 5 6 7 8 9 10)'
     )
 
-    parser.add_argument(
-        '--format', '-f',
-        choices=['png', 'pdf', 'both'],
-        default='png',
-        help='Output format (default: png)'
-    )
-
-    parser.add_argument(
-        '--dpi',
-        type=int,
-        default=300,
-        help='Resolution for raster output (default: 300)'
-    )
 
     parser.add_argument(
         '--verbose', '-v',
@@ -465,8 +432,6 @@ def main():
     plot_session_timeline(
         data_df=data_df,
         output_dir=args.output_dir,
-        dpi=args.dpi,
-        fmt=args.format
     )
 
     logger.info("=" * 70)
