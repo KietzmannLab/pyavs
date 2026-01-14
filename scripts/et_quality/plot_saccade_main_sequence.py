@@ -299,27 +299,18 @@ def plot_main_sequence_temporal(saccades_df: pd.DataFrame, output_dir: str,
     colors = sns.color_palette("magma", n_colors=4)
 
     # Plot KDE for each temporal bin
-    for bin_name, color in zip(bin_labels, colors):
-        bin_data = saccades_df[saccades_df['time_bin'] == bin_name]
-
-        if len(bin_data) < 10:
-            logger.warning(f"Skipping {bin_name}: insufficient data (n={len(bin_data)})")
-            continue
-
-        logger.info(f"  Plotting {bin_name}: n={len(bin_data)}")
-
-        sns.kdeplot(
-            x=bin_data['amplitude_clipped'],
-            y=bin_data['peak_velocity_clipped'],
-            fill=True,
-            ax=ax,
-            color=color,
-            alpha=0.3,
-            levels=5,
-            thresh=0.05,
-            label=f"{bin_name} (n={len(bin_data)})"
-        )
-
+    sns.lmplot(
+        data=saccades_df,
+        x='amplitude_clipped',
+        y='peak_velocity_clipped',
+        scatter=False,
+        fit_reg=True,
+        #ax=ax,
+        hue='time_bin',
+        palette=colors,
+        lowess=True,
+        
+    )
     # Labels (lowercase)
     ax.set_xlabel('saccade amplitude [°]')
     ax.set_ylabel('peak velocity [°/s]')
@@ -368,7 +359,7 @@ def main():
         '--subjects', '-s',
         nargs='+',
         type=int,
-        default=None,
+        default=[1,2],
         help='Subject IDs to process (default: all available subjects)'
     )
 
@@ -376,7 +367,7 @@ def main():
         '--sessions', '-sess',
         nargs='+',
         type=int,
-        default=[1, 2, 3, 4],
+        default=[1, 2,],
         help='Sessions to include (default: 1 2 3 4)'
     )
 
