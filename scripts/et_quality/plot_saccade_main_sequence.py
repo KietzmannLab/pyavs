@@ -6,12 +6,18 @@ This script analyzes how the relationship between saccade amplitude and peak
 velocity changes over time during the first 4 seconds of scene viewing. Uses
 overlaid 2D KDE contours to show temporal evolution of the main sequence.
 
+IMPORTANT: The raw data is in pixels/pixels per second (preprocessing was run
+with px2deg=False). This script automatically converts to visual degrees and
+degrees per second using the screen parameters (1920×1080 pixels, 0.276 mm/px,
+700mm viewing distance).
+
 GENERATED FIGURES:
 - saccade_main_sequence_temporal.png/pdf - Overlaid KDE contours for 4 temporal bins
 
 Usage:
     python plot_saccade_main_sequence.py --verbose
     python plot_saccade_main_sequence.py --subjects 1 2 3
+    python plot_saccade_main_sequence.py --distance-mm 650  # Custom viewing distance
 
 Author: P. Sulewski (psulewski@uos.de)
 """
@@ -160,10 +166,44 @@ def bin_saccades_by_time(saccades_df: pd.DataFrame) -> pd.DataFrame:
     return saccades_df
 
 
-def preprocess_saccades(saccades_df: pd.DataFrame,
-                       outlier_percentile: float = 98) -> pd.DataFrame:
+def convert_pixels_to_degrees(pixels: float, mm_per_px: float = 0.276,
+                              distance_mm: float = 700.0) -> float:
     """
-    Remove NaN values and clip outliers.
+    Convert pixels to visual degrees.
+
+    This conversion accounts for the screen resolution and viewing distance
+    used in the AVS experiment.
+
+    Parameters
+    ----------
+    pixels : float
+        Value in pixels
+    mm_per_px : float, default=0.276
+        Monitor resolution (mm per pixel)
+    distance_mm : float, default=700.0
+        Viewing distance in millimeters
+
+    Returns
+    -------
+    float
+        Value in visual degrees
+
+    Notes
+    -----
+    Screen: 1920×1080 pixels (BENQ monitor)
+    Viewing distance: 700mm
+    Resolution: 0.276 mm/pixel
+    """
+    degrees = np.arctan2(pixels * mm_per_px, distance_mm) * 180 / np.pi
+    return degrees
+
+
+def preprocess_saccades(saccades_df: pd.DataFrame,
+                       outlier_percentile: float = 98,
+                       mm_per_px: float = 0.276,
+                       distance_mm: float = 700.0) -> pd.DataFrame:
+    """
+    Remove NaN values, convert units, and clip outliers.
 
     Parameters
     ----------
@@ -171,6 +211,10 @@ def preprocess_saccades(saccades_df: pd.DataFrame,
         Saccade events dataframe
     outlier_percentile : float, default=98
         Percentile threshold for clipping outliers
+    mm_per_px : float, default=0.276
+        Monitor resolution (mm per pixel)
+    distance_mm : float, default=700.0
+        Viewing distance in millimeters
 
     Returns
     -------
@@ -189,7 +233,23 @@ def preprocess_saccades(saccades_df: pd.DataFrame,
     if nan_removed > 0:
         logger.info(f"  Removed {nan_removed} rows with NaN values")
 
-    # Calculate percentile thresholds
+    # Convert from pixels to degrees
+    # The preprocessing was run with px2deg=False, so values are in pixels/pixels per second
+    logger.info(f"  Converting units (pixels → degrees, viewing distance: {distance_mm}mm)")
+
+    # Calculate conversion factor: degrees per pixel at screen center
+    pixels_per_degree = 1.0 / convert_pixels_to_degrees(1.0, mm_per_px, distance_mm)
+    logger.info(f"  Conversion factor: {pixels_per_degree:.2f} pixels/degree")
+
+    # Convert amplitude: pixels → degrees
+    df['amplitude'] = df['amplitude'].apply(
+        lambda x: convert_pixels_to_degrees(x, mm_per_px, distance_mm)
+    )
+
+    # Convert peak velocity: pixels/second → degrees/second
+    df['peak_velocity'] = df['peak_velocity'] / pixels_per_degree
+
+    # Calculate percentile thresholds (after conversion)
     amp_cutoff = np.percentile(df['amplitude'], outlier_percentile)
     vel_cutoff = np.percentile(df['peak_velocity'], outlier_percentile)
 
@@ -342,6 +402,20 @@ def main():
     )
 
     parser.add_argument(
+        '--distance-mm',
+        type=float,
+        default=700.0,
+        help='Viewing distance in millimeters (default: 700)'
+    )
+
+    parser.add_argument(
+        '--mm-per-px',
+        type=float,
+        default=0.276,
+        help='Monitor resolution in mm per pixel (default: 0.276)'
+    )
+
+    parser.add_argument(
         '--verbose', '-v',
         action='store_true',
         help='Enable verbose logging'
@@ -392,8 +466,13 @@ def main():
     # Bin saccades by time
     saccades = bin_saccades_by_time(saccades)
 
-    # Preprocess (outlier removal, NaN handling)
-    saccades = preprocess_saccades(saccades, outlier_percentile=args.outlier_percentile)
+    # Preprocess (unit conversion, outlier removal, NaN handling)
+    saccades = preprocess_saccades(
+        saccades,
+        outlier_percentile=args.outlier_percentile,
+        mm_per_px=args.mm_per_px,
+        distance_mm=args.distance_mm
+    )
 
     if len(saccades) == 0:
         logger.error("No saccades remaining after preprocessing. Cannot generate plot.")
