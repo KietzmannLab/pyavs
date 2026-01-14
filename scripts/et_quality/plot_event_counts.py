@@ -46,7 +46,7 @@ def discover_subjects(data_path: str) -> List[int]:
     List[int]
         Sorted list of subject IDs found in data directory
     """
-    pattern = os.path.join(data_path, 'results', 'as[0-9][0-9]_*')
+    pattern = os.path.join(data_path, 'results', 'as[0-5][0-10]_*')
     dirs = glob.glob(pattern)
 
     subjects = set()
@@ -188,7 +188,7 @@ def plot_dataset_counts(counts_df: pd.DataFrame, output_dir: str,
 
     # Setup styling
     sns.set_context("poster")
-    sns.set_style("white")
+    # 
 
     # Prepare data for stacking
     event_types = ['fixation', 'saccade', 'blink']
@@ -196,20 +196,21 @@ def plot_dataset_counts(counts_df: pd.DataFrame, output_dir: str,
     caption_counts = counts_df[counts_df['recording'] == 'caption'].set_index('event_type')['count'].reindex(event_types, fill_value=0)
 
     # Create plot
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(7, 7))
     x = np.arange(len(event_types))
     width = 0.6
 
-    plt.bar(x, scene_counts, width, label='Scene', color='steelblue')
-    plt.bar(x, caption_counts, width, bottom=scene_counts, label='Caption', color='coral')
+    plt.bar(x, scene_counts, width, label='scene viewing', color='cornflowerblue')
+    plt.bar(x, caption_counts, width, bottom=scene_counts, label='caption task', color='salmon')
 
-    plt.xlabel('Event Type')
-    plt.ylabel('Total Count [events]')
+    plt.xlabel('eye tracking event type')
+    plt.ylabel('total count [events]')
     plt.xticks(x, event_types)
-    plt.legend()
-    plt.grid(axis='y', alpha=0.3)
+    plt.legend(frameon=False)
+    #plt.grid(axis='y', alpha=0.3)
     plt.tight_layout()
-
+    # despine
+    sns.despine()
     # Save figure
     if fmt in ['png', 'both']:
         png_file = os.path.join(output_dir, 'event_counts_dataset.png')
@@ -244,7 +245,7 @@ def plot_per_subject_counts(summary_df: pd.DataFrame, output_dir: str,
 
     # Setup styling
     sns.set_context("poster")
-    sns.set_style("white")
+     
 
     # Prepare data for stacking
     event_types = ['fixation', 'saccade', 'blink']
@@ -361,7 +362,7 @@ def main():
         '--subjects', '-s',
         nargs='+',
         type=int,
-        default=None,
+        default=[1,2,3,4,5],
         help='Subject IDs to process (default: all available subjects)'
     )
 
@@ -369,7 +370,7 @@ def main():
         '--sessions', '-sess',
         nargs='+',
         type=int,
-        default=[1, 2, 3, 4],
+        default=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
         help='Sessions to include (default: 1 2 3 4)'
     )
 

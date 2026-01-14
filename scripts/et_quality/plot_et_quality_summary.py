@@ -122,7 +122,7 @@ def plot_calibration_quality(cal_df: pd.DataFrame, output_dir: str,
     #sns.set_style("white")
 
     # Create figure
-    plt.figure(figsize=(6,7))
+    plt.figure(figsize=(7,7))
 
     # Filter out unknown quality
     cal_plot = cal_df[cal_df['quality'].isin(['GOOD', 'FAIR', 'POOR'])].copy()
