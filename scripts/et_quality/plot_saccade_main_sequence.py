@@ -6,18 +6,12 @@ This script analyzes how the relationship between saccade amplitude and peak
 velocity changes over time during the first 4 seconds of scene viewing. Uses
 overlaid 2D KDE contours to show temporal evolution of the main sequence.
 
-IMPORTANT: The raw data is in pixels/pixels per second (preprocessing was run
-with px2deg=False). This script automatically converts to visual degrees and
-degrees per second using the screen parameters (1920×1080 pixels, 0.276 mm/px,
-700mm viewing distance).
-
 GENERATED FIGURES:
 - saccade_main_sequence_temporal.png/pdf - Overlaid KDE contours for 4 temporal bins
 
 Usage:
     python plot_saccade_main_sequence.py --verbose
     python plot_saccade_main_sequence.py --subjects 1 2 3
-    python plot_saccade_main_sequence.py --distance-mm 650  # Custom viewing distance
 
 Author: P. Sulewski (psulewski@uos.de)
 """
@@ -109,6 +103,9 @@ def load_saccade_data(subjects: List[int], sessions: List[int],
         missing_cols = [col for col in required_cols if col not in saccades.columns]
         if missing_cols:
             raise ValueError(f"Missing required columns: {missing_cols}")
+        
+        # recompute amplitude in pixels from start_gx and start_gy and end_gx and end_gy
+        saccades['amplitude'] = np.sqrt((saccades['end_gx'] - saccades['start_gx'])**2 + (saccades['end_gy'] - saccades['start_gy'])**2)
 
         logger.info(f"Total scene saccades loaded: {len(saccades)}")
         logger.info(f"  Per-subject counts: {saccades.groupby('subject').size().to_dict()}")
@@ -137,7 +134,7 @@ def bin_saccades_by_time(saccades_df: pd.DataFrame) -> pd.DataFrame:
     logger.info("Binning saccades by temporal window:")
 
     bins = [0, 1, 2, 3, 4]
-    labels = ['early', 'mid-early', 'mid-late', 'late']
+    labels = ["<1s", "1-2s", "2-3s", "3-4s"]
 
     saccades_df['time_bin'] = pd.cut(
         saccades_df['time_in_trial'],
@@ -166,44 +163,10 @@ def bin_saccades_by_time(saccades_df: pd.DataFrame) -> pd.DataFrame:
     return saccades_df
 
 
-def convert_pixels_to_degrees(pixels: float, mm_per_px: float = 0.276,
-                              distance_mm: float = 700.0) -> float:
-    """
-    Convert pixels to visual degrees.
-
-    This conversion accounts for the screen resolution and viewing distance
-    used in the AVS experiment.
-
-    Parameters
-    ----------
-    pixels : float
-        Value in pixels
-    mm_per_px : float, default=0.276
-        Monitor resolution (mm per pixel)
-    distance_mm : float, default=700.0
-        Viewing distance in millimeters
-
-    Returns
-    -------
-    float
-        Value in visual degrees
-
-    Notes
-    -----
-    Screen: 1920×1080 pixels (BENQ monitor)
-    Viewing distance: 700mm
-    Resolution: 0.276 mm/pixel
-    """
-    degrees = np.arctan2(pixels * mm_per_px, distance_mm) * 180 / np.pi
-    return degrees
-
-
 def preprocess_saccades(saccades_df: pd.DataFrame,
-                       outlier_percentile: float = 98,
-                       mm_per_px: float = 0.276,
-                       distance_mm: float = 700.0) -> pd.DataFrame:
+                       outlier_percentile: float = 100) -> pd.DataFrame:
     """
-    Remove NaN values, convert units, and clip outliers.
+    Remove NaN values and clip outliers.
 
     Parameters
     ----------
@@ -211,10 +174,6 @@ def preprocess_saccades(saccades_df: pd.DataFrame,
         Saccade events dataframe
     outlier_percentile : float, default=98
         Percentile threshold for clipping outliers
-    mm_per_px : float, default=0.276
-        Monitor resolution (mm per pixel)
-    distance_mm : float, default=700.0
-        Viewing distance in millimeters
 
     Returns
     -------
@@ -233,28 +192,10 @@ def preprocess_saccades(saccades_df: pd.DataFrame,
     if nan_removed > 0:
         logger.info(f"  Removed {nan_removed} rows with NaN values")
 
-    # Convert from pixels to degrees
-    # The preprocessing was run with px2deg=False, so values are in pixels/pixels per second
-    logger.info(f"  Converting units (pixels → degrees, viewing distance: {distance_mm}mm)")
-
-    # Calculate conversion factor: degrees per pixel at screen center
-    pixels_per_degree = 1.0 / convert_pixels_to_degrees(1.0, mm_per_px, distance_mm)
-    logger.info(f"  Conversion factor: {pixels_per_degree:.2f} pixels/degree")
-
-    # Convert amplitude: pixels → degrees
-    df['amplitude'] = df['amplitude'].apply(
-        lambda x: convert_pixels_to_degrees(x, mm_per_px, distance_mm)
-    )
-
-    # Convert peak velocity: pixels/second → degrees/second
-    df['peak_velocity'] = df['peak_velocity'] / pixels_per_degree
-
-    # Calculate percentile thresholds (after conversion)
+    # Calculate percentile thresholds
     amp_cutoff = np.percentile(df['amplitude'], outlier_percentile)
     vel_cutoff = np.percentile(df['peak_velocity'], outlier_percentile)
 
-    logger.info(f"  Amplitude clipped at {outlier_percentile}th percentile: {amp_cutoff:.1f}°")
-    logger.info(f"  Peak velocity clipped at {outlier_percentile}th percentile: {vel_cutoff:.1f}°/s")
 
     # Clip to percentile
     df['amplitude_clipped'] = df['amplitude'].clip(upper=amp_cutoff)
@@ -291,34 +232,53 @@ def plot_main_sequence_temporal(saccades_df: pd.DataFrame, output_dir: str,
     # Setup styling
     sns.set_context("poster")
 
-    # Create figure
-    fig, ax = plt.subplots(figsize=(10, 8))
-
+    
     # Color palette
-    bin_labels = ['early', 'mid-early', 'mid-late', 'late']
+    #bin_labels = ['early', 'mid-early', 'mid-late', 'late']
     colors = sns.color_palette("magma", n_colors=4)
-
+    # convert pixels to degrees (assuming 33 px/deg as in AVS)
+    pix_deg = 33
+    #saccades_df['amplitude_clipped'] = saccades_df['amplitude_clipped'] / pix_deg
+    saccades_df['peak_velocity_clipped'] = saccades_df['peak_velocity_clipped'] / pix_deg
+    saccades_df['amplitude_clipped'] = saccades_df['amplitude_clipped'] / pix_deg
     # Plot KDE for each temporal bin
-    sns.lmplot(
-        data=saccades_df,
-        x='amplitude_clipped',
-        y='peak_velocity_clipped',
-        scatter=False,
-        fit_reg=True,
-        #ax=ax,
-        hue='time_bin',
-        palette=colors,
-        lowess=True,
-        
-    )
+    g = sns.JointGrid(data=saccades_df, x='amplitude_clipped', y='peak_velocity_clipped')
+
+    # Plot your binned scatter with hue on the joint axes
+    for time_bin, color in zip(saccades_df['time_bin'].unique(), colors):
+        subset = saccades_df[saccades_df['time_bin'] == time_bin]
+        sns.regplot(
+            data=subset,
+            x='amplitude_clipped',
+            y='peak_velocity_clipped',
+            x_bins=20,
+            fit_reg=True,
+            lowess=True,
+            scatter=False,
+            #scatter_kws={'alpha': 0.3},
+            ax=g.ax_joint,
+            color=color,
+            label=time_bin
+        )
+        # add legend
+    g.ax_joint.legend(title='viewing time', frameon=False)
+
+    # Marginal KDEs
+    for time_bin, color in zip(saccades_df['time_bin'].unique(), colors):
+        subset = saccades_df[saccades_df['time_bin'] == time_bin]
+        sns.kdeplot(data=subset, x='amplitude_clipped', ax=g.ax_marg_x, color=color, fill=True, alpha=0.3)
+        sns.kdeplot(data=subset, y='peak_velocity_clipped', ax=g.ax_marg_y, color=color, fill=True, alpha=0.3)
+        # set figure size
+    plt.gcf().set_size_inches(8, 8)
+    # get the current axis
+    #ax = plt.gca()
     # Labels (lowercase)
-    ax.set_xlabel('saccade amplitude [°]')
-    ax.set_ylabel('peak velocity [°/s]')
+    g.ax_joint.set_xlabel('saccade amplitude [°]')
+    g.ax_joint.set_ylabel('peak velocity [°/s]')
 
     # Legend and styling
-    ax.legend(loc='upper left', frameon=False)
-    sns.despine(ax=ax)
-
+    
+    sns.despine()
     plt.tight_layout()
 
     # Save figure
@@ -359,7 +319,7 @@ def main():
         '--subjects', '-s',
         nargs='+',
         type=int,
-        default=[1,2],
+        default=[1,2,3,4,5],
         help='Subject IDs to process (default: all available subjects)'
     )
 
@@ -367,7 +327,7 @@ def main():
         '--sessions', '-sess',
         nargs='+',
         type=int,
-        default=[1, 2,],
+        default=np.arange(1,11).tolist(),
         help='Sessions to include (default: 1 2 3 4)'
     )
 
@@ -388,22 +348,8 @@ def main():
     parser.add_argument(
         '--outlier-percentile',
         type=float,
-        default=98,
-        help='Percentile threshold for outlier clipping (default: 98)'
-    )
-
-    parser.add_argument(
-        '--distance-mm',
-        type=float,
-        default=700.0,
-        help='Viewing distance in millimeters (default: 700)'
-    )
-
-    parser.add_argument(
-        '--mm-per-px',
-        type=float,
-        default=0.276,
-        help='Monitor resolution in mm per pixel (default: 0.276)'
+        default=99,
+        help='Percentile threshold for outlier clipping (default: 99)'
     )
 
     parser.add_argument(
@@ -457,13 +403,8 @@ def main():
     # Bin saccades by time
     saccades = bin_saccades_by_time(saccades)
 
-    # Preprocess (unit conversion, outlier removal, NaN handling)
-    saccades = preprocess_saccades(
-        saccades,
-        outlier_percentile=args.outlier_percentile,
-        mm_per_px=args.mm_per_px,
-        distance_mm=args.distance_mm
-    )
+    # Preprocess (outlier removal, NaN handling)
+    saccades = preprocess_saccades(saccades, outlier_percentile=args.outlier_percentile)
 
     if len(saccades) == 0:
         logger.error("No saccades remaining after preprocessing. Cannot generate plot.")
