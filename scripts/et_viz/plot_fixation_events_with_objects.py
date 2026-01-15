@@ -421,7 +421,7 @@ def main():
     SUBJECT_ID = 4
     SESSION_ID = 10
     DATA_PATH = config.data_path
-    TRANSFORMED_ANNOTATIONS_DIR = "/share/klab/datasets/avs/AVS-UTILS/avs_scene_annotations/coco_objects"
+    TRANSFORMED_ANNOTATIONS_DIR = "/share/klab/datasets/avs/AVS-UTILS/avs_scene_annotations/cocostuff/"
 
     logger.info(f"Using standardized visual parameters:")
     logger.info(f"  Screen size: {config.screen_size_pixels} pixels")
