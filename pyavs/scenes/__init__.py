@@ -13,6 +13,19 @@ from .objects import (
     FixationObjectChecker
 )
 
+from .cocostuff_classes import (
+    COCOSTUFF_CLASSES,
+    THING_CLASS_INDICES,
+    STUFF_CLASS_INDICES,
+    MISSING_COCO_INDICES,
+    get_class_name,
+    get_class_id,
+    is_thing_class,
+    is_stuff_class,
+    get_annotation_type,
+    get_summary
+)
+
 from .crops import (
     create_fixation_crops,
     extract_scene_regions

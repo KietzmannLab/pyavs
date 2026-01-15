@@ -33,6 +33,14 @@ from pycocotools.coco import COCO
 # Import pyAVS config
 from ..config.config import PyAVSConfig
 
+# Import COCO-Stuff utilities
+from .cocostuff_classes import (
+    COCOSTUFF_CLASSES,
+    get_class_name,
+    is_thing_class,
+    is_stuff_class
+)
+
 
 class AVSSceneAnnotationTransformer:
     """
@@ -42,15 +50,16 @@ class AVSSceneAnnotationTransformer:
     scene_resizer.py applied to the original scene images.
     """
     
-    def __init__(self, 
+    def __init__(self,
                  avs_scenes_dir: str,
                  output_dir: str,
                  mscoco_annotations_dir: str,
                  mscoco_images_dir: str,
+                 use_cocostuff: bool = False,
                  verbose: bool = False):
         """
         Initialize the transformer.
-        
+
         Parameters
         ----------
         avs_scenes_dir : str
@@ -61,6 +70,10 @@ class AVSSceneAnnotationTransformer:
             Directory containing MSCOCO annotation files
         mscoco_images_dir : str
             Directory containing original MSCOCO images
+        use_cocostuff : bool, optional
+            If True, load and process COCO-Stuff annotations (172 classes).
+            If False, use only COCO instances (80 classes).
+            Default: False for backward compatibility.
         verbose : bool
             Enable verbose logging
         """
@@ -68,6 +81,7 @@ class AVSSceneAnnotationTransformer:
         self.output_dir = Path(output_dir)
         self.mscoco_annotations_dir = Path(mscoco_annotations_dir)
         self.mscoco_images_dir = Path(mscoco_images_dir)
+        self.use_cocostuff = use_cocostuff
         self.verbose = verbose
         
         # Set up logging
@@ -98,15 +112,69 @@ class AVSSceneAnnotationTransformer:
         self._load_coco_datasets()
     
     def _load_coco_datasets(self):
-        """Load COCO annotation datasets."""
+        """Load COCO annotation datasets (instances and optionally stuff)."""
         for dataset_name in ['train2017', 'val2017']:
-            annotation_file = self.mscoco_annotations_dir / f'instances_{dataset_name}.json'
-            if annotation_file.exists():
-                self.logger.info(f'Loading COCO dataset: {annotation_file}')
-                self.coco_datasets[dataset_name] = COCO(str(annotation_file))
+            # Always load instances (thing classes)
+            instances_file = self.mscoco_annotations_dir / f'instances_{dataset_name}.json'
+            if instances_file.exists():
+                self.logger.info(f'Loading COCO instances dataset: {instances_file}')
+                self.coco_datasets[f'{dataset_name}_instances'] = COCO(str(instances_file))
             else:
-                self.logger.warning(f'COCO annotation file not found: {annotation_file}')
-    
+                self.logger.warning(f'COCO instances file not found: {instances_file}')
+
+            # Load COCO-Stuff annotations if requested
+            if self.use_cocostuff:
+                stuff_file = self.mscoco_annotations_dir / 'cocostuff' / f'stuff_{dataset_name}.json'
+                if stuff_file.exists():
+                    self.logger.info(f'Loading COCO-Stuff dataset: {stuff_file}')
+                    self.coco_datasets[f'{dataset_name}_stuff'] = COCO(str(stuff_file))
+                else:
+                    self.logger.warning(f'COCO-Stuff annotation file not found: {stuff_file}')
+
+    def _get_annotations_for_image(self, coco_id: int, dataset_name: str) -> Tuple[List, List]:
+        """
+        Get all annotations (things + stuff) for an image.
+
+        Parameters
+        ----------
+        coco_id : int
+            COCO image ID
+        dataset_name : str
+            Dataset name ('train2017' or 'val2017')
+
+        Returns
+        -------
+        tuple
+            (thing_annotations, stuff_annotations)
+        """
+        thing_annotations = []
+        stuff_annotations = []
+
+        # Get thing annotations (from instances)
+        instances_key = f'{dataset_name}_instances'
+        if instances_key in self.coco_datasets:
+            try:
+                ann_ids = self.coco_datasets[instances_key].getAnnIds(
+                    imgIds=coco_id, iscrowd=None
+                )
+                thing_annotations = self.coco_datasets[instances_key].loadAnns(ann_ids)
+            except Exception as e:
+                self.logger.warning(f"Could not get instances for COCO ID {coco_id}: {e}")
+
+        # Get stuff annotations (if using COCO-Stuff)
+        if self.use_cocostuff:
+            stuff_key = f'{dataset_name}_stuff'
+            if stuff_key in self.coco_datasets:
+                try:
+                    ann_ids = self.coco_datasets[stuff_key].getAnnIds(
+                        imgIds=coco_id, iscrowd=None
+                    )
+                    stuff_annotations = self.coco_datasets[stuff_key].loadAnns(ann_ids)
+                except Exception as e:
+                    self.logger.warning(f"Could not get stuff for COCO ID {coco_id}: {e}")
+
+        return thing_annotations, stuff_annotations
+
     def crop_resize(self, image: Image.Image, size: Tuple[int, int], ratio: Fraction) -> Image.Image:
         """
         Apply center crop and resize - matching scene_resizer.py logic.
@@ -233,10 +301,12 @@ class AVSSceneAnnotationTransformer:
         
         # Get annotations for this image
         try:
-            ann_ids = self.coco_datasets[dataset_name].getAnnIds(imgIds=coco_id, iscrowd=None)
-            annotations = self.coco_datasets[dataset_name].loadAnns(ann_ids)
-        except:
-            self.logger.warning(f"Could not get annotations for COCO ID {coco_id}")
+            thing_annotations, stuff_annotations = self._get_annotations_for_image(
+                coco_id, dataset_name
+            )
+            annotations = thing_annotations + stuff_annotations
+        except Exception as e:
+            self.logger.warning(f"Could not get annotations for COCO ID {coco_id}: {e}")
             return False
         
         if not annotations:
@@ -263,10 +333,17 @@ class AVSSceneAnnotationTransformer:
             for ann in cat_annotations:
                 if 'segmentation' in ann:
                     try:
-                        mask = self.coco_datasets[dataset_name].annToMask(ann)
-                        merged_mask = np.logical_or(merged_mask, mask.astype(bool))
-                    except:
-                        self.logger.warning(f"Could not process annotation {ann['id']}")
+                        # Determine which dataset this annotation came from
+                        ann_dataset_key = (
+                            f'{dataset_name}_stuff' if is_stuff_class(ann['category_id'])
+                            else f'{dataset_name}_instances'
+                        )
+
+                        if ann_dataset_key in self.coco_datasets:
+                            mask = self.coco_datasets[ann_dataset_key].annToMask(ann)
+                            merged_mask = np.logical_or(merged_mask, mask.astype(bool))
+                    except Exception as e:
+                        self.logger.warning(f"Could not process annotation {ann['id']}: {e}")
                         continue
             
             if not merged_mask.any():
@@ -303,8 +380,19 @@ class AVSSceneAnnotationTransformer:
             
             # Get category name
             try:
-                category_name = self.coco_datasets[dataset_name].loadCats(ids=category_id)[0]['name']
-            except:
+                if self.use_cocostuff:
+                    category_name = get_class_name(category_id)
+                else:
+                    # Use COCO dataset for name lookup
+                    ann_dataset_key = f'{dataset_name}_instances'
+                    if ann_dataset_key in self.coco_datasets:
+                        category_name = self.coco_datasets[ann_dataset_key].loadCats(
+                            ids=category_id
+                        )[0]['name']
+                    else:
+                        category_name = f"category_{category_id}"
+            except Exception as e:
+                self.logger.warning(f"Could not get category name for {category_id}: {e}")
                 category_name = f"category_{category_id}"
             
             # Store transformed object data
@@ -377,10 +465,13 @@ def main():
                        help='Directory containing MSCOCO annotation files')
     parser.add_argument('--mscoco-images-dir',
                        help='Directory containing original MSCOCO images')
+    parser.add_argument('--use-cocostuff',
+                       action='store_true',
+                       help='Use COCO-Stuff annotations (172 classes: 80 things + 91 stuff) instead of COCO instances only (80 classes)')
     parser.add_argument('--verbose', '-v',
                        action='store_true',
                        help='Enable verbose logging')
-    
+
     args = parser.parse_args()
     
     # Check required directories
@@ -402,6 +493,7 @@ def main():
         output_dir=args.output_dir,
         mscoco_annotations_dir=args.mscoco_annotations_dir,
         mscoco_images_dir=args.mscoco_images_dir,
+        use_cocostuff=args.use_cocostuff,
         verbose=args.verbose
     )
     

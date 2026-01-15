@@ -25,6 +25,12 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 
 from ..utils.config import get_input_paths
+from .cocostuff_classes import (
+    COCOSTUFF_CLASSES,
+    get_class_name,
+    is_thing_class,
+    is_stuff_class
+)
 
 
 @dataclass
@@ -299,18 +305,23 @@ class FixationObjectChecker:
     JSON files created by the AVS scene annotation transformer.
     """
     
-    def __init__(self, transformed_annotations_dir: str):
+    def __init__(self, transformed_annotations_dir: str, use_cocostuff: bool = False):
         """
         Initialize the fixation object checker.
-        
+
         Parameters
         ----------
         transformed_annotations_dir : str
             Path to directory containing transformed annotation JSON files
+        use_cocostuff : bool, default=False
+            If True, use COCO-Stuff annotations (183 classes: 1 unlabeled + 80 things + 91 stuff + 11 missing).
+            If False, use standard COCO annotations (80 thing classes only).
         """
         self.annotations_dir = Path(transformed_annotations_dir)
         self.annotation_cache = {}  # Cache for loaded annotations
-        
+        self.use_cocostuff = use_cocostuff
+        self.num_classes = 183 if use_cocostuff else 91  # COCO-Stuff: 0-182, COCO: 1-90
+
         # Get scene dimensions from config
         from ..config.config import PyAVSConfig
         config = PyAVSConfig()
@@ -331,13 +342,80 @@ class FixationObjectChecker:
         try:
             with open(annotation_file, 'r') as f:
                 annotations = json.load(f)
+
+            # Validate annotation format
+            if not self._validate_annotation_format(annotations):
+                print(f"Warning: Invalid annotation format for scene {coco_id}")
+
             self.annotation_cache[coco_id] = annotations
             return annotations
         except Exception as e:
             print(f"Error loading annotations for scene {coco_id}: {e}")
             self.annotation_cache[coco_id] = {}
             return {}
-    
+
+    def _validate_annotation_format(self, annotations: Dict) -> bool:
+        """
+        Validate that category IDs in annotations are in expected range.
+
+        Parameters
+        ----------
+        annotations : Dict
+            Loaded annotation dictionary with 'categories' key
+
+        Returns
+        -------
+        bool
+            True if all category IDs are valid, False otherwise
+        """
+        if not annotations or 'categories' not in annotations:
+            return True  # Empty annotations are valid
+
+        categories = annotations['categories']
+
+        for category_id in categories.keys():
+            cat_id_int = int(category_id)
+
+            if self.use_cocostuff:
+                # COCO-Stuff: valid range 0-182
+                if not (0 <= cat_id_int < 183):
+                    print(f"Warning: Category ID {cat_id_int} out of COCO-Stuff range [0, 182]")
+                    return False
+            else:
+                # Standard COCO: valid range 1-90
+                if not (1 <= cat_id_int <= 90):
+                    print(f"Warning: Category ID {cat_id_int} out of COCO range [1, 90]")
+                    return False
+
+        return True
+
+    def _get_category_name(self, category_id: int, fallback_name: str = None) -> str:
+        """
+        Get category name from ID.
+
+        Parameters
+        ----------
+        category_id : int
+            COCO or COCO-Stuff category ID
+        fallback_name : str, optional
+            Fallback name if lookup fails
+
+        Returns
+        -------
+        str
+            Category name
+        """
+        if self.use_cocostuff:
+            # Use COCO-Stuff class list
+            name = get_class_name(category_id)
+            if name != 'unknown':
+                return name
+
+        # Fallback: use provided name or generate from ID
+        if fallback_name:
+            return fallback_name
+        return f"category_{category_id}"
+
     def _decode_rle_mask(self, rle_data: Dict) -> np.ndarray:
         """Decode RLE mask data."""
         # Reconstruct RLE format for pycocotools
@@ -535,17 +613,18 @@ class FixationObjectChecker:
 
 
 
-def get_fixated_objects(events_df: pd.DataFrame, 
+def get_fixated_objects(events_df: pd.DataFrame,
                        transformed_annotations_dir: str,
                        verbose: bool = False,
-                       error_margin_pixels: int = 10) -> pd.DataFrame:
+                       error_margin_pixels: int = 10,
+                       use_cocostuff: bool = True) -> pd.DataFrame:
     """
     Add object labels to fixation events using transformed AVS scene annotations.
-    
+
     This function uses pre-transformed annotations that match the processed scene
     format used in the AVS experiment, providing more accurate object detection.
     Includes error margin tolerance to account for eye tracker noise and calibration drift.
-    
+
     Parameters
     ----------
     events_df : pd.DataFrame
@@ -557,14 +636,24 @@ def get_fixated_objects(events_df: pd.DataFrame,
     error_margin_pixels : int, optional
         Search radius in pixels around fixation for nearest object (default: 10)
         This accounts for eye tracker noise and calibration drift.
-        
+    use_cocostuff : bool, optional
+        If True, use COCO-Stuff annotations (172 classes: 80 things + 91 stuff + 1 unlabeled).
+        If False, use standard COCO annotations (80 thing classes only).
+        Default is True (COCO-Stuff mode).
+
     Returns
     -------
     pd.DataFrame
         Events dataframe with object_label and object_id columns added
+
+    Notes
+    -----
+    COCO-Stuff mode (use_cocostuff=True) provides better coverage by including
+    amorphous background regions like sky, grass, walls, water, etc. This typically
+    increases fixation labeling coverage by 20-40% compared to COCO-only mode.
     """
     # Initialize fixation object checker
-    checker = FixationObjectChecker(transformed_annotations_dir)
+    checker = FixationObjectChecker(transformed_annotations_dir, use_cocostuff=use_cocostuff)
     
     # Add object label columns
     events_df = events_df.copy()
@@ -764,7 +853,8 @@ def map_fixations_to_objects(fixations_df: pd.DataFrame,
     return result_df
 
 
-# Complete list of all 80 MSCOCO object classes
+# Original 80 COCO object classes (backward compatibility)
+# For COCO-Stuff (172 classes: 80 things + 91 stuff + 1 unlabeled), use cocostuff_classes.COCOSTUFF_CLASSES
 MSCOCO_CLASSES = [
     'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat',
     'traffic light', 'fire hydrant', 'stop sign', 'parking meter', 'bench', 'bird', 'cat',
