@@ -31,7 +31,7 @@ import pycocotools.mask
 from pycocotools.coco import COCO
 
 # Import pyAVS config
-from ..config.config import PyAVSConfig
+from pyavs.config.config import PyAVSConfig
 
 # Import COCO-Stuff utilities
 from .cocostuff_classes import (
@@ -164,7 +164,11 @@ class AVSSceneAnnotationTransformer:
         # Get stuff annotations (if using COCO-Stuff)
         if self.use_cocostuff:
             stuff_key = f'{dataset_name}_stuff'
+            #print(self.coco_datasets)
+            #print("stuff key:", dataset_name+"_stuff")
+            
             if stuff_key in self.coco_datasets:
+                print("found stuff key", "loading scene", coco_id)
                 try:
                     ann_ids = self.coco_datasets[stuff_key].getAnnIds(
                         imgIds=coco_id, iscrowd=None
@@ -253,15 +257,21 @@ class AVSSceneAnnotationTransformer:
             try:
                 img_info = coco.loadImgs(coco_id)
                 if img_info:
+                    info_msg = f"Found COCO ID {coco_id} in dataset {dataset_name}"
+                    self.logger.debug(info_msg)
+                    # remove the suffix (_instances or _stuff)
+                    dataset_name = dataset_name.split('_')[0]
                     return dataset_name
+        
             except:
-                continue
+                warning_msg = f"COCO ID {coco_id} not found in dataset {dataset_name}"
+                self.logger.debug(warning_msg)
         return None
     
     def _get_original_image_size(self, coco_id: int, dataset_name: str) -> Optional[Tuple[int, int]]:
         """Get original image dimensions from COCO metadata."""
         try:
-            img_info = self.coco_datasets[dataset_name].loadImgs(coco_id)[0]
+            img_info = self.coco_datasets[dataset_name+"_instances"].loadImgs(coco_id)[0]
             return img_info['width'], img_info['height']
         except:
             self.logger.warning(f"Could not get image size for COCO ID {coco_id}")

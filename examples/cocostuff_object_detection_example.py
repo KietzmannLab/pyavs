@@ -228,8 +228,8 @@ def plot_coverage_comparison(coco_fixations, cocostuff_fixations, total_fixation
     print("=" * 70)
 
     # Setup styling
-    sns.set_style('whitegrid')
-    sns.set_context('notebook')
+    #sns.set_style('whitegrid')
+    sns.set_context('poster')
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
@@ -353,7 +353,7 @@ def main():
         '--subjects', '-s',
         nargs='+',
         type=int,
-        default=[1, 2, 3],
+        default=[1,],
         help='Subject IDs to process (default: 1 2 3)'
     )
 
@@ -361,7 +361,7 @@ def main():
         '--sessions', '-sess',
         nargs='+',
         type=int,
-        default=[1, 2, 3, 4],
+        default=[1,],
         help='Sessions to include (default: 1 2 3 4)'
     )
 
