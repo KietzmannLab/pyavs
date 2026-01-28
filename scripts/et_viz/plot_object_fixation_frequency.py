@@ -224,13 +224,13 @@ def main():
 
     DATA_PATH = config.data_path
     TRANSFORMED_ANNOTATIONS_DIR = os.path.join(
-        DATA_PATH, "AVS-UTILS", "avs_scene_annotations", "coco_objects"
+        DATA_PATH, "AVS-UTILS", "avs_scene_annotations", "cocostuff"
     )
     OUTPUT_DIR = "/share/klab/psulewski/psulewski/pyavs/et_viz_output"
 
     # Define subjects and sessions to process
     # Adjust these lists based on available data
-    SUBJECTS = list(range(1, 61))  # Subjects 1-60
+    SUBJECTS = list(range(1, 6))  # Subjects 1-60
     SESSIONS = list(range(1, 11))  # Sessions 1-10
 
     # Check paths

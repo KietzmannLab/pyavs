@@ -241,10 +241,13 @@ def plot_session_timeline(data_df: pd.DataFrame, output_dir: str,
     plt.figure(figsize=(8, 5))
 
     # Scatter plot with session coloring
+    # add a session time rank variable for coloring
+    data_df['session_rank'] = data_df.groupby('subject')['days_from_first'].rank(method='dense').astype(int)
+
     scatter = plt.scatter(
         data_df['days_from_first'],
         data_df['subject'],
-        c=data_df['session'],
+        c=data_df['session_rank'],
         cmap='magma',
         s=300,
         alpha=0.9,
