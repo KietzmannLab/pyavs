@@ -19,12 +19,14 @@ Author: P. Sulewski (psulewski@uos.de)
 
 import argparse
 import os
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Tuple
+from collections import defaultdict
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import mne
 import logging
+from joblib import Parallel, delayed
 
 import pyavs
 from pyavs.preprocessing.composer import AVSComposer
@@ -137,6 +139,37 @@ def load_session_epochs(
         return None
 
 
+def _load_session_wrapper(
+    subject: int,
+    session: int,
+    event_type: str,
+    data_path: str,
+    tmin: float,
+    tmax: float,
+    use_offset: bool,
+    recording: str,
+    verbose: bool
+) -> Tuple[int, int, Optional[mne.Epochs]]:
+    """
+    Wrapper for load_session_epochs that returns subject/session IDs with epochs.
+
+    This wrapper is needed for parallel processing to track which result
+    belongs to which subject-session pair.
+    """
+    epochs = load_session_epochs(
+        subject=subject,
+        session=session,
+        event_type=event_type,
+        data_path=data_path,
+        tmin=tmin,
+        tmax=tmax,
+        use_offset=use_offset,
+        recording=recording,
+        verbose=verbose
+    )
+    return subject, session, epochs
+
+
 def aggregate_epochs(
     subjects: List[int],
     sessions: List[int],
@@ -146,10 +179,13 @@ def aggregate_epochs(
     tmax: float,
     use_offset: bool,
     recording: str = "scene",
-    verbose: bool = False
+    verbose: bool = False,
+    n_jobs: int = -1
 ) -> Dict[int, mne.Evoked]:
     """
     Aggregate epochs across subjects/sessions and compute evoked per subject.
+
+    Uses joblib for parallel processing of subject-session pairs.
 
     Parameters
     ----------
@@ -171,32 +207,44 @@ def aggregate_epochs(
         Recording context
     verbose : bool
         Enable verbose output
+    n_jobs : int
+        Number of parallel jobs (-1 for all CPUs, default: -1)
 
     Returns
     -------
     Dict[int, mne.Evoked]
         Dictionary mapping subject ID to evoked response
     """
+    # Create all subject-session pairs
+    pairs = [(subj, sess) for subj in subjects for sess in sessions]
+    logger.info(f"Processing {len(pairs)} subject-session pairs with n_jobs={n_jobs}")
+
+    # Load epochs in parallel
+    results = Parallel(n_jobs=n_jobs, verbose=10 if verbose else 0)(
+        delayed(_load_session_wrapper)(
+            subject=subj,
+            session=sess,
+            event_type=event_type,
+            data_path=data_path,
+            tmin=tmin,
+            tmax=tmax,
+            use_offset=use_offset,
+            recording=recording,
+            verbose=verbose
+        )
+        for subj, sess in pairs
+    )
+
+    # Group epochs by subject
+    epochs_by_subject = defaultdict(list)
+    for subject, session, epochs in results:
+        if epochs is not None and len(epochs) > 0:
+            epochs_by_subject[subject].append(epochs)
+
+    # Compute evoked for each subject
     evokeds_per_subject = {}
-
     for subject in subjects:
-        all_epochs = []
-
-        for session in sessions:
-            epochs = load_session_epochs(
-                subject=subject,
-                session=session,
-                event_type=event_type,
-                data_path=data_path,
-                tmin=tmin,
-                tmax=tmax,
-                use_offset=use_offset,
-                recording=recording,
-                verbose=verbose
-            )
-
-            if epochs is not None and len(epochs) > 0:
-                all_epochs.append(epochs)
+        all_epochs = epochs_by_subject.get(subject, [])
 
         if all_epochs:
             # Concatenate all epochs for this subject
@@ -356,7 +404,8 @@ def generate_erp_figures(
     ch_type: str = 'mag',
     fmt: str = 'both',
     dpi: int = 300,
-    verbose: bool = False
+    verbose: bool = False,
+    n_jobs: int = -1
 ) -> None:
     """
     Main orchestration function to generate all ERP figures.
@@ -387,6 +436,8 @@ def generate_erp_figures(
         Resolution for raster output
     verbose : bool
         Enable verbose output
+    n_jobs : int
+        Number of parallel jobs (-1 for all CPUs)
     """
     logger.info("=" * 70)
     logger.info("Generating Event ERP Figures")
@@ -416,7 +467,7 @@ def generate_erp_figures(
             logger.info(f"\nProcessing {event_type} {timing_label}...")
 
             try:
-                # Aggregate epochs across subjects
+                # Aggregate epochs across subjects (parallel processing)
                 evokeds_per_subject = aggregate_epochs(
                     subjects=subjects,
                     sessions=sessions,
@@ -426,7 +477,8 @@ def generate_erp_figures(
                     tmax=tmax,
                     use_offset=use_offset,
                     recording="scene",
-                    verbose=verbose
+                    verbose=verbose,
+                    n_jobs=n_jobs
                 )
 
                 if not evokeds_per_subject:
@@ -557,6 +609,13 @@ def main():
         help='Enable verbose logging'
     )
 
+    parser.add_argument(
+        '--n-jobs', '-j',
+        type=int,
+        default=-1,
+        help='Number of parallel jobs (-1 for all CPUs, default: -1)'
+    )
+
     args = parser.parse_args()
 
     # Setup logging
@@ -582,7 +641,8 @@ def main():
         ch_type=args.ch_type,
         fmt=args.format,
         dpi=args.dpi,
-        verbose=args.verbose
+        verbose=args.verbose,
+        n_jobs=args.n_jobs
     )
 
 
