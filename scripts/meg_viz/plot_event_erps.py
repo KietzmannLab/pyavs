@@ -390,8 +390,74 @@ def plot_erp_mean(
         logger.info(f"Saved: {pdf_file}")
 
     plt.close()
-    
-plot_erp_all_channels(
+
+
+def plot_erp_all_channels(
+    evokeds_per_subject: Dict[int, mne.Evoked],
+    event_type: str,
+    timing: str,
+    ch_type: str,
+    output_dir: str,
+    fmt: str = 'both',
+    dpi: int = 300
+) -> None:
+    """
+    Create ERP plot showing all channels using MNE's plotting functions.
+
+    Uses MNE's evoked.plot() to show butterfly plot of all channels
+    with proper sensor layout.
+
+    Parameters
+    ----------
+    evokeds_per_subject : Dict[int, mne.Evoked]
+        Dictionary mapping subject ID to evoked response
+    event_type : str
+        Event type for labeling
+    timing : str
+        'onset' or 'offset'
+    ch_type : str
+        Channel type ('mag' or 'grad')
+    output_dir : str
+        Output directory
+    fmt : str
+        Output format ('png', 'pdf', or 'both')
+    dpi : int
+        Resolution for raster output
+    """
+    if not evokeds_per_subject:
+        logger.warning("No evoked data to plot")
+        return
+
+    # Get evokeds and pick channel type
+    evokeds = list(evokeds_per_subject.values())
+    evokeds_picked = [ev.copy().pick(ch_type) for ev in evokeds]
+
+    # Compute grand average (returns an Evoked object with all channels)
+    grand_avg = mne.grand_average(evokeds_picked)
+
+    # Create butterfly plot with all channels
+    fig = grand_avg.plot(
+        picks=ch_type,
+        spatial_colors=True,
+        gfp=True,
+        show=False,
+        time_unit='ms'
+    )
+
+    # Save figure
+    base_name = f"{event_type}_{timing}_erp_all_channels"
+
+    if fmt in ['png', 'both']:
+        png_file = os.path.join(output_dir, f'{base_name}.png')
+        fig.savefig(png_file, dpi=dpi, bbox_inches='tight', facecolor='white', edgecolor='none')
+        logger.info(f"Saved: {png_file}")
+
+    if fmt in ['pdf', 'both']:
+        pdf_file = os.path.join(output_dir, f'{base_name}.pdf')
+        fig.savefig(pdf_file, format='pdf', bbox_inches='tight', facecolor='white', edgecolor='none')
+        logger.info(f"Saved: {pdf_file}")
+
+    plt.close(fig)
 
 
 def generate_erp_figures(
@@ -487,17 +553,9 @@ def generate_erp_figures(
                     logger.warning(f"No data for {event_type} {timing_label}")
                     continue
 
-                # Compute grand average
-                times, erp_mean, erp_sem = compute_grand_average(
-                    evokeds_per_subject,
-                    ch_type=ch_type
-                )
-
-                # Generate plot
-                plot_erp_mean(
-                    times=times,
-                    erp_mean=erp_mean,
-                    erp_sem=erp_sem,
+                # Generate all-channels plot using MNE's plotting
+                plot_erp_all_channels(
+                    evokeds_per_subject=evokeds_per_subject,
                     event_type=event_type,
                     timing=timing_label,
                     ch_type=ch_type,
