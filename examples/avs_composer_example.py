@@ -135,65 +135,18 @@ def main():
     
     for event_type in event_types:
         logger.info(f"\n   Processing {event_type} events...")
-        
+
         # Get annotations for this event type
+        # Use onset_offset parameter to control timing (onset vs offset)
         composer.get_et_annotations(
             event_type=event_type,
             recording=recording,
             exclude_last_fixation=True,
             add_cross_event_info=True,
-            preprocessed=True
+            preprocessed=True,
+            onset_offset="offset" if onset_offset else "onset"
         )
         logger.info(f"   Loaded {len(composer.et_events)} {event_type} events")
-        
-        # NEW: Apply ET event offset timing if enabled (fringe feature)
-        if onset_offset:
-            logger.info(f"   Applying ET event offset timing (time_in_trial + duration)")
-            
-            # Check if we have the required columns
-            if 'time_in_trial' in composer.et_events.columns and 'duration' in composer.et_events.columns:
-                # Create modified timing based on event end (onset + duration)
-                original_times = composer.et_events['time_in_trial'].copy()
-                durations = composer.et_events['duration'].copy()
-                offset_times = original_times + durations
-                
-                # Update the events timing
-                composer.et_events['time_in_trial'] = offset_times
-                
-                logger.info(f"   Updated {len(composer.et_events)} events to use offset timing")
-                logger.info(f"   Example: original={original_times.iloc[0]:.3f}s + duration={durations.iloc[0]:.3f}s = offset={offset_times.iloc[0]:.3f}s")
-                
-                # Need to recreate annotations with new timing by calling add_fix_event_trigger again
-                # This is a bit hacky but necessary for this fringe feature
-                try:
-                    from pyavs.preprocessing.trigger_tools import add_fix_event_trigger
-                    
-                    logger.info(f"   Recreating MEG annotations with offset timing...")
-                    composer.raws_annotated, missing_trials = add_fix_event_trigger(
-                        composer.raws_concatenated,
-                        blocks=composer.blocks_this_session,
-                        et_events=composer.et_events,
-                        session=composer.session_num,
-                        block_trigger_offset=1000,
-                        stim_channel='STI101',
-                        verbose=True,
-                        recording="scene"
-                    )
-                    
-                    if len(missing_trials) > 0:
-                        logger.warning(f"   {len(missing_trials)} trials could not be annotated with offset timing")
-                        
-                    logger.info(f"   Recreated annotations: {len(composer.raws_annotated.annotations)}")
-                    
-                except Exception as e:
-                    logger.error(f"   Error recreating annotations with offset timing: {e}")
-                    logger.info(f"   Continuing with original annotations...")
-                    
-            else:
-                logger.warning(f"   Cannot apply offset timing: missing required columns")
-                logger.info(f"   Required: 'time_in_trial', 'duration'")
-                logger.info(f"   Available: {list(composer.et_events.columns)}")
-        
         logger.info(f"   Added {event_type} annotations to MEG data")
         logger.info(f"   Total annotations: {len(composer.raws_annotated.annotations)}")
         

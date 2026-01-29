@@ -720,12 +720,13 @@ class AVSComposer:
     def get_et_annotations(
         self,
         event_type: str = "fixation",
-        recording = "scene",
+        recording: str = "scene",
         exclude_last_fixation: bool = True,
         get_object_labels: bool = False,
         add_cross_event_info: bool = True,
         preprocessed: bool = True,
-        save_annotated_raw: bool = False
+        save_annotated_raw: bool = False,
+        onset_offset: str = "onset"
     ):
         """
         Extracts annotations from the eye tracker data.
@@ -748,6 +749,11 @@ class AVSComposer:
             Whether the eye tracking data is preprocessed. Defaults to True.
         save_annotated_raw : bool, optional
             Whether to save the annotated raws. Defaults to False.
+        onset_offset : str, optional
+            Whether to use event onset or offset timing. Defaults to "onset".
+            Valid options: ["onset", "offset"].
+            When "offset", time_in_trial is shifted by duration to align epochs
+            to event offsets instead of onsets.
         """
         
         # Now we have to read in the eye tracking events
@@ -783,6 +789,23 @@ class AVSComposer:
                 removed_count = len(self.et_events) - len(self.et_events[self.et_events["fix_sequence_from_last"] != 0])
                 logger.info(f"Removed {removed_count} fixation events because they were the last fixation event on a scene")
             self.et_events = self.et_events[self.et_events["fix_sequence_from_last"] != 0]
+
+        # Apply offset timing if requested
+        if onset_offset not in ["onset", "offset"]:
+            raise ValueError(f"onset_offset must be 'onset' or 'offset', got '{onset_offset}'")
+
+        if onset_offset == "offset":
+            if self.verbose:
+                logger.info("Applying event offset timing (time_in_trial + duration)")
+            if 'time_in_trial' not in self.et_events.columns:
+                raise ValueError("et_events missing 'time_in_trial' column for offset timing")
+            if 'duration' not in self.et_events.columns:
+                raise ValueError("et_events missing 'duration' column for offset timing")
+
+            # Shift time_in_trial by duration to get event offset timing
+            self.et_events['time_in_trial'] = (
+                self.et_events['time_in_trial'] + self.et_events['duration']
+            )
 
         # Now we add fixation based triggers to the MEG signal
         self.raws_annotated, missing_trials = add_fix_event_trigger(
