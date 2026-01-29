@@ -249,7 +249,7 @@ def aggregate_epochs(
         if all_epochs:
             # Concatenate all epochs for this subject
             if len(all_epochs) > 1:
-                combined_epochs = mne.concatenate_epochs(all_epochs)
+                combined_epochs = mne.concatenate_epochs(all_epochs, on_mismatch='warn')
             else:
                 combined_epochs = all_epochs[0]
 
@@ -313,7 +313,7 @@ def compute_grand_average(
     return times, erp_mean, erp_sem
 
 
-def plot_erp(
+def plot_erp_mean(
     times: np.ndarray,
     erp_mean: np.ndarray,
     erp_sem: np.ndarray,
@@ -390,6 +390,8 @@ def plot_erp(
         logger.info(f"Saved: {pdf_file}")
 
     plt.close()
+    
+plot_erp_all_channels(
 
 
 def generate_erp_figures(
@@ -492,7 +494,7 @@ def generate_erp_figures(
                 )
 
                 # Generate plot
-                plot_erp(
+                plot_erp_mean(
                     times=times,
                     erp_mean=erp_mean,
                     erp_sem=erp_sem,
@@ -533,22 +535,22 @@ def main():
         '--output-dir', '-o',
         type=str,
         default='/share/klab/psulewski/pyavs/meg_quality/',
-        help='Output directory for figures (default: /share/klab/psulewski/pyavs/meg_quality/)'
+        help='Output directory for figures (default: /share/klab/psulewski/psulewski/pyavs/meg_quality/)'
     )
 
     parser.add_argument(
         '--subjects', '-s',
         nargs='+',
         type=int,
-        default=[1, 2, 3, 4, 5],
-        help='Subject IDs to process (default: 1 2 3 4 5)'
+        default=[4],
+        help='Subject IDs to process (default: 4)'
     )
 
     parser.add_argument(
         '--sessions', '-sess',
         nargs='+',
         type=int,
-        default=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+        default=[1, 2],
         help='Sessions to include (default: 1-10)'
     )
 
@@ -556,7 +558,7 @@ def main():
         '--event-types', '-e',
         nargs='+',
         type=str,
-        default=['blink', 'fixation', 'saccade', 'scene'],
+        default=['blink',], #'fixation', 'saccade', 'scene'],
         choices=['blink', 'fixation', 'saccade', 'scene'],
         help='Event types to process (default: blink fixation saccade scene)'
     )
@@ -564,8 +566,8 @@ def main():
     parser.add_argument(
         '--timing', '-t',
         choices=['onset', 'offset', 'both'],
-        default='both',
-        help='Timing mode: onset, offset, or both (default: both)'
+        default='onset',
+        help='Timing mode: onset, offset, or both (default: onset)'
     )
 
     parser.add_argument(
@@ -585,8 +587,8 @@ def main():
     parser.add_argument(
         '--ch-type',
         choices=['mag', 'grad'],
-        default='mag',
-        help='Channel type: mag or grad (default: mag)'
+        default='grad',
+        help='Channel type: mag or grad (default: grad)'
     )
 
     parser.add_argument(
