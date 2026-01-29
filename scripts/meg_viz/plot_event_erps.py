@@ -205,8 +205,8 @@ def aggregate_epochs(
             else:
                 combined_epochs = all_epochs[0]
 
-            # Compute evoked for this subject
-            evoked = combined_epochs.average()
+            # Compute evoked for this subject using median (more robust to artifacts)
+            evoked = combined_epochs.average(method='median')
             evokeds_per_subject[subject] = evoked
             logger.info(f"Subject {subject}: {len(combined_epochs)} total epochs")
         else:
@@ -222,6 +222,9 @@ def compute_grand_average(
     """
     Compute grand average ERP with SEM across subjects.
 
+    Computes the mean across channels for each subject's evoked response,
+    then computes mean and SEM across subjects.
+
     Parameters
     ----------
     evokeds_per_subject : Dict[int, mne.Evoked]
@@ -232,7 +235,7 @@ def compute_grand_average(
     Returns
     -------
     tuple
-        (times, grand_avg, sem) arrays for plotting
+        (times, mean_erp, sem) arrays for plotting
     """
     if not evokeds_per_subject:
         raise ValueError("No evoked responses to average")
@@ -243,32 +246,29 @@ def compute_grand_average(
     # Pick channel type for each evoked
     evokeds_picked = [ev.copy().pick(ch_type) for ev in evokeds]
 
-    # Compute grand average using MNE
-    grand_avg = mne.grand_average(evokeds_picked)
-
-    # Compute GFP (global field power) for each subject
-    # GFP = RMS across channels
-    gfp_all = []
+    # Compute channel-averaged ERP for each subject
+    erp_all = []
     for ev in evokeds_picked:
         data = ev.data  # channels x times
-        gfp = np.sqrt(np.mean(data ** 2, axis=0))
-        gfp_all.append(gfp)
+        # Mean across channels (preserves polarity)
+        erp = np.mean(data, axis=0)
+        erp_all.append(erp)
 
-    gfp_all = np.array(gfp_all)  # subjects x times
+    erp_all = np.array(erp_all)  # subjects x times
 
     # Compute mean and SEM across subjects
-    gfp_mean = np.mean(gfp_all, axis=0)
-    gfp_sem = np.std(gfp_all, axis=0) / np.sqrt(len(gfp_all))
+    erp_mean = np.mean(erp_all, axis=0)
+    erp_sem = np.std(erp_all, axis=0) / np.sqrt(len(erp_all))
 
-    times = grand_avg.times * 1000  # Convert to ms
+    times = evokeds_picked[0].times * 1000  # Convert to ms
 
-    return times, gfp_mean, gfp_sem
+    return times, erp_mean, erp_sem
 
 
 def plot_erp(
     times: np.ndarray,
-    gfp_mean: np.ndarray,
-    gfp_sem: np.ndarray,
+    erp_mean: np.ndarray,
+    erp_sem: np.ndarray,
     event_type: str,
     timing: str,
     ch_type: str,
@@ -283,10 +283,10 @@ def plot_erp(
     ----------
     times : np.ndarray
         Time points in milliseconds
-    gfp_mean : np.ndarray
-        Mean GFP across subjects
-    gfp_sem : np.ndarray
-        SEM of GFP across subjects
+    erp_mean : np.ndarray
+        Mean ERP across subjects
+    erp_sem : np.ndarray
+        SEM of ERP across subjects
     event_type : str
         Event type for labeling
     timing : str
@@ -305,11 +305,11 @@ def plot_erp(
     plt.figure(figsize=(8, 6))
 
     # Plot mean with SEM shading
-    plt.plot(times, gfp_mean, color='cornflowerblue', linewidth=2)
+    plt.plot(times, erp_mean, color='cornflowerblue', linewidth=2)
     plt.fill_between(
         times,
-        gfp_mean - gfp_sem,
-        gfp_mean + gfp_sem,
+        erp_mean - erp_sem,
+        erp_mean + erp_sem,
         color='cornflowerblue',
         alpha=0.3
     )
@@ -434,7 +434,7 @@ def generate_erp_figures(
                     continue
 
                 # Compute grand average
-                times, gfp_mean, gfp_sem = compute_grand_average(
+                times, erp_mean, erp_sem = compute_grand_average(
                     evokeds_per_subject,
                     ch_type=ch_type
                 )
@@ -442,8 +442,8 @@ def generate_erp_figures(
                 # Generate plot
                 plot_erp(
                     times=times,
-                    gfp_mean=gfp_mean,
-                    gfp_sem=gfp_sem,
+                    erp_mean=erp_mean,
+                    erp_sem=erp_sem,
                     event_type=event_type,
                     timing=timing_label,
                     ch_type=ch_type,
