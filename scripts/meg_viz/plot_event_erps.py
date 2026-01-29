@@ -234,11 +234,20 @@ def aggregate_epochs(
         )
         for subj, sess in pairs
     )
-
+    # use mne Scaler for median centering per channel
+    from mne.decoding import Scaler
+    scaler = Scaler(scalings='median', with_std=False)
     # Group epochs by subject
     epochs_by_subject = defaultdict(list)
     for subject, session, epochs in results:
         if epochs is not None and len(epochs) > 0:
+            
+            epochs_data = epochs.get_data()
+            logger.info(f"Subject {subject}, Session {session}: {len(epochs)} epochs, data shape {epochs_data.shape}")
+            # Apply median centering
+            epochs_data = scaler.fit_transform(epochs_data)
+            epochs.data = epochs_data  # Update epochs data
+
             epochs_by_subject[subject].append(epochs)
 
     # Compute evoked for each subject
@@ -255,6 +264,8 @@ def aggregate_epochs(
 
             # Compute evoked for this subject using median (more robust to artifacts)
             evoked = combined_epochs.average(method='median')
+            # add nave 
+            evoked.nave = len(combined_epochs)
             evokeds_per_subject[subject] = evoked
             logger.info(f"Subject {subject}: {len(combined_epochs)} total epochs")
         else:
@@ -600,7 +611,7 @@ def main():
         '--subjects', '-s',
         nargs='+',
         type=int,
-        default=[4],
+        default=[5],
         help='Subject IDs to process (default: 4)'
     )
 
@@ -608,7 +619,7 @@ def main():
         '--sessions', '-sess',
         nargs='+',
         type=int,
-        default=[1, 2],
+        default=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
         help='Sessions to include (default: 1-10)'
     )
 
@@ -624,7 +635,7 @@ def main():
     parser.add_argument(
         '--timing', '-t',
         choices=['onset', 'offset', 'both'],
-        default='onset',
+        default='both',
         help='Timing mode: onset, offset, or both (default: onset)'
     )
 
