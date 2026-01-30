@@ -1,14 +1,22 @@
 #!/usr/bin/env python3
 """
-Plot saccade duration quartile heatmap showing RMS over gradiometers.
+Plot saccade duration quartile heatmap showing GFP over gradiometers.
 
 This script loads precomputed saccade event epochs during scene viewing and
-plots a duration quartile-sorted heatmap showing RMS over all gradiometers.
-Saccades are matched to their associated fixations to obtain fixation duration
-for sorting.
+plots a duration quartile-sorted heatmap showing GFP (Global Field Power)
+over all gradiometers. Saccades are matched to their associated fixations
+to obtain fixation duration for sorting.
+
+When multiple sessions are requested, data is concatenated across sessions
+before computing quantiles and plotting a single combined heatmap.
 
 Usage:
     python plot_saccade_duration_heatmap.py --subject 1 --session 1 \
+        --data-path /share/klab/datasets/avs/ \
+        --output-dir /share/klab/psulewski/psulewski/pyavs/meg_quality/
+
+    # Concatenate across sessions
+    python plot_saccade_duration_heatmap.py --subject 1 --sessions 1 2 3 4 5 \
         --data-path /share/klab/datasets/avs/ \
         --output-dir /share/klab/psulewski/psulewski/pyavs/meg_quality/
 
@@ -19,7 +27,7 @@ import argparse
 import os
 import sys
 from pathlib import Path
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -94,6 +102,11 @@ def load_saccade_grad_data(
     if not csv_metadata.empty:
         metadata_df = csv_metadata
 
+    # Add subject/session info to metadata
+    metadata_df = metadata_df.copy()
+    metadata_df['subject_id'] = subject_id
+    metadata_df['session'] = session
+
     # Check if associated_fixation_duration already exists
     if 'associated_fixation_duration' in metadata_df.columns:
         logger.info("Found associated_fixation_duration in metadata")
@@ -129,9 +142,7 @@ def load_saccade_grad_data(
     logger.info(f"Matched {len(matched_saccades)} saccade-fixation pairs")
 
     # Merge associated_fixation_duration into metadata
-    # We need to match by sceneID and start_time or sac_sequence
     if 'sceneID' in metadata_df.columns and 'sceneID' in matched_saccades.columns:
-        # Create a mapping from (sceneID, sac_sequence) to associated_fixation_duration
         if 'sac_sequence' in matched_saccades.columns and 'sac_sequence' in metadata_df.columns:
             matched_saccades['key'] = (
                 matched_saccades['sceneID'].astype(str) + '_' +
@@ -144,11 +155,76 @@ def load_saccade_grad_data(
             duration_map = matched_saccades.set_index('key')['associated_fixation_duration']
             metadata_df['associated_fixation_duration'] = metadata_df['key'].map(duration_map)
             metadata_df.drop(columns=['key'], inplace=True)
-        
+
     n_matched = metadata_df['associated_fixation_duration'].notna().sum()
     logger.info(f"Matched {n_matched}/{len(metadata_df)} epochs with fixation durations")
 
     return grad_data, metadata_df, times
+
+
+def load_and_concatenate_sessions(
+    subject_id: int,
+    sessions: List[int],
+    data_path: str
+) -> Tuple[np.ndarray, pd.DataFrame, np.ndarray]:
+    """
+    Load and concatenate saccade epochs across multiple sessions.
+
+    Parameters
+    ----------
+    subject_id : int
+        Subject ID
+    sessions : list of int
+        Session numbers to concatenate
+    data_path : str
+        Path to data directory
+
+    Returns
+    -------
+    tuple
+        (grad_data, metadata, times)
+        - grad_data: concatenated array of shape (n_total_epochs, n_grad_channels, n_times)
+        - metadata: concatenated DataFrame with session info
+        - times: array of time points in seconds (same for all sessions)
+    """
+    all_grad_data = []
+    all_metadata = []
+    times = None
+
+    for session in sessions:
+        try:
+            grad_data, metadata, session_times = load_saccade_grad_data(
+                subject_id=subject_id,
+                session=session,
+                data_path=data_path
+            )
+
+            all_grad_data.append(grad_data)
+            all_metadata.append(metadata)
+
+            if times is None:
+                times = session_times
+            else:
+                # Verify times are consistent across sessions
+                if not np.allclose(times, session_times):
+                    logger.warning(f"Session {session} has different time points, using first session's times")
+
+            logger.info(f"Session {session}: {grad_data.shape[0]} epochs")
+
+        except Exception as e:
+            logger.warning(f"Failed to load session {session}: {e}")
+            continue
+
+    if len(all_grad_data) == 0:
+        raise ValueError(f"No data loaded for subject {subject_id}")
+
+    # Concatenate
+    concatenated_grad = np.concatenate(all_grad_data, axis=0)
+    concatenated_metadata = pd.concat(all_metadata, ignore_index=True)
+
+    logger.info(f"Concatenated {len(sessions)} sessions: {concatenated_grad.shape[0]} total epochs")
+
+    return concatenated_grad, concatenated_metadata, times
 
 
 def compute_duration_quantiles(
@@ -202,15 +278,18 @@ def compute_duration_quantiles(
         if np.sum(bin_mask) > 0:
             quantile_data[q] = np.median(valid_data[bin_mask], axis=0)
             quantile_median_durations[q] = np.median(valid_durations[bin_mask])
-        else: #Error
+        else:
             logger.error(f"No epochs in quantile {q}")
 
     return quantile_data, quantile_median_durations
 
 
-def compute_rms_over_grads(data: np.ndarray) -> np.ndarray:
+def compute_gfp_over_grads(data: np.ndarray) -> np.ndarray:
     """
-    Compute RMS over all gradiometer channels.
+    Compute GFP (Global Field Power) over all gradiometer channels.
+
+    GFP is the standard deviation across sensors at each time point,
+    measuring the spatial variability/non-uniformity of the field.
 
     Parameters
     ----------
@@ -220,20 +299,19 @@ def compute_rms_over_grads(data: np.ndarray) -> np.ndarray:
     Returns
     -------
     np.ndarray
-        RMS values of shape (n_quantiles, n_times)
+        GFP values of shape (n_quantiles, n_times)
     """
-    # RMS = sqrt(mean(data^2, axis=1))
-    rms = np.sqrt(np.nanmean(data ** 2, axis=1))
-    return rms
+    gfp = np.nanstd(data, axis=1)
+    return gfp
 
 
 def plot_heatmap(
-    rms_data: np.ndarray,
+    gfp_data: np.ndarray,
     times: np.ndarray,
     durations: np.ndarray,
     output_path: str,
     subject_id: int,
-    session: int,
+    sessions: List[int],
     tlims: Tuple[float, float] = (-0.2, 0.5)
 ) -> None:
     """
@@ -241,8 +319,8 @@ def plot_heatmap(
 
     Parameters
     ----------
-    rms_data : np.ndarray
-        RMS data of shape (n_quantiles, n_times)
+    gfp_data : np.ndarray
+        GFP data of shape (n_quantiles, n_times)
     times : np.ndarray
         Time points in seconds
     durations : np.ndarray
@@ -251,8 +329,8 @@ def plot_heatmap(
         Directory to save the output
     subject_id : int
         Subject ID
-    session : int
-        Session number
+    sessions : list of int
+        Session numbers included
     tlims : tuple
         Time limits for plotting (tmin, tmax) in seconds
     """
@@ -265,10 +343,10 @@ def plot_heatmap(
     # Find time indices within tlims
     time_mask = (times >= tlims[0]) & (times <= tlims[1])
     plot_times = times_ms[time_mask]
-    plot_data = rms_data[:, time_mask]
+    plot_data = gfp_data[:, time_mask]
 
-    
-    plot_data_ftcm = plot_data * 1e13  # Convert to fT/cm for gradiometers
+    # Convert to fT/cm for gradiometers
+    plot_data_ftcm = plot_data * 1e13
 
     plt.figure(figsize=(8, 8))
 
@@ -286,20 +364,7 @@ def plot_heatmap(
     # Add vertical dashed white line at t=0 (saccade onset)
     plt.axvline(x=0, color='white', linestyle='--')
 
-    # Add diagonal dotted white line showing fixation duration offset
-    # This line represents when the fixation ends relative to saccade onset
-    # For each quantile row, the fixation duration corresponds to when fixation ends
-    # Fixation starts after saccade, so the offset is at duration time
-    n_quantiles = len(durations)
-    for i, dur in enumerate(durations):
-        if not np.isnan(dur):
-            # Convert duration to ms and plot a point
-            dur_ms = dur * 1000
-            if tlims_ms[0] <= dur_ms <= tlims_ms[1]:
-                # Plot diagonal line segment
-                plt.plot(dur_ms, i + 0.5, 'w.', markersize=0.5)
-
-    # Draw the diagonal line as a continuous line
+    # Draw the diagonal line showing fixation duration offset
     valid_mask = ~np.isnan(durations)
     valid_durations_ms = durations[valid_mask] * 1000
     valid_indices = np.arange(len(durations))[valid_mask] + 0.5
@@ -314,7 +379,7 @@ def plot_heatmap(
 
     # Colorbar
     cbar = plt.colorbar(im)
-    cbar.set_label('gradiometer RMS [fT/cm]')
+    cbar.set_label('gradiometer GFP [fT/cm]')
 
     # Labels
     plt.xlabel('time [ms]')
@@ -323,12 +388,18 @@ def plot_heatmap(
     # Remove yticks (duration is continuous)
     plt.yticks([])
 
-    #sns.despine()
     plt.tight_layout()
 
     # Save figures
     os.makedirs(output_path, exist_ok=True)
-    base_filename = f"sub-{subject_id:02d}_ses-{session:02d}_saccade_duration_heatmap_rms_grad"
+
+    # Create filename based on sessions
+    if len(sessions) == 1:
+        session_str = f"ses-{sessions[0]:02d}"
+    else:
+        session_str = f"ses-{sessions[0]:02d}-{sessions[-1]:02d}"
+
+    base_filename = f"sub-{subject_id:02d}_{session_str}_saccade_duration_heatmap_gfp_grad"
 
     png_path = os.path.join(output_path, f"{base_filename}.png")
     pdf_path = os.path.join(output_path, f"{base_filename}.pdf")
@@ -341,21 +412,21 @@ def plot_heatmap(
     logger.info(f"Saved heatmap to {pdf_path}")
 
 
-def process_subject_session(
+def process_subject(
     subject_id: int,
-    session: int,
+    sessions: List[int],
     data_path: str,
     output_dir: str
 ) -> bool:
     """
-    Process heatmap for a single subject/session.
+    Process heatmap for a single subject, concatenating across sessions.
 
     Parameters
     ----------
     subject_id : int
         Subject ID
-    session : int
-        Session number
+    sessions : list of int
+        Session numbers to concatenate
     data_path : str
         Path to data directory
     output_dir : str
@@ -367,12 +438,19 @@ def process_subject_session(
         True if successful, False otherwise
     """
     try:
-        # Load data
-        grad_data, metadata, times = load_saccade_grad_data(
-            subject_id=subject_id,
-            session=session,
-            data_path=data_path
-        )
+        # Load and concatenate data across sessions
+        if len(sessions) == 1:
+            grad_data, metadata, times = load_saccade_grad_data(
+                subject_id=subject_id,
+                session=sessions[0],
+                data_path=data_path
+            )
+        else:
+            grad_data, metadata, times = load_and_concatenate_sessions(
+                subject_id=subject_id,
+                sessions=sessions,
+                data_path=data_path
+            )
 
         # Get durations
         if 'associated_fixation_duration' not in metadata.columns:
@@ -396,24 +474,24 @@ def process_subject_session(
             n_quantiles=min(N_QUANTILES, n_valid)
         )
 
-        # Compute RMS
-        rms_data = compute_rms_over_grads(quantile_data)
+        # Compute GFP
+        gfp_data = compute_gfp_over_grads(quantile_data)
 
         # Plot
         plot_heatmap(
-            rms_data=rms_data,
+            gfp_data=gfp_data,
             times=times,
             durations=quantile_durations,
             output_path=output_dir,
             subject_id=subject_id,
-            session=session,
+            sessions=sessions,
             tlims=TLIMS
         )
 
         return True
 
     except Exception as e:
-        logger.error(f"Error processing subject {subject_id}, session {session}: {e}")
+        logger.error(f"Error processing subject {subject_id}: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -422,7 +500,7 @@ def process_subject_session(
 def main():
     """Main function for command line execution."""
     parser = argparse.ArgumentParser(
-        description='Plot saccade duration quartile heatmap (RMS over gradiometers)',
+        description='Plot saccade duration quartile heatmap (GFP over gradiometers)',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -431,85 +509,91 @@ Examples:
       --data-path /share/klab/datasets/avs/ \\
       --output-dir /share/klab/psulewski/psulewski/pyavs/meg_quality/
 
-  # Process multiple subjects
-  python plot_saccade_duration_heatmap.py --subjects 1 2 3 --sessions 1 2 \\
+  # Concatenate across multiple sessions for one subject
+  python plot_saccade_duration_heatmap.py --subject 1 --sessions 1 2 3 4 5 \\
+      --data-path /share/klab/datasets/avs/ \\
+      --output-dir /share/klab/psulewski/psulewski/pyavs/meg_quality/
+
+  # Process multiple subjects (each with concatenated sessions)
+  python plot_saccade_duration_heatmap.py --subjects 1 2 3 --sessions 1 2 3 4 5 \\
       --data-path /share/klab/datasets/avs/ \\
       --output-dir /share/klab/psulewski/psulewski/pyavs/meg_quality/
         """
     )
 
-    # Subject and session arguments
+    # Subject arguments
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument('--subject', type=int, help='Single subject ID to process')
     group.add_argument('--subjects', type=int, nargs='+', help='List of subject IDs')
 
-    parser.add_argument('--session', type=int, help='Single session (required with --subject)')
-    parser.add_argument('--sessions', type=int, nargs='+', default=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-                        help='List of sessions (default: [1])')
+    # Session arguments
+    parser.add_argument('--session', type=int, help='Single session (required with --subject if not using --sessions)')
+    parser.add_argument('--sessions', type=int, nargs='+', default=None,
+                        help='List of sessions to concatenate (default: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])')
 
     parser.add_argument('--data-path', type=str, required=False,
                         help='Path to AVS data directory',
                         default='/share/klab/datasets/avs/')
     parser.add_argument('--output-dir', type=str, required=False,
-                        
-                        help='Output directory for heatmaps', default='/share/klab/psulewski/pyavs/meg_viz/')
+                        help='Output directory for heatmaps',
+                        default='/share/klab/psulewski/pyavs/meg_viz/')
 
     parser.add_argument('--verbose', '-v', action='store_true',
                         help='Enable verbose logging')
 
     args = parser.parse_args()
 
-    # Validate arguments
-    if args.subject is not None and args.session is None:
-        parser.error("--session is required when using --subject")
-
-    # Determine subjects and sessions
-    if args.subject is not None:
-        subjects = [args.subject]
+    # Determine sessions
+    if args.sessions is not None:
+        sessions = args.sessions
+    elif args.session is not None:
         sessions = [args.session]
     else:
+        # Default to all sessions
+        sessions = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+    # Determine subjects
+    if args.subject is not None:
+        subjects = [args.subject]
+    else:
         subjects = args.subjects
-        sessions = args.sessions
 
     # Validate paths
     if not os.path.exists(args.data_path):
         print(f"Error: Data path does not exist: {args.data_path}")
         return 1
 
-    # Process each subject/session
+    # Process each subject
     print("=== Saccade Duration Heatmap Generation ===")
     print(f"Subjects: {subjects}")
-    print(f"Sessions: {sessions}")
+    print(f"Sessions (concatenated): {sessions}")
     print(f"Data path: {args.data_path}")
     print(f"Output directory: {args.output_dir}")
     print()
 
     success_count = 0
-    total_count = 0
 
     for subject_id in subjects:
-        for session in sessions:
-            total_count += 1
-            print(f"Processing subject {subject_id}, session {session}...")
+        print(f"Processing subject {subject_id} (sessions {sessions})...")
 
-            success = process_subject_session(
-                subject_id=subject_id,
-                session=session,
-                data_path=args.data_path,
-                output_dir=args.output_dir
-            )
+        success = process_subject(
+            subject_id=subject_id,
+            sessions=sessions,
+            data_path=args.data_path,
+            output_dir=args.output_dir
+        )
 
-            if success:
-                success_count += 1
-                print(f"  Success!")
-            else:
-                print(f"  Failed!")
+        if success:
+            success_count += 1
+            print(f"  Success!")
+        else:
+            print(f"  Failed!")
 
     print()
     print(f"=== Summary ===")
-    print(f"Processed: {success_count}/{total_count} subject-session combinations")
+    print(f"Processed: {success_count}/{len(subjects)} subjects")
 
-    return 0 if success_count == total_count else 1
+    return 0 if success_count == len(subjects) else 1
 
 
 if __name__ == "__main__":
