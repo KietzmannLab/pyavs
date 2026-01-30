@@ -95,7 +95,12 @@ def load_blink_data(subjects: List[int], sessions: List[int],
         blinks = events[events['type'] == 'blink'].copy()
 
         # Filter to scene and caption recordings
-        blinks = blinks[blinks['recording'].isin(['scene', 'caption'])].copy()
+        blinks = blinks[blinks['recording'].isin(['scene'])].copy()
+        
+        # exlude the most extreme 2 percent of blink durations
+       
+        upper_bound = blinks['end_time'].sub(blinks['start_time']).quantile(0.98)
+        blinks = blinks[blinks['end_time'].sub(blinks['start_time']) <= upper_bound]
 
         # Compute duration in milliseconds if not already present
         if 'duration' not in blinks.columns:
@@ -107,7 +112,7 @@ def load_blink_data(subjects: List[int], sessions: List[int],
 
         logger.info(f"Total blinks loaded: {len(blinks)}")
         logger.info(f"  Scene: {len(blinks[blinks['recording'] == 'scene'])}")
-        logger.info(f"  Caption: {len(blinks[blinks['recording'] == 'caption'])}")
+       
 
         return blinks
 
@@ -184,7 +189,7 @@ def plot_blink_durations_per_subject(blinks_df: pd.DataFrame, output_dir: str,
             data=blinks_df,
             x='subject',
             y='duration',
-            color='cornflowerblue',
+            palette='colorblind',
             inner='quartile'
         )
 

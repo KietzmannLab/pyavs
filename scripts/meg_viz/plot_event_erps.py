@@ -627,16 +627,16 @@ def main():
         '--event-types', '-e',
         nargs='+',
         type=str,
-        default=['blink',], #'fixation', 'saccade', 'scene'],
+        default=['scene',], #'fixation', 'saccade', 'scene'],
         choices=['blink', 'fixation', 'saccade', 'scene'],
-        help='Event types to process (default: blink fixation saccade scene)'
+        help='Event types to process (default: scene)'
     )
 
     parser.add_argument(
         '--timing', '-t',
         choices=['onset', 'offset', 'both'],
-        default='both',
-        help='Timing mode: onset, offset, or both (default: onset)'
+        default='onset',
+        help='Timing mode: onset, offset, or both (default: both)'
     )
 
     parser.add_argument(
