@@ -1,1 +1,1 @@
-# MEG quality visualization scripts
+# MEG quality assessment scripts
