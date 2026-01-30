@@ -36,8 +36,8 @@ from pyavs.utils.logging import get_logger
 logger = get_logger('scripts.meg_quality.saccade_duration_heatmap')
 
 # Configuration
-N_QUANTILES = 200
-TLIMS = (-0.2, 0.5)  # Time limits for plotting in seconds
+N_QUANTILES = 80
+TLIMS = (-0.2, 0.700)  # Time limits for plotting in seconds
 EVENT_TYPE = 'saccade_scene'
 
 
@@ -87,11 +87,7 @@ def load_saccade_grad_data(
     if 'times' in attributes:
         times = np.array(attributes['times'])
     else:
-        # Fallback: construct times from sfreq
-        sfreq = attributes.get('hz', 500)
-        tmin = attributes.get('tmin', -0.5)
-        n_times = grad_data.shape[2]
-        times = np.linspace(tmin, tmin + (n_times - 1) / sfreq, n_times)
+        raise ValueError("No 'times' attribute found in epoch data")
 
     # Load metadata from CSV (preferred source)
     csv_metadata = load_metadata_csv(subject_id, session, EVENT_TYPE, data_path)
@@ -148,14 +144,7 @@ def load_saccade_grad_data(
             duration_map = matched_saccades.set_index('key')['associated_fixation_duration']
             metadata_df['associated_fixation_duration'] = metadata_df['key'].map(duration_map)
             metadata_df.drop(columns=['key'], inplace=True)
-        else:
-            # Fallback: try matching by start_time
-            logger.warning("sac_sequence not found, attempting match by start_time")
-            metadata_df['associated_fixation_duration'] = np.nan
-    else:
-        logger.warning("Cannot match saccades to fixations - missing sceneID")
-        metadata_df['associated_fixation_duration'] = np.nan
-
+        
     n_matched = metadata_df['associated_fixation_duration'].notna().sum()
     logger.info(f"Matched {n_matched}/{len(metadata_df)} epochs with fixation durations")
 
@@ -165,7 +154,7 @@ def load_saccade_grad_data(
 def compute_duration_quantiles(
     data: np.ndarray,
     durations: np.ndarray,
-    n_quantiles: int = 200
+    n_quantiles: int = 80
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Sort epochs by associated fixation duration and compute quantile-averaged data.
@@ -213,10 +202,8 @@ def compute_duration_quantiles(
         if np.sum(bin_mask) > 0:
             quantile_data[q] = np.median(valid_data[bin_mask], axis=0)
             quantile_median_durations[q] = np.median(valid_durations[bin_mask])
-        else:
-            # Handle empty bins by interpolating
-            quantile_data[q] = np.nan
-            quantile_median_durations[q] = (quantile_edges[q] + quantile_edges[q + 1]) / 2
+        else: #Error
+            logger.error(f"No epochs in quantile {q}")
 
     return quantile_data, quantile_median_durations
 
@@ -280,11 +267,10 @@ def plot_heatmap(
     plot_times = times_ms[time_mask]
     plot_data = rms_data[:, time_mask]
 
-    # Convert to fT/cm (gradiometers are typically in T/m, multiply by 1e13 for fT/cm)
-    # Assuming data is already in SI units (T/m)
-    plot_data_ftcm = plot_data * 1e13
+    
+    plot_data_ftcm = plot_data * 1e13  # Convert to fT/cm for gradiometers
 
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(8, 8))
 
     # Plot heatmap
     extent = [plot_times[0], plot_times[-1], 0, len(durations)]
@@ -298,7 +284,7 @@ def plot_heatmap(
     )
 
     # Add vertical dashed white line at t=0 (saccade onset)
-    plt.axvline(x=0, color='white', linestyle='--', linewidth=1.5)
+    plt.axvline(x=0, color='white', linestyle='--')
 
     # Add diagonal dotted white line showing fixation duration offset
     # This line represents when the fixation ends relative to saccade onset
@@ -324,12 +310,11 @@ def plot_heatmap(
             valid_durations_ms[line_mask],
             valid_indices[line_mask],
             'w:',
-            linewidth=1.5
         )
 
     # Colorbar
     cbar = plt.colorbar(im)
-    cbar.set_label('RMS [fT/cm]')
+    cbar.set_label('gradiometer RMS [fT/cm]')
 
     # Labels
     plt.xlabel('time [ms]')
@@ -338,7 +323,7 @@ def plot_heatmap(
     # Remove yticks (duration is continuous)
     plt.yticks([])
 
-    sns.despine()
+    #sns.despine()
     plt.tight_layout()
 
     # Save figures
@@ -459,7 +444,7 @@ Examples:
     group.add_argument('--subjects', type=int, nargs='+', help='List of subject IDs')
 
     parser.add_argument('--session', type=int, help='Single session (required with --subject)')
-    parser.add_argument('--sessions', type=int, nargs='+', default=[1],
+    parser.add_argument('--sessions', type=int, nargs='+', default=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
                         help='List of sessions (default: [1])')
 
     parser.add_argument('--data-path', type=str, required=False,
