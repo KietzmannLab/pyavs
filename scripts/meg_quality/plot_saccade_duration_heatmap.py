@@ -462,10 +462,12 @@ Examples:
     parser.add_argument('--sessions', type=int, nargs='+', default=[1],
                         help='List of sessions (default: [1])')
 
-    parser.add_argument('--data-path', type=str, required=True,
-                        help='Path to AVS data directory')
-    parser.add_argument('--output-dir', type=str, required=True,
-                        help='Output directory for heatmaps')
+    parser.add_argument('--data-path', type=str, required=False,
+                        help='Path to AVS data directory',
+                        default='/share/klab/datasets/avs/')
+    parser.add_argument('--output-dir', type=str, required=False,
+                        
+                        help='Output directory for heatmaps', default='/share/klab/psulewski/pyavs/meg_viz/')
 
     parser.add_argument('--verbose', '-v', action='store_true',
                         help='Enable verbose logging')
