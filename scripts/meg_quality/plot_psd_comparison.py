@@ -4,7 +4,7 @@ PSD Comparison Script: Empty Room vs Pre-Scene Baseline vs Scene Viewing
 
 This script compares Power Spectral Density (PSD) across three conditions:
 1. Empty room recordings - to show the setup is not too noisy
-2. Pre-scene baseline (500ms fixation cross) - transition period
+2. Pre-scene baseline (1000ms before scene onset) - transition period
 3. Scene viewing (4 seconds) - to show interesting neural signal
 
 Aggregates across all sessions per subject for a summary comparison plot.
@@ -175,7 +175,7 @@ def compute_condition_psds(
     Parameters
     ----------
     epochs : mne.Epochs
-        Scene-locked epochs with tmin=-0.5, tmax=4.0
+        Scene-locked epochs with tmin=-1.0, tmax=4.0
     empty_room_raw : mne.io.Raw or None
         Concatenated empty room raw data
     sensor_type : str
@@ -203,15 +203,14 @@ def compute_condition_psds(
         print("No empty room recordings available")
         results['empty_room'] = (None, None)
 
-    # 2. Pre-scene baseline PSD (-0.5 to 0 seconds)
+    # 2. Pre-scene baseline PSD (-1.0 to 0 seconds)
     print("Computing pre-scene baseline PSD...")
-    # Use smaller n_fft for short baseline (500ms)
-    # Note: With 500ms data, minimum resolvable frequency is ~2 Hz
-    baseline_n_fft = min(256, int(0.5 * epochs.info['sfreq']))
-    baseline_fmin = max(fmin, 2.0)
+    # With 1000ms data, we can use larger n_fft and resolve down to ~1 Hz
+    baseline_n_fft = min(512, int(1.0 * epochs.info['sfreq']))
+    baseline_fmin = max(fmin, 1.0)
     freqs_baseline, psd_baseline = compute_psd_from_epochs(
         epochs,
-        time_range=(-0.5, 0.0),
+        time_range=(-1.0, 0.0),
         sensor_type=sensor_type,
         fmin=baseline_fmin,
         fmax=fmax,
@@ -424,7 +423,7 @@ def process_session_with_composer(
         composer.raws_concatenated,
         scene_events,
         event_id={'scene_on': scene_on_code},
-        tmin=-0.5,
+        tmin=-1.0,
         tmax=4.0,
         baseline=None,
         preload=True,
