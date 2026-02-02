@@ -8,7 +8,7 @@ with mean +/- SEM across subjects.
 Usage:
     python plot_psd_group.py \
         --input-dir /share/klab/psulewski/pyavs/meg_quality/ \
-        --subjects 1 2 3 4 5 6 7 8 9 10 \
+        --subjects 1 2 3 4 5\
         --sensor-type grad
 
 Author: pyAVS team
@@ -155,32 +155,23 @@ def plot_group_psd(
     for condition in ['empty_room', 'baseline', 'scene']:
         stats = group_stats[condition]
         freqs = stats['freqs']
-        mean = stats['mean']
-        sem = stats['sem']
-
-        if freqs is None or mean is None:
-            continue
+       
+        
 
         n = stats.get('n', '?')
         label = f"{labels[condition]} (n={n})"
 
-        # Plot mean
-        plt.semilogy(
-            freqs,
-            mean,
+        sns.lineplot(
+            x=freqs,
+            y=mean,
             label=label,
-            color=colors[condition],
-            linewidth=2,
+            color=colors[condition], 
+            # log y scale
         )
-
-        # Plot SEM shading
-        plt.fill_between(
-            freqs,
-            mean - sem,
-            mean + sem,
-            color=colors[condition],
-            alpha=0.2,
-        )
+        # log y
+    fig = plt.gcf()
+    ax = fig.gca()
+    ax.set_yscale('log')
 
     plt.xlabel('frequency [Hz]')
 

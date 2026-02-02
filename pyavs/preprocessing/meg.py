@@ -648,7 +648,7 @@ def preprocess_meg_block(raw: mne.io.Raw,
 
 def prepare_empty_room_recording(raw_empty_room: mne.io.Raw,
                                 raw_reference: mne.io.Raw,
-                                bads: str = 'from_raw',
+                                bads: str = 'union',
                                 annotations: str = 'from_raw',
                                 meas_date: str = 'keep',
                                 verbose: bool = True) -> mne.io.Raw:
@@ -662,7 +662,7 @@ def prepare_empty_room_recording(raw_empty_room: mne.io.Raw,
     raw_reference : mne.io.Raw
         Reference recording from the same session
     bads : str, optional
-        How to handle bad channels (default: 'from_raw')
+        How to handle bad channels (default: 'union')
     annotations : str, optional
         How to handle annotations (default: 'from_raw')
     meas_date : str, optional

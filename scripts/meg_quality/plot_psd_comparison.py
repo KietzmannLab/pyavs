@@ -38,136 +38,17 @@ from avs_machine_room.prepro.meg.avs_trigger_tools import get_meg_trigger_dict
 from avs_machine_room.dataloader.tools.avs_directory_tools import get_data_dirs
 
 
-def compute_psd_from_raw(
-    raw: mne.io.Raw,
-    sensor_type: str = 'grad',
-    fmin: float = 0.5,
-    fmax: float = 100.0,
-    n_fft: int = 2048,
-    n_overlap: int = 1024,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Compute PSD from raw data.
-
-    Parameters
-    ----------
-    raw : mne.io.Raw
-        Raw MEG data
-    sensor_type : str
-        'grad' or 'mag'
-    fmin : float
-        Minimum frequency
-    fmax : float
-        Maximum frequency
-    n_fft : int
-        FFT length
-    n_overlap : int
-        Number of overlap samples
-
-    Returns
-    -------
-    tuple
-        (freqs, psd_mean) - Frequencies and mean PSD over channels
-    """
-    picks = mne.pick_types(raw.info, meg=sensor_type)
-    data = raw.get_data(picks=picks)
-    sfreq = raw.info['sfreq']
-
-    psd, freqs = psd_array_welch(
-        data,
-        sfreq=sfreq,
-        fmin=fmin,
-        fmax=fmax,
-        n_fft=n_fft,
-        n_overlap=n_overlap,
-        verbose=False,
-    )
-
-    # Average over channels
-    psd_mean = psd.mean(axis=0)
-
-    return freqs, psd_mean
 
 
-def compute_psd_from_epochs(
-    epochs: mne.Epochs,
-    time_range: Tuple[float, float],
-    sensor_type: str = 'grad',
-    fmin: float = 0.5,
-    fmax: float = 100.0,
-    n_fft: Optional[int] = None,
-    n_overlap: Optional[int] = None,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Compute PSD from epochs within a time range.
 
-    Parameters
-    ----------
-    epochs : mne.Epochs
-        Epochs object
-    time_range : tuple
-        (tmin, tmax) time range to extract
-    sensor_type : str
-        'grad' or 'mag'
-    fmin : float
-        Minimum frequency
-    fmax : float
-        Maximum frequency
-    n_fft : int, optional
-        FFT length (default: determined from data)
-    n_overlap : int, optional
-        Overlap samples (default: n_fft // 2)
-
-    Returns
-    -------
-    tuple
-        (freqs, psd_mean) - Frequencies and mean PSD over epochs and channels
-    """
-    picks = mne.pick_types(epochs.info, meg=sensor_type)
-    sfreq = epochs.info['sfreq']
-
-    # Get time indices
-    times = epochs.times
-    time_mask = (times >= time_range[0]) & (times <= time_range[1])
-
-    # Extract data: (n_epochs, n_channels, n_times)
-    data = epochs.get_data(picks=picks)[:, :, time_mask]
-
-    n_epochs, n_channels, n_times = data.shape
-
-    # Set n_fft based on available samples if not specified
-    if n_fft is None:
-        n_fft = min(2048, n_times)
-    if n_overlap is None:
-        n_overlap = n_fft // 2
-
-    # Compute PSD for each epoch, then average
-    psds = []
-    for epoch_data in data:
-        psd, freqs = psd_array_welch(
-            epoch_data,
-            sfreq=sfreq,
-            fmin=fmin,
-            fmax=fmax,
-            n_fft=n_fft,
-            n_overlap=n_overlap,
-            verbose=False,
-        )
-        # Average over channels
-        psds.append(psd.mean(axis=0))
-
-    # Average over epochs
-    psd_mean = np.mean(psds, axis=0)
-
-    return freqs, psd_mean
 
 
 def compute_condition_psds(
     epochs: mne.Epochs,
     empty_room_raw: Optional[mne.io.Raw],
-    sensor_type: str = 'grad',
+    sensor_type: str = 'mag',
     fmin: float = 0.5,
-    fmax: float = 100.0,
+    fmax: float = 125.0,
 ) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
     """
     Compute PSDs for all three conditions.
@@ -191,13 +72,26 @@ def compute_condition_psds(
         {'empty_room': (freqs, psd), 'baseline': (freqs, psd), 'scene': (freqs, psd)}
     """
     results = {}
+    
+    common_params = dict(
+    method='welch',
+    fmin=fmin,
+    fmax=fmax,
+    n_fft=512,
+    n_overlap=256, average='median'
+    )
 
     # 1. Empty room PSD
     if empty_room_raw is not None:
         print("Computing empty room PSD...")
-        freqs_er, psd_er = compute_psd_from_raw(
-            empty_room_raw, sensor_type=sensor_type, fmin=fmin, fmax=fmax
-        )
+        print("Bad channels in empty room:", empty_room_raw.info['bads'])
+        psd_er, freqs_er = empty_room_raw.compute_psd(
+            picks=sensor_type, n_jobs=-1,
+            **common_params,
+        ).get_data(return_freqs=True)
+        
+        # average across channels
+        psd_er = np.median(psd_er, axis=0)
         results['empty_room'] = (freqs_er, psd_er)
     else:
         print("No empty room recordings available")
@@ -205,30 +99,40 @@ def compute_condition_psds(
 
     # 2. Pre-scene baseline PSD (-1.0 to 0 seconds)
     print("Computing pre-scene baseline PSD...")
-    # With 1000ms data, we can use larger n_fft and resolve down to ~1 Hz
-    baseline_n_fft = min(512, int(1.0 * epochs.info['sfreq']))
-    baseline_fmin = max(fmin, 1.0)
-    freqs_baseline, psd_baseline = compute_psd_from_epochs(
-        epochs,
-        time_range=(-1.0, 0.0),
-        sensor_type=sensor_type,
-        fmin=baseline_fmin,
-        fmax=fmax,
-        n_fft=baseline_n_fft,
-    )
+    psd_baseline, freqs_baseline = epochs.compute_psd(
+        picks=sensor_type,
+        tmin=-1.0,
+        tmax=0.0, n_jobs=-1,
+        **common_params,    
+    ).get_data(return_freqs=True)
+    
+    # average across channels
+    psd_baseline = np.mean(psd_baseline, axis=(0,1))
+    
     results['baseline'] = (freqs_baseline, psd_baseline)
-
-    # 3. Scene viewing PSD (0 to 4 seconds)
+    
+    # 3. Scene viewing PSD (0.0 to 4.0 seconds)
     print("Computing scene viewing PSD...")
-    freqs_scene, psd_scene = compute_psd_from_epochs(
-        epochs,
-        time_range=(0.0, 4.0),
-        sensor_type=sensor_type,
-        fmin=fmin,
-        fmax=fmax,
-        n_fft=2048,
-    )
+    psd_scene, freqs_scene = epochs.compute_psd(
+        picks=sensor_type,
+        tmin=0.0,
+        tmax=4.0, n_jobs=-1,    
+        **common_params, 
+    ).get_data(return_freqs=True)
+    
+    # average across channels for all 3 conditions
+    psd_scene = np.mean(psd_scene, axis=(0,1))
+
+    
     results['scene'] = (freqs_scene, psd_scene)
+    
+    # print all shapes
+    for condition in ['empty_room', 'baseline', 'scene']:
+        freqs, psd = results[condition]
+        if freqs is not None and psd is not None:
+            print(f"{condition} PSD shape: freqs {freqs.shape}, psd {psd.shape}")
+        else:
+            print(f"{condition} PSD not available")
 
     return results
 
@@ -389,11 +293,11 @@ def process_session_with_composer(
         verbose=True,
         write_output=False,
         interpolate_bad_channels=True,
-        n_jobs=1,
+        n_jobs=-1, max_block = None, 
     )
 
     # Load MEG data (includes empty room)
-    composer.load_meg_data(compute_missing_prepro=False)
+    composer.load_meg_data(compute_missing_prepro=True)
 
     if not composer.raws_dict:
         print(f"No MEG blocks found for session {session}")
@@ -433,8 +337,20 @@ def process_session_with_composer(
     # Get empty room raw
     empty_room_raw = None
     if composer.empty_room_available and hasattr(composer, 'raws_concatenated_empty_room'):
+        print("Empty room recording available")
         empty_room_raw = composer.raws_concatenated_empty_room
-
+        
+    
+    # print preprocessing history .info['proc_history']
+    print("Preprocessing history:")
+    print(composer.raws_concatenated.info.get('proc_history', 'No preprocessing history found'))
+    print("Preprocessing history empty room:")
+    if empty_room_raw is not None:
+        print(empty_room_raw.info.get('proc_history', 'No preprocessing history found'))
+        
+    print(empty_room_raw.get_data(picks='meg').std())
+    print(epochs.get_data(picks='meg').std())
+    
     return empty_room_raw, epochs
 
 
@@ -534,7 +450,7 @@ def main():
     )
     parser.add_argument(
         '--sessions', type=int, nargs='+', default=None,
-        help='Session numbers (default: all sessions 1-5)'
+        help='Session numbers (default: all sessions 1-10)'
     )
     parser.add_argument(
         '--data-path', type=str, default='/share/klab/datasets/avs/',
