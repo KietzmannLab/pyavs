@@ -3,12 +3,12 @@
 Group-level PSD Comparison Plot
 
 Loads per-subject PSD data files and creates a group average plot
-with mean +/- SEM across subjects.
+with 95% bootstrapped confidence intervals using seaborn.
 
 Usage:
     python plot_psd_group.py \
         --input-dir /share/klab/psulewski/pyavs/meg_quality/ \
-        --subjects 1 2 3 4 5\
+        --subjects 1 2 3 4 5 \
         --sensor-type grad
 
 Author: pyAVS team
@@ -19,6 +19,7 @@ import os
 from typing import Dict, List, Tuple
 
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -69,68 +70,56 @@ def load_subject_psd(
     return result
 
 
-def compute_group_stats(
-    subject_psds: List[Dict[str, Tuple[np.ndarray, np.ndarray]]],
-) -> Dict[str, Dict[str, np.ndarray]]:
+def build_long_dataframe(
+    subject_psds: List[Tuple[int, Dict[str, Tuple[np.ndarray, np.ndarray]]]],
+) -> pd.DataFrame:
     """
-    Compute group mean and SEM for each condition.
+    Build a long-format DataFrame for seaborn plotting.
 
     Parameters
     ----------
     subject_psds : list
-        List of PSD dicts per subject
+        List of (subject_id, psd_dict) tuples
 
     Returns
     -------
-    dict
-        {'condition': {'freqs': array, 'mean': array, 'sem': array}}
+    pd.DataFrame
+        DataFrame with columns: subject, condition, frequency, power
     """
-    results = {}
+    rows = []
 
-    for condition in ['empty_room', 'baseline', 'scene']:
-        # Collect all valid PSDs for this condition
-        valid_psds = []
-        freqs = None
-
-        for subj_psd in subject_psds:
-            if subj_psd is None:
-                continue
-            f, p = subj_psd[condition]
-            if f is not None and p is not None:
-                valid_psds.append(p)
-                freqs = f
-
-        if len(valid_psds) == 0:
-            results[condition] = {'freqs': None, 'mean': None, 'sem': None}
+    for subject_id, psd_dict in subject_psds:
+        if psd_dict is None:
             continue
 
-        # Stack and compute stats
-        psd_array = np.array(valid_psds)
-        mean_psd = np.mean(psd_array, axis=0)
-        sem_psd = np.std(psd_array, axis=0) / np.sqrt(len(valid_psds))
+        for condition in ['empty_room', 'baseline', 'scene']:
+            freqs, psd = psd_dict[condition]
+            if freqs is None or psd is None:
+                continue
 
-        results[condition] = {
-            'freqs': freqs,
-            'mean': mean_psd,
-            'sem': sem_psd,
-            'n': len(valid_psds),
-        }
+            for f, p in zip(freqs, psd):
+                rows.append({
+                    'subject': subject_id,
+                    'condition': condition,
+                    'frequency': f,
+                    'power': p,
+                })
 
-    return results
+    return pd.DataFrame(rows)
 
 
 def plot_group_psd(
-    group_stats: Dict[str, Dict[str, np.ndarray]],
+    df: pd.DataFrame,
     output_path: str,
     sensor_type: str = 'grad',
 ) -> None:
     """
-    Plot group-level PSD comparison with mean +/- SEM.
+    Plot group-level PSD comparison with 95% bootstrapped CI.
 
     Parameters
     ----------
-    group_stats : dict
-        Output from compute_group_stats
+    df : pd.DataFrame
+        Long-format DataFrame with columns: subject, condition, frequency, power
     output_path : str
         Path to save figure
     sensor_type : str
@@ -150,28 +139,41 @@ def plot_group_psd(
         'scene': 'scene viewing',
     }
 
+    # Get subject counts per condition
+    n_subjects = {}
+    for condition in ['empty_room', 'baseline', 'scene']:
+        cond_df = df[df['condition'] == condition]
+        n_subjects[condition] = cond_df['subject'].nunique()
+
+    # Create label mapping with subject counts
+    label_map = {
+        cond: f"{labels[cond]} (n={n_subjects.get(cond, 0)})"
+        for cond in labels
+    }
+
+    # Replace condition names with labels for legend
+    df_plot = df.copy()
+    df_plot['condition'] = df_plot['condition'].map(label_map)
+
+    # Create color palette matching the new labels
+    palette = {label_map[cond]: colors[cond] for cond in colors}
+
     plt.figure(figsize=(8, 6))
 
-    for condition in ['empty_room', 'baseline', 'scene']:
-        stats = group_stats[condition]
-        freqs = stats['freqs']
-       
-        
+    # Plot with seaborn lineplot and 95% bootstrapped CI
+    sns.lineplot(
+        data=df_plot,
+        x='frequency',
+        y='power',
+        hue='condition',
+        hue_order=[label_map['empty_room'], label_map['baseline'], label_map['scene']],
+        palette=palette,
+        errorbar=('ci', 95),
+        n_boot=1000,
+    )
 
-        n = stats.get('n', '?')
-        label = f"{labels[condition]} (n={n})"
-
-        sns.lineplot(
-            x=freqs,
-            y=mean,
-            label=label,
-            color=colors[condition], 
-            # log y scale
-        )
-        # log y
-    fig = plt.gcf()
-    ax = fig.gca()
-    ax.set_yscale('log')
+    # Set log scale for y-axis
+    plt.yscale('log')
 
     plt.xlabel('frequency [Hz]')
 
@@ -197,7 +199,7 @@ def plot_group_psd(
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Plot group-level PSD comparison'
+        description='Plot group-level PSD comparison with 95% CI'
     )
     parser.add_argument(
         '--input-dir', type=str, default='/share/klab/psulewski/pyavs/meg_quality/',
@@ -224,15 +226,17 @@ def main():
     for subj in args.subjects:
         psd = load_subject_psd(args.input_dir, subj, args.sensor_type)
         if psd is not None:
-            subject_psds.append(psd)
+            subject_psds.append((subj, psd))
             print(f"  Loaded subject {subj}")
 
     if len(subject_psds) == 0:
         print("No valid subject data found!")
         return
 
-    print(f"\nComputing group statistics for {len(subject_psds)} subjects...")
-    group_stats = compute_group_stats(subject_psds)
+    # Build long-format DataFrame
+    print(f"\nBuilding DataFrame for {len(subject_psds)} subjects...")
+    df = build_long_dataframe(subject_psds)
+    print(f"DataFrame shape: {df.shape}")
 
     # Set output path
     if args.output_path is None:
@@ -241,7 +245,8 @@ def main():
         )
 
     # Plot
-    plot_group_psd(group_stats, args.output_path, args.sensor_type)
+    print("\nPlotting with 95% bootstrapped CI...")
+    plot_group_psd(df, args.output_path, args.sensor_type)
 
     print("\nDone!")
 
