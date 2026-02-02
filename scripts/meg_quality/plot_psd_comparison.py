@@ -9,6 +9,8 @@ This script compares Power Spectral Density (PSD) across three conditions:
 
 Aggregates across all sessions per subject for a summary comparison plot.
 
+Uses AVSComposer infrastructure for MEG data loading.
+
 Usage:
     python plot_psd_comparison.py --subject 1 --sessions 1 2 3 4 5 \
         --data-path /share/klab/datasets/avs/ \
@@ -29,247 +31,11 @@ import seaborn as sns
 from mne.time_frequency import psd_array_welch
 
 # Add parent paths for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', 'AVS-machine-room'))
 
-from avs_machine_room.dataloader.tools.avs_directory_tools import (
-    get_session_letter,
-    get_max_block,
-    get_data_dirs,
-)
-from avs_machine_room.prepro.meg.avs_trigger_tools import (
-    get_meg_trigger_dict,
-    repair_meg_trigger_events,
-    get_avs_blocks,
-)
-from avs_machine_room.prepro.meg.avs_meg_prep import (
-    read_bad_chan_logbook,
-    get_bad_channels_from_logbook,
-)
-
-
-def load_empty_room_recording(
-    subject_id: int,
-    session: int,
-    timing: str,
-    data_path: str,
-    preprocessed: bool = True,
-) -> Optional[mne.io.Raw]:
-    """
-    Load empty room recording for a subject/session.
-
-    Parameters
-    ----------
-    subject_id : int
-        Subject ID
-    session : int
-        Session number
-    timing : str
-        'before' or 'after' - which empty room recording to load
-        ('b' = before, 'd' = after/danach)
-    data_path : str
-        Path to data directory
-    preprocessed : bool
-        Whether to load preprocessed (Maxwell filtered) data
-
-    Returns
-    -------
-    mne.io.Raw or None
-        Raw empty room recording, or None if not found
-    """
-    session_letter = get_session_letter(session)
-    sub_sess_id = f"as{subject_id:02d}{session_letter}"
-    session_dir = os.path.join(data_path, 'rawdir', sub_sess_id)
-    prepro_dir = os.path.join(session_dir, 'prepro')
-
-    # Map timing to file suffix
-    timing_suffix = 'b' if timing == 'before' else 'd'
-
-    if preprocessed:
-        fif_suffix = "_raw-sss.fif"
-        raw_fname = os.path.join(prepro_dir, f"{sub_sess_id}{timing_suffix}{fif_suffix}")
-    else:
-        fif_suffix = ".fif"
-        raw_fname = os.path.join(session_dir, f"{sub_sess_id}{timing_suffix}{fif_suffix}")
-
-    if not os.path.isfile(raw_fname):
-        print(f"Empty room recording not found: {raw_fname}")
-        return None
-
-    print(f"Loading empty room recording: {raw_fname}")
-    raw = mne.io.read_raw_fif(raw_fname, preload=True, verbose=False)
-
-    return raw
-
-
-def load_preprocessed_meg_blocks(
-    subject_id: int,
-    session: int,
-    data_path: str,
-    min_block: int = 1,
-    max_block: Optional[int] = None,
-) -> Dict[int, mne.io.Raw]:
-    """
-    Load preprocessed MEG data blocks for a subject/session.
-
-    Parameters
-    ----------
-    subject_id : int
-        Subject ID
-    session : int
-        Session number
-    data_path : str
-        Path to data directory
-    min_block : int
-        Minimum block to load (1-indexed within session)
-    max_block : int, optional
-        Maximum block to load
-
-    Returns
-    -------
-    dict
-        Dictionary mapping block numbers to Raw objects
-    """
-    session_letter = get_session_letter(session)
-    sub_sess_id = f"as{subject_id:02d}{session_letter}"
-    session_dir = os.path.join(data_path, 'rawdir', sub_sess_id)
-    prepro_dir = os.path.join(session_dir, 'prepro')
-
-    if max_block is None:
-        max_block = get_max_block(session)
-
-    # Get global block numbers for this session
-    blocks_this_session = get_avs_blocks(session, min_block, max_block)
-
-    bad_channel_logbook = read_bad_chan_logbook()
-    raws_dict = {}
-
-    for block in blocks_this_session:
-        raw_fname = os.path.join(prepro_dir, f"{sub_sess_id}{str(block).zfill(2)}_raw-sss.fif")
-
-        if not os.path.isfile(raw_fname):
-            print(f"Block {block} not found: {raw_fname}")
-            continue
-
-        print(f"Loading block {block}: {raw_fname}")
-        raw = mne.io.read_raw_fif(raw_fname, preload=True, verbose=False)
-
-        # Add logged bad channels
-        logged_bad_chans = get_bad_channels_from_logbook(
-            bad_channel_logbook, subject_id, session, block
-        )
-        if logged_bad_chans:
-            raw.info['bads'] = list(set(raw.info['bads'] + logged_bad_chans))
-
-        raws_dict[block] = raw
-
-    return raws_dict
-
-
-def concatenate_and_find_events(
-    raws_dict: Dict[int, mne.io.Raw],
-    session: int,
-    interpolate_bads: bool = True,
-) -> Tuple[mne.io.Raw, np.ndarray]:
-    """
-    Concatenate raw blocks and find trigger events.
-
-    Parameters
-    ----------
-    raws_dict : dict
-        Dictionary mapping block numbers to Raw objects
-    session : int
-        Session number (for trigger repair)
-    interpolate_bads : bool
-        Whether to interpolate bad channels
-
-    Returns
-    -------
-    tuple
-        (concatenated_raw, events) - Concatenated raw and event array
-    """
-    raws_list = list(raws_dict.values())
-
-    # Remove duplicate bad channels and optionally interpolate
-    for raw in raws_list:
-        raw.info['bads'] = list(set(raw.info['bads']))
-
-    if interpolate_bads:
-        raws_list = [raw.interpolate_bads() for raw in raws_list]
-    else:
-        for raw in raws_list:
-            raw.info['bads'] = []
-
-    raw_concat = mne.concatenate_raws(raws_list, on_mismatch='warn')
-
-    # Find events
-    events_raw = mne.find_events(
-        raw_concat,
-        stim_channel='STI101',
-        consecutive=True,
-        min_duration=0.008,
-        output='onset',
-        uint_cast=True,
-        verbose=False,
-    )
-
-    # Repair block triggers
-    events = repair_meg_trigger_events(
-        events_raw,
-        session=session,
-        new_block_trigger_offset=1000,
-        initial_block_trigger_offset=50,
-        verbose=False,
-    )
-
-    return raw_concat, events
-
-
-def create_scene_epochs(
-    raw: mne.io.Raw,
-    events: np.ndarray,
-    tmin: float = -0.5,
-    tmax: float = 4.0,
-) -> mne.Epochs:
-    """
-    Create epochs locked to scene onset.
-
-    Parameters
-    ----------
-    raw : mne.io.Raw
-        Concatenated raw data
-    events : np.ndarray
-        Event array
-    tmin : float
-        Epoch start relative to scene onset (negative = before)
-    tmax : float
-        Epoch end relative to scene onset
-
-    Returns
-    -------
-    mne.Epochs
-        Scene-locked epochs
-    """
-    trigger_dict = get_meg_trigger_dict()
-    scene_on_code = trigger_dict['scene_on']  # 100
-
-    # Select scene onset events
-    scene_events = events[events[:, 2] == scene_on_code]
-
-    print(f"Found {len(scene_events)} scene onset events")
-
-    epochs = mne.Epochs(
-        raw,
-        scene_events,
-        event_id={'scene_on': scene_on_code},
-        tmin=tmin,
-        tmax=tmax,
-        baseline=None,
-        preload=True,
-        verbose=False,
-    )
-
-    return epochs
+from avs_machine_room.prepro.meg.avs_composer import AVSComposer
+from avs_machine_room.prepro.meg.avs_trigger_tools import get_meg_trigger_dict
+from avs_machine_room.dataloader.tools.avs_directory_tools import get_data_dirs
 
 
 def compute_psd_from_raw(
@@ -367,7 +133,6 @@ def compute_psd_from_epochs(
     # Extract data: (n_epochs, n_channels, n_times)
     data = epochs.get_data(picks=picks)[:, :, time_mask]
 
-    # Reshape to (n_epochs * n_channels, n_times) for PSD computation
     n_epochs, n_channels, n_times = data.shape
 
     # Set n_fft based on available samples if not specified
@@ -399,7 +164,7 @@ def compute_psd_from_epochs(
 
 def compute_condition_psds(
     epochs: mne.Epochs,
-    empty_room_raws: List[mne.io.Raw],
+    empty_room_raw: Optional[mne.io.Raw],
     sensor_type: str = 'grad',
     fmin: float = 0.5,
     fmax: float = 100.0,
@@ -411,8 +176,8 @@ def compute_condition_psds(
     ----------
     epochs : mne.Epochs
         Scene-locked epochs with tmin=-0.5, tmax=4.0
-    empty_room_raws : list
-        List of empty room Raw objects
+    empty_room_raw : mne.io.Raw or None
+        Concatenated empty room raw data
     sensor_type : str
         'grad' or 'mag'
     fmin : float
@@ -428,27 +193,21 @@ def compute_condition_psds(
     results = {}
 
     # 1. Empty room PSD
-    if empty_room_raws:
+    if empty_room_raw is not None:
         print("Computing empty room PSD...")
-        er_psds = []
-        er_freqs = None
-        for er_raw in empty_room_raws:
-            freqs, psd = compute_psd_from_raw(
-                er_raw, sensor_type=sensor_type, fmin=fmin, fmax=fmax
-            )
-            er_psds.append(psd)
-            er_freqs = freqs
-        results['empty_room'] = (er_freqs, np.mean(er_psds, axis=0))
+        freqs_er, psd_er = compute_psd_from_raw(
+            empty_room_raw, sensor_type=sensor_type, fmin=fmin, fmax=fmax
+        )
+        results['empty_room'] = (freqs_er, psd_er)
     else:
         print("No empty room recordings available")
         results['empty_room'] = (None, None)
 
     # 2. Pre-scene baseline PSD (-0.5 to 0 seconds)
     print("Computing pre-scene baseline PSD...")
-    # Use smaller n_fft for short baseline (500ms at 1000 Hz = 500 samples)
+    # Use smaller n_fft for short baseline (500ms)
     # Note: With 500ms data, minimum resolvable frequency is ~2 Hz
     baseline_n_fft = min(256, int(0.5 * epochs.info['sfreq']))
-    # Adjust fmin for baseline - can't resolve below 2 Hz with 500ms
     baseline_fmin = max(fmin, 2.0)
     freqs_baseline, psd_baseline = compute_psd_from_epochs(
         epochs,
@@ -500,7 +259,6 @@ def save_psd_data(
     str
         Path to saved npz file
     """
-    # Prepare data for saving
     save_data = {
         'subject_id': subject_id,
         'sensor_type': sensor_type,
@@ -512,7 +270,6 @@ def save_psd_data(
             save_data[f'{condition}_freqs'] = freqs
             save_data[f'{condition}_psd'] = psd
 
-    # Save to npz
     base_path = output_path.rsplit('.', 1)[0]
     npz_path = f"{base_path}_psd_data.npz"
     np.savez(npz_path, **save_data)
@@ -543,9 +300,8 @@ def plot_psd_comparison(
     """
     sns.set_context("poster")
 
-    # Use colorblind-friendly colors
     colors = {
-        'empty_room': '#999999',  # gray
+        'empty_room': '#999999',
         'baseline': 'cornflowerblue',
         'scene': 'salmon',
     }
@@ -571,7 +327,6 @@ def plot_psd_comparison(
 
     plt.xlabel('frequency [Hz]')
 
-    # Set y-label based on sensor type
     if sensor_type == 'grad':
         plt.ylabel('power spectral density [fT/cm]²/Hz')
     else:
@@ -582,7 +337,6 @@ def plot_psd_comparison(
     sns.despine()
     plt.tight_layout()
 
-    # Save in multiple formats
     base_path = output_path.rsplit('.', 1)[0]
     for ext in ['.png', '.pdf']:
         save_path = base_path + ext
@@ -590,6 +344,99 @@ def plot_psd_comparison(
         print(f"Saved: {save_path}")
 
     plt.close()
+
+
+def process_session_with_composer(
+    subject_id: int,
+    session: int,
+    data_path: str,
+    output_dir: str,
+) -> Tuple[Optional[mne.io.Raw], Optional[mne.Epochs]]:
+    """
+    Load MEG data for a session using AVSComposer.
+
+    Parameters
+    ----------
+    subject_id : int
+        Subject ID
+    session : int
+        Session number
+    data_path : str
+        Path to data directory
+    output_dir : str
+        Output directory
+
+    Returns
+    -------
+    tuple
+        (empty_room_raw, epochs) - Empty room raw and scene epochs, or None if not available
+    """
+    raw_dir = os.path.join(data_path, 'rawdir')
+    results_dir = os.path.join(data_path, 'results')
+    et_dir = results_dir
+
+    # Initialize composer
+    composer = AVSComposer(
+        data_dir=raw_dir,
+        output_dir=output_dir,
+        et_dir=et_dir,
+        subject=subject_id,
+        session_num=session,
+        diagnostics={},
+        preprocessed=True,
+        recompute_prepro=False,
+        stim_channel='STI101',
+        server='uos',
+        verbose=True,
+        write_output=False,
+        interpolate_bad_channels=True,
+        n_jobs=1,
+    )
+
+    # Load MEG data (includes empty room)
+    composer.load_meg_data(compute_missing_prepro=False)
+
+    if not composer.raws_dict:
+        print(f"No MEG blocks found for session {session}")
+        return None, None
+
+    # Concatenate raws
+    composer.concatenate_raws_per_session()
+
+    # Find events
+    composer.find_events_in_raw()
+
+    # Get trigger dict
+    trigger_dict = get_meg_trigger_dict()
+    scene_on_code = trigger_dict['scene_on']  # 100
+
+    # Create scene epochs
+    scene_events = composer.meg_trigger_events[
+        composer.meg_trigger_events[:, 2] == scene_on_code
+    ]
+
+    print(f"Found {len(scene_events)} scene onset events")
+
+    if len(scene_events) == 0:
+        return None, None
+
+    epochs = mne.Epochs(
+        composer.raws_concatenated,
+        scene_events,
+        event_id={'scene_on': scene_on_code},
+        tmin=-0.5,
+        tmax=4.0,
+        baseline=None,
+        preload=True,
+        verbose=False,
+    )
+
+    # Get empty room raw
+    empty_room_raw = None
+    if composer.empty_room_available and hasattr(composer, 'raws_concatenated_empty_room'):
+        empty_room_raw = composer.raws_concatenated_empty_room
+
+    return empty_room_raw, epochs
 
 
 def process_subject(
@@ -626,34 +473,14 @@ def process_subject(
     for session in sessions:
         print(f"\n--- Session {session} ---\n")
 
-        # Load empty room recordings
-        for timing in ['before', 'after']:
-            er_raw = load_empty_room_recording(
-                subject_id, session, timing, data_path, preprocessed=True
-            )
-            if er_raw is not None:
-                all_empty_room_raws.append(er_raw)
-
-        # Load MEG blocks
-        raws_dict = load_preprocessed_meg_blocks(
-            subject_id, session, data_path
+        empty_room_raw, epochs = process_session_with_composer(
+            subject_id, session, data_path, output_dir
         )
 
-        if not raws_dict:
-            print(f"No MEG blocks found for session {session}")
-            continue
+        if empty_room_raw is not None:
+            all_empty_room_raws.append(empty_room_raw)
 
-        # Concatenate and find events
-        raw_concat, events = concatenate_and_find_events(
-            raws_dict, session, interpolate_bads=True
-        )
-
-        # Create scene epochs
-        epochs = create_scene_epochs(
-            raw_concat, events, tmin=-0.5, tmax=4.0
-        )
-
-        if len(epochs) > 0:
+        if epochs is not None and len(epochs) > 0:
             all_epochs.append(epochs)
             print(f"Session {session}: {len(epochs)} epochs")
         else:
@@ -668,11 +495,18 @@ def process_subject(
     epochs_concat = mne.concatenate_epochs(all_epochs, on_mismatch='warn')
     print(f"Total epochs: {len(epochs_concat)}")
 
+    # Concatenate empty room raws if available
+    if all_empty_room_raws:
+        print(f"Concatenating {len(all_empty_room_raws)} empty room recordings...")
+        empty_room_concat = mne.concatenate_raws(all_empty_room_raws, on_mismatch='warn')
+    else:
+        empty_room_concat = None
+
     # Compute PSDs
     print("\nComputing PSDs...")
     psd_dict = compute_condition_psds(
         epochs_concat,
-        all_empty_room_raws,
+        empty_room_concat,
         sensor_type=sensor_type,
     )
 
@@ -718,7 +552,6 @@ def main():
 
     args = parser.parse_args()
 
-    # Default to all sessions if not specified
     if args.sessions is None:
         args.sessions = np.arange(1, 11).tolist()
 
