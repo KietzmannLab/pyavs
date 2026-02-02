@@ -475,6 +475,52 @@ def compute_condition_psds(
     return results
 
 
+def save_psd_data(
+    psd_dict: Dict[str, Tuple[np.ndarray, np.ndarray]],
+    output_path: str,
+    subject_id: int,
+    sensor_type: str = 'grad',
+) -> str:
+    """
+    Save PSD data to npz file.
+
+    Parameters
+    ----------
+    psd_dict : dict
+        {'empty_room': (freqs, psd), 'baseline': (freqs, psd), 'scene': (freqs, psd)}
+    output_path : str
+        Base output path (will add _psd_data.npz)
+    subject_id : int
+        Subject ID
+    sensor_type : str
+        Sensor type
+
+    Returns
+    -------
+    str
+        Path to saved npz file
+    """
+    # Prepare data for saving
+    save_data = {
+        'subject_id': subject_id,
+        'sensor_type': sensor_type,
+    }
+
+    for condition in ['empty_room', 'baseline', 'scene']:
+        freqs, psd = psd_dict[condition]
+        if freqs is not None and psd is not None:
+            save_data[f'{condition}_freqs'] = freqs
+            save_data[f'{condition}_psd'] = psd
+
+    # Save to npz
+    base_path = output_path.rsplit('.', 1)[0]
+    npz_path = f"{base_path}_psd_data.npz"
+    np.savez(npz_path, **save_data)
+    print(f"Saved PSD data: {npz_path}")
+
+    return npz_path
+
+
 def plot_psd_comparison(
     psd_dict: Dict[str, Tuple[np.ndarray, np.ndarray]],
     output_path: str,
@@ -633,10 +679,13 @@ def process_subject(
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
 
-    # Plot and save
+    # Save PSD data
     output_path = os.path.join(
         output_dir, f"sub-{subject_id:02d}_psd_comparison_{sensor_type}.png"
     )
+    save_psd_data(psd_dict, output_path, subject_id, sensor_type)
+
+    # Plot and save
     plot_psd_comparison(psd_dict, output_path, subject_id, sensor_type)
 
     print(f"\nDone processing subject {subject_id}")
