@@ -665,7 +665,7 @@ def process_subject(
 
     # Concatenate epochs across sessions
     print(f"\nConcatenating {len(all_epochs)} epoch objects...")
-    epochs_concat = mne.concatenate_epochs(all_epochs)
+    epochs_concat = mne.concatenate_epochs(all_epochs, on_mismatch='warn')
     print(f"Total epochs: {len(epochs_concat)}")
 
     # Compute PSDs
@@ -720,7 +720,7 @@ def main():
 
     # Default to all sessions if not specified
     if args.sessions is None:
-        args.sessions = [1, 2, 3, 4, 5]
+        args.sessions = np.arange(1, 11).tolist()
 
     process_subject(
         subject_id=args.subject,
