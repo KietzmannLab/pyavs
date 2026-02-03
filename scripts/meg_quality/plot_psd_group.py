@@ -158,7 +158,7 @@ def plot_group_psd(
     # Create color palette matching the new labels
     palette = {label_map[cond]: colors[cond] for cond in colors}
 
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(8, 8))
 
     # Plot with seaborn lineplot and 95% bootstrapped CI
     sns.lineplot(
@@ -167,13 +167,16 @@ def plot_group_psd(
         y='power',
         hue='condition',
         hue_order=[label_map['empty_room'], label_map['baseline'], label_map['scene']],
-        palette=palette,
+        palette=palette, 
+        #'median' instead of mean for central tendency
+        estimator='median',
         errorbar=('ci', 95),
         n_boot=1000,
     )
 
     # Set log scale for y-axis
     plt.yscale('log')
+    plt.xscale('log')
 
     plt.xlabel('frequency [Hz]')
 
@@ -181,8 +184,11 @@ def plot_group_psd(
         plt.ylabel('power spectral density [fT/cm]²/Hz')
     else:
         plt.ylabel('power spectral density [fT]²/Hz')
+        
+    # make all data between 40 and 60 Hz greyed out to indicate line noise region
+    plt.axvspan(45, 55, color='darkgrey', alpha=0.5, zorder=1000, linestyle=None, linewidth=0)
 
-    plt.xlim([0.5, 100])
+    plt.xlim([None, 80])
     plt.legend(frameon=False)
     sns.despine()
     plt.tight_layout()

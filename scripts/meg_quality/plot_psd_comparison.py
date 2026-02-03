@@ -107,7 +107,7 @@ def compute_condition_psds(
     ).get_data(return_freqs=True)
     
     # average across channels
-    psd_baseline = np.mean(psd_baseline, axis=(0,1))
+    psd_baseline = np.median(psd_baseline, axis=(0,1))
     
     results['baseline'] = (freqs_baseline, psd_baseline)
     
@@ -121,7 +121,7 @@ def compute_condition_psds(
     ).get_data(return_freqs=True)
     
     # average across channels for all 3 conditions
-    psd_scene = np.mean(psd_scene, axis=(0,1))
+    psd_scene = np.median(psd_scene, axis=(0,1))
 
     
     results['scene'] = (freqs_scene, psd_scene)
