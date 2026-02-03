@@ -179,10 +179,11 @@ class AVSSceneAnnotationTransformer:
 
         return thing_annotations, stuff_annotations
 
-    def crop_resize(self, image: Image.Image, size: Tuple[int, int], ratio: Fraction) -> Image.Image:
+    def crop_resize(self, image: Image.Image, size: Tuple[int, int], ratio: Fraction,
+                    resample: int = Image.LANCZOS) -> Image.Image:
         """
         Apply center crop and resize - matching scene_resizer.py logic.
-        
+
         Parameters
         ----------
         image : PIL.Image
@@ -191,39 +192,41 @@ class AVSSceneAnnotationTransformer:
             Target size (width, height)
         ratio : Fraction
             Target aspect ratio
-            
+        resample : int, optional
+            Resampling filter. Use Image.LANCZOS for photos, Image.NEAREST for masks.
+
         Returns
         -------
         PIL.Image
             Transformed image
         """
         w, h = image.size
-        
+
         # Center crop to target ratio
         if w > ratio * h:  # width is larger than necessary
             x, y = (w - ratio * h) // 2, 0
         else:  # height is larger (ratio * h >= w)
             x, y = 0, (h - w / ratio) // 2
-        
+
         image = image.crop((x, y, w - x, h - y))
-        
+
         # Resize to target size
         if image.size != size:
-            image = image.resize(size, resample=Image.LANCZOS)
-            
+            image = image.resize(size, resample=resample)
+
         return image
     
     def _transform_mask(self, mask: np.ndarray, original_size: Tuple[int, int]) -> np.ndarray:
         """
         Transform a boolean mask using the same crop+resize as scene_resizer.
-        
+
         Parameters
         ----------
         mask : np.ndarray
             Original boolean mask
         original_size : tuple
             Original image size (width, height)
-            
+
         Returns
         -------
         np.ndarray
@@ -231,13 +234,17 @@ class AVSSceneAnnotationTransformer:
         """
         # Convert boolean mask to PIL Image
         mask_image = Image.fromarray(mask.astype(np.uint8) * 255)
-        
+
         # Apply same transformation as scenes
-        transformed_image = self.crop_resize(mask_image, self.target_size, self.target_ratio)
-        
+        # Use NEAREST interpolation to preserve sharp mask edges
+        transformed_image = self.crop_resize(
+            mask_image, self.target_size, self.target_ratio,
+            resample=Image.NEAREST
+        )
+
         # Convert back to boolean mask
         transformed_mask = np.array(transformed_image, dtype=bool)
-        
+
         return transformed_mask
     
     def _get_coco_id_from_filename(self, filename: str) -> Optional[int]:
