@@ -23,10 +23,15 @@ Author: P. Sulewski (psulewski@uos.de)
 """
 
 import os
+import json
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.patheffects as path_effects
 from PIL import Image
+from scipy import ndimage
+import pycocotools.mask as mask_util
+import seaborn as sns
 
 # pyAVS imports
 from pyavs.scenes.objects import get_fixated_objects
@@ -142,6 +147,7 @@ def add_object_labels_to_data(fixations_df: pd.DataFrame,
 
 def plot_fixations_on_scene(scene_id: int, fixations_df: pd.DataFrame,
                            mscoco_image_dir: str, config: PyAVSConfig,
+                           transformed_annotations_dir: str = None,
                            output_dir: str = "plots", max_fixations: int = 50) -> None:
     """
     Plot fixations with object labels overlaid on a scene image.
@@ -156,6 +162,8 @@ def plot_fixations_on_scene(scene_id: int, fixations_df: pd.DataFrame,
         Path to MSCOCO images directory
     config : PyAVSConfig
         Configuration with visual system parameters (required)
+    transformed_annotations_dir : str, optional
+        Path to transformed annotations directory for segmentation mask plots
     output_dir : str, optional
         Output directory for plots
     max_fixations : int, optional
@@ -280,6 +288,126 @@ def plot_fixations_on_scene(scene_id: int, fixations_df: pd.DataFrame,
     logger.info(f"  PDF: {pdf_file}")
 
     plt.show()
+    plt.close()
+
+    # Generate segmentation mask visualization if annotation directory provided
+    if transformed_annotations_dir is not None:
+        plot_segmentation_mask(scene_id, transformed_annotations_dir, config, output_dir)
+
+
+def plot_segmentation_mask(scene_id: int, transformed_annotations_dir: str,
+                           config: PyAVSConfig, output_dir: str = "plots") -> None:
+    """
+    Plot segmentation masks for a scene with category labels.
+
+    Creates a visualization showing all object segmentation masks with distinct
+    colors and category labels at the centroid of each region.
+
+    Parameters
+    ----------
+    scene_id : int
+        COCO scene ID to plot
+    transformed_annotations_dir : str
+        Path to transformed annotations directory
+    config : PyAVSConfig
+        Configuration with visual system parameters
+    output_dir : str, optional
+        Output directory for plots
+    """
+    # Load transformed annotations
+    annotation_file = os.path.join(transformed_annotations_dir, f"{scene_id}_transformed.json")
+
+    if not os.path.exists(annotation_file):
+        logger.warning(f"No transformed annotations found for scene {scene_id}")
+        return
+
+    with open(annotation_file, 'r') as f:
+        annotations = json.load(f)
+
+    if not annotations:
+        logger.warning(f"Empty annotations for scene {scene_id}")
+        return
+
+    # Get scene dimensions from config
+    scene_width = int(config.screen_size_pixels[0] * config.screen_usage)
+    scene_height = int(config.screen_size_pixels[1] * config.screen_usage)
+
+    # Create blank RGB image
+    segmentation_image = np.zeros((scene_height, scene_width, 3), dtype=np.float32)
+
+    # Get colormap with enough distinct colors
+    colors = plt.cm.tab20(np.linspace(0, 1, 20))
+
+    # Store category info for labels
+    category_info = []
+
+    # Decode and fill each mask
+    for idx, (cat_id_str, obj_data) in enumerate(annotations.items()):
+        # Decode RLE mask
+        rle_data = obj_data['rle']
+        rle = {
+            'size': rle_data['size'],
+            'counts': rle_data['counts'].encode('utf-8') if isinstance(rle_data['counts'], str) else rle_data['counts']
+        }
+        mask = mask_util.decode(rle).astype(bool)
+
+        # Assign color (cycle through colormap)
+        color = colors[idx % 20][:3]
+
+        # Fill mask region with color
+        segmentation_image[mask] = color
+
+        # Calculate centroid for label placement
+        if mask.any():
+            center_y, center_x = ndimage.center_of_mass(mask)
+            category_info.append({
+                'name': obj_data['category_name'],
+                'center_x': center_x,
+                'center_y': center_y,
+                'color': color
+            })
+
+    # Set up seaborn context
+    sns.set_context("poster")
+
+    # Create figure with same size parameters as fixation plot
+    plt.figure(figsize=(10, 7.5))
+    ax = plt.gca()
+
+    # Display segmentation image
+    ax.imshow(segmentation_image)
+
+    # Add category labels at centroids
+    for info in category_info:
+        text = ax.text(
+            info['center_x'], info['center_y'],
+            info['name'],
+            color='white',
+            ha='center', va='center'
+        )
+        # Add black outline for readability on lighter colors
+        text.set_path_effects([
+            path_effects.Stroke(linewidth=3, foreground='black'),
+            path_effects.Normal()
+        ])
+
+    ax.axis('off')
+    plt.tight_layout()
+
+    # Save plots
+    os.makedirs(output_dir, exist_ok=True)
+
+    png_file = os.path.join(output_dir, f"scene_{scene_id}_segmentation.png")
+    plt.savefig(png_file, dpi=300, bbox_inches='tight', facecolor='white', edgecolor='none')
+
+    pdf_file = os.path.join(output_dir, f"scene_{scene_id}_segmentation.pdf")
+    plt.savefig(pdf_file, format='pdf', bbox_inches='tight', facecolor='white', edgecolor='none')
+
+    logger.info(f"Saved segmentation plots:")
+    logger.info(f"  PNG: {png_file}")
+    logger.info(f"  PDF: {pdf_file}")
+
+    sns.despine()
     plt.close()
 
 
@@ -473,6 +601,7 @@ def main():
             fixations_with_objects,
             mscoco_image_dir,
             config,
+            transformed_annotations_dir=TRANSFORMED_ANNOTATIONS_DIR,
             output_dir=plots_dir,)
 
     # Print final summary
