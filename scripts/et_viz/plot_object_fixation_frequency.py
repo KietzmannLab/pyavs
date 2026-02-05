@@ -159,7 +159,7 @@ def plot_object_fixation_frequency(
             colors.append(palette[i % len(palette)])
 
     # Create figure
-    plt.figure(figsize=(16, 6))
+    plt.figure(figsize=(12, 7))
 
     # Create bar plot
     bars = plt.bar(
@@ -179,7 +179,9 @@ def plot_object_fixation_frequency(
 
     # Set axis labels (lowercase, units in brackets)
     plt.ylabel('fixation count')
-    plt.xlabel('object category')
+    plt.xlabel(None)
+    # logscale for y-axis
+    plt.yscale('log')
 
     # Remove top and right spines
     sns.despine()
@@ -230,7 +232,7 @@ def main():
 
     # Define subjects and sessions to process
     # Adjust these lists based on available data
-    SUBJECTS = list(range(1, 6))  # Subjects 1-60
+    SUBJECTS = list(range(1, 6))  # Subjects 1-5
     SESSIONS = list(range(1, 11))  # Sessions 1-10
 
     # Check paths
@@ -265,10 +267,18 @@ def main():
     logger.info("\nCreating object fixation frequency plot...")
     plot_object_fixation_frequency(
         all_fixations,
-        top_n=40,
+        top_n=25,
         output_dir=OUTPUT_DIR,
         filename="object_fixation_frequency_all_subjects"
     )
+    
+    # how many unique object categories were fixated? and how many fixations on average (plus std)?
+    unique_objects = all_fixations['object_label'].nunique()
+    fixations_per_object = all_fixations['object_label'].value_counts()
+    avg_fixations = fixations_per_object.mean()
+    std_fixations = fixations_per_object.std()
+    logger.info(f"\nUnique object categories fixated: {unique_objects}")
+    logger.info(f"Average fixations per object: {avg_fixations:.1f} ± {std_fixations:.1f}")
 
     # Print top 10 most fixated objects
     object_counts = all_fixations['object_label'].value_counts()

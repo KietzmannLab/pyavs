@@ -336,8 +336,19 @@ def plot_segmentation_mask(scene_id: int, transformed_annotations_dir: str,
     segmentation_image = np.zeros((scene_height, scene_width, 3), dtype=np.float32)
 
     # Get colormap with enough distinct colors
-    colors = plt.cm.tab20(np.linspace(0, 1, 20))
-
+    num_categories = len(annotations)
+    colors = []   
+    import colorsys                                                                                                         
+    for i in range(num_categories):                                                                                  
+        # Spread hues evenly, vary saturation and value to increase distinction                                      
+        hue = i / num_categories                                                                                     
+        saturation = 0.6 + 0.4 * ((i % 3) / 2)  # Vary between 0.6-1.0                                               
+        value = 0.7 + 0.3 * ((i % 2))  # Vary between 0.7-1.0                                                        
+        # Convert HSV to RGB                                                                                         
+                                                                                                
+        rgb = colorsys.hsv_to_rgb(hue, saturation, value)                                                            
+        colors.append(rgb)                                                                                           
+    colors = np.array(colors)   
     # Store category info for labels
     category_info = []
 
@@ -352,7 +363,7 @@ def plot_segmentation_mask(scene_id: int, transformed_annotations_dir: str,
         mask = mask_util.decode(rle).astype(bool)
 
         # Assign color (cycle through colormap)
-        color = colors[idx % 20][:3]
+        color = colors[idx][:3]
 
         # Fill mask region with color
         segmentation_image[mask] = color
@@ -379,6 +390,8 @@ def plot_segmentation_mask(scene_id: int, transformed_annotations_dir: str,
 
     # Add category labels at centroids
     for info in category_info:
+        if info['name'] in ['outside', 'unknown']:
+            continue
         text = ax.text(
             info['center_x'], info['center_y'],
             info['name'],
@@ -387,7 +400,7 @@ def plot_segmentation_mask(scene_id: int, transformed_annotations_dir: str,
         )
         # Add black outline for readability on lighter colors
         text.set_path_effects([
-            path_effects.Stroke(linewidth=3, foreground='black'),
+            path_effects.Stroke(linewidth=2, foreground='black'),
             path_effects.Normal()
         ])
 
