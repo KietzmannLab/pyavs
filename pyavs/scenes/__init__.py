@@ -35,5 +35,11 @@ from .embeddings import (
     extract_embeddings_from_crops,
     get_available_models,
     get_default_ecoset_path,
-    create_bids_embeddings_path 
+    create_bids_embeddings_path
+)
+
+from .coco_licenses import (
+    extract_licensed_images,
+    PERMISSIVE_LICENSE_IDS,
+    LICENSE_INFO,
 )
