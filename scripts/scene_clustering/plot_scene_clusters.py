@@ -9,7 +9,7 @@ Features:
 - t-SNE visualization of scene embeddings colored by cluster
 - AVS vs NSD cluster share comparison
 - Example images saved to cluster subfolders (AVS-sized images)
-- License metadata saved as JSON per cluster for paper-safe outputs
+- License + Flickr metadata saved as JSON per cluster for paper-safe attribution
 
 Usage (with defaults on UOS server):
     python -m scripts.scene_clustering.plot_scene_clusters
@@ -20,6 +20,7 @@ Usage (with custom paths):
         --avs-scenes /path/to/experiment_cocoIDs.csv \\
         --avs-scenes-dir /path/to/avs_scenes \\
         --permissive-csv /path/to/ms_coco_permissive_images.csv \\
+        --flickr-metadata-csv /path/to/avs_permissive_images_with_flickr.csv \\
         --output-dir /path/to/output
 
 Default paths (UOS server):
@@ -27,6 +28,7 @@ Default paths (UOS server):
     avs-scenes: /share/klab/datasets/avs/input/scene_sampling_MEG/experiment_cocoIDs.csv
     avs-scenes-dir: /share/klab/datasets/avs/AVS-UTILS/avs_scenes
     permissive-csv: /share/klab/datasets/avs/AVS-UTILS/avs_scene_annotations/ms_coco_permissive_images.csv
+    flickr-metadata-csv: /share/klab/datasets/avs/AVS-UTILS/avs_scene_annotations/avs_permissive_images_with_flickr.csv
     output-dir: /share/klab/psulewski/psulewski/pyavs/scene_clustering
 
 Output structure:
@@ -38,7 +40,7 @@ Output structure:
         ├── cluster_0/
         │   ├── 000000123456.jpg    # Individual scene images
         │   ├── 000000234567.jpg
-        │   └── licenses.json       # License info for this cluster
+        │   └── licenses.json       # License + Flickr attribution metadata
         ├── cluster_1/
         │   └── ...
         └── ...
@@ -365,6 +367,7 @@ def save_cluster_examples(
     avs_scenes_dir: str,
     output_dir: str,
     permissive_csv: str,
+    flickr_df: Optional[pd.DataFrame] = None,
     paper_safe_ids: Optional[set[int]] = None,
     n_examples: int = 6,
     cluster_id: Optional[int] = None,
@@ -374,6 +377,7 @@ def save_cluster_examples(
 
     Instead of joining images into a single plot, this saves individual
     scene images to a subfolder and writes license info as JSON.
+    When flickr_df is provided, Flickr metadata is included in the JSON.
 
     Parameters
     ----------
@@ -385,6 +389,9 @@ def save_cluster_examples(
         Output directory for cluster subfolders
     permissive_csv : str
         Path to CSV with COCO license info
+    flickr_df : pd.DataFrame, optional
+        DataFrame with Flickr metadata. If provided, filters to scenes with
+        complete metadata and includes Flickr fields in the licenses.json.
     paper_safe_ids : set[int], optional
         Set of COCO IDs with permissive licenses
     n_examples : int
@@ -400,22 +407,43 @@ def save_cluster_examples(
     # Load license info
     df_licenses = pd.read_csv(permissive_csv)
 
-    clusters_to_plot = [cluster_id] if cluster_id is not None else sorted(df_embeddings['cluster'].unique())
+    # Merge Flickr metadata if provided
+    if flickr_df is not None:
+        flickr_cols = ['coco_id'] + FLICKR_ALL_FIELDS
+        available_cols = [c for c in flickr_cols if c in flickr_df.columns]
+        df_with_flickr = df_embeddings.merge(
+            flickr_df[available_cols],
+            left_on='cocoID', right_on='coco_id', how='left'
+        )
+        # Filter for scenes with complete required Flickr metadata
+        has_required_metadata = pd.Series(True, index=df_with_flickr.index)
+        for field in FLICKR_REQUIRED_FIELDS:
+            if field in df_with_flickr.columns:
+                has_required_metadata &= df_with_flickr[field].notna()
+        df_embeddings_filtered = df_with_flickr[has_required_metadata].copy()
+        logger.info(f"Scenes with complete Flickr metadata: {len(df_embeddings_filtered)} / {len(df_embeddings)}")
+    else:
+        df_embeddings_filtered = df_embeddings
+        df_with_flickr = None
+
+    clusters_to_plot = [cluster_id] if cluster_id is not None else sorted(df_embeddings_filtered['cluster'].unique())
     all_saved_examples = []
 
     for cid in clusters_to_plot:
-        cluster_df = df_embeddings[df_embeddings['cluster'] == cid]
+        cluster_df = df_embeddings_filtered[df_embeddings_filtered['cluster'] == cid]
 
         # Filter to paper-safe images if specified
         if paper_safe_ids is not None:
             cluster_df = cluster_df[cluster_df['cocoID'].isin(paper_safe_ids)]
 
         if len(cluster_df) == 0:
-            logger.warning(f"Cluster {cid}: No paper-safe images available")
+            logger.warning(f"Cluster {cid}: No paper-safe images with complete metadata available")
             continue
 
         # Sample examples
         n_to_sample = min(n_examples, len(cluster_df))
+        if n_to_sample < n_examples:
+            logger.warning(f"Cluster {cid}: Only {n_to_sample} scenes with complete metadata available")
         examples = cluster_df.sample(n=n_to_sample, random_state=42)
 
         # Create cluster subfolder
@@ -451,6 +479,22 @@ def save_cluster_examples(
                 license_data = {'coco_id': coco_id, 'license_id': None, 'license_name': 'Unknown'}
 
             license_data['cluster'] = int(cid)
+
+            # Add Flickr metadata to license data if available
+            if flickr_df is not None:
+                for field in FLICKR_ALL_FIELDS:
+                    if field in row.index:
+                        val = row[field]
+                        # Convert to JSON-serializable type
+                        if isinstance(val, (np.integer,)):
+                            license_data[field] = int(val)
+                        elif isinstance(val, (np.floating,)):
+                            license_data[field] = float(val)
+                        elif pd.notna(val):
+                            license_data[field] = str(val)
+                        else:
+                            license_data[field] = None
+
             cluster_license_info.append(license_data)
 
             all_saved_examples.append({
@@ -459,7 +503,7 @@ def save_cluster_examples(
                 'saved_path': dst_path
             })
 
-        # Save license info as JSON for this cluster
+        # Save license info (with Flickr metadata) as JSON for this cluster
         if cluster_license_info:
             license_json_path = os.path.join(cluster_subdir, 'licenses.json')
             with open(license_json_path, 'w') as f:
@@ -556,6 +600,13 @@ def plot_individual_cluster_tsne(
 DEFAULT_INPUT_DIR = '/share/klab/datasets/avs/input'
 DEFAULT_AVS_UTILS_DIR = '/share/klab/datasets/avs/AVS-UTILS'
 DEFAULT_OUTPUT_DIR = '/share/klab/psulewski/psulewski/pyavs/scene_clustering'
+DEFAULT_FLICKR_METADATA_PATH = '/share/klab/datasets/avs/AVS-UTILS/avs_scene_annotations/avs_permissive_images_with_flickr.csv'
+
+# Required Flickr metadata fields for attribution
+FLICKR_REQUIRED_FIELDS = ['flickr_nsid', 'flickr_username', 'flickr_title',
+                          'flickr_date_taken', 'flickr_page_url']
+FLICKR_OPTIONAL_FIELDS = ['flickr_locality', 'flickr_country']
+FLICKR_ALL_FIELDS = FLICKR_REQUIRED_FIELDS + FLICKR_OPTIONAL_FIELDS
 
 
 def main():
@@ -590,6 +641,13 @@ def main():
         type=str,
         default=os.path.join(DEFAULT_AVS_UTILS_DIR, 'avs_scene_annotations', 'ms_coco_permissive_images.csv'),
         help='Path to CSV with COCO image license info'
+    )
+
+    parser.add_argument(
+        '--flickr-metadata-csv',
+        type=str,
+        default=DEFAULT_FLICKR_METADATA_PATH,
+        help='Path to CSV with Flickr metadata for attribution'
     )
 
     parser.add_argument(
@@ -659,6 +717,7 @@ def main():
         ('avs-scenes', args.avs_scenes),
         ('avs-scenes-dir', args.avs_scenes_dir),
         ('permissive-csv', args.permissive_csv),
+        ('flickr-metadata-csv', args.flickr_metadata_csv),
     ]:
         if not os.path.exists(path_val):
             logger.error(f"Path not found for --{path_arg}: {path_val}")
@@ -670,6 +729,10 @@ def main():
         args.embeddings_csv,
         args.avs_scenes
     )
+
+    # Load Flickr metadata for attribution
+    logger.info(f"Loading Flickr metadata from {args.flickr_metadata_csv}")
+    flickr_df = pd.read_csv(args.flickr_metadata_csv)
 
     # Get paper-safe COCO IDs
     logger.info(f"Filtering examples by license IDs: {args.license_ids}")
@@ -727,12 +790,13 @@ def main():
             args.output_dir
         )
 
-        # Save example images to cluster subfolder (with license JSON)
+        # Save example images to cluster subfolder (with license JSON and Flickr metadata)
         examples = save_cluster_examples(
             df_avs_only,
             args.avs_scenes_dir,
             individual_dir,
             args.permissive_csv,
+            flickr_df=flickr_df,
             paper_safe_ids=paper_safe_ids,
             n_examples=args.n_examples,
             cluster_id=cid
