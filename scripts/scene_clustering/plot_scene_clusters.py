@@ -8,8 +8,8 @@ cluster in embedding space and comparing AVS vs NSD scene distributions.
 Features:
 - t-SNE visualization of scene embeddings colored by cluster
 - AVS vs NSD cluster share comparison
-- Example image grids with license filtering for paper-safe outputs
-- License metadata export for all plotted example images
+- Example images saved to cluster subfolders (AVS-sized images)
+- License metadata saved as JSON per cluster for paper-safe outputs
 
 Usage (with defaults on UOS server):
     python -m scripts.scene_clustering.plot_scene_clusters
@@ -18,23 +18,39 @@ Usage (with custom paths):
     python -m scripts.scene_clustering.plot_scene_clusters \\
         --embeddings-csv /path/to/df_mean_embeddings_clustered_60.csv \\
         --avs-scenes /path/to/experiment_cocoIDs.csv \\
-        --coco-dir /path/to/mscoco_scenes \\
+        --avs-scenes-dir /path/to/avs_scenes \\
         --permissive-csv /path/to/ms_coco_permissive_images.csv \\
         --output-dir /path/to/output
 
 Default paths (UOS server):
     embeddings-csv: /share/klab/datasets/avs/input/scene_sampling_MEG/df_mean_embeddings_clustered_60.csv
     avs-scenes: /share/klab/datasets/avs/input/scene_sampling_MEG/experiment_cocoIDs.csv
-    coco-dir: /share/klab/datasets/avs/input/mscoco_scenes
+    avs-scenes-dir: /share/klab/datasets/avs/AVS-UTILS/avs_scenes
     permissive-csv: /share/klab/datasets/avs/AVS-UTILS/avs_scene_annotations/ms_coco_permissive_images.csv
     output-dir: /share/klab/psulewski/psulewski/pyavs/scene_clustering
+
+Output structure:
+    output_dir/
+    ├── tsne_clusters.png/pdf       # Main t-SNE visualization
+    ├── cluster_share_avs_nsd.png/pdf  # AVS vs NSD comparison
+    ├── tsne_cache.npy              # Cached t-SNE coordinates
+    └── individual_clusters/
+        ├── cluster_0/
+        │   ├── 000000123456.jpg    # Individual scene images
+        │   ├── 000000234567.jpg
+        │   └── licenses.json       # License info for this cluster
+        ├── cluster_1/
+        │   └── ...
+        └── ...
 
 Author: P. Sulewski (psulewski@uos.de)
 """
 
 import argparse
+import json
 import logging
 import os
+import shutil
 from pathlib import Path
 from typing import Optional
 
@@ -42,7 +58,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from PIL import Image
 from sklearn.manifold import TSNE
 
 from pyavs.utils.logging import get_logger
@@ -345,44 +360,48 @@ def plot_cluster_share_comparison(
     logger.info(f"Saved: {pdf_path}")
 
 
-def plot_cluster_examples(
+def save_cluster_examples(
     df_embeddings: pd.DataFrame,
-    coco_dir: str,
+    avs_scenes_dir: str,
     output_dir: str,
+    permissive_csv: str,
     paper_safe_ids: Optional[set[int]] = None,
     n_examples: int = 6,
     cluster_id: Optional[int] = None,
-    filename: Optional[str] = None
 ) -> list[dict]:
     """
-    Plot example images from a cluster with license filtering.
+    Save example images from a cluster to a subfolder with license info.
+
+    Instead of joining images into a single plot, this saves individual
+    scene images to a subfolder and writes license info as JSON.
 
     Parameters
     ----------
     df_embeddings : pd.DataFrame
-        Embeddings dataframe with 'cluster' and 'coco_id' columns
-    coco_dir : str
-        Directory containing COCO images
+        Embeddings dataframe with 'cluster' and 'cocoID' columns
+    avs_scenes_dir : str
+        Directory containing AVS-sized scene images (AVS-UTILS/avs_scenes)
     output_dir : str
-        Output directory for plots
+        Output directory for cluster subfolders
+    permissive_csv : str
+        Path to CSV with COCO license info
     paper_safe_ids : set[int], optional
         Set of COCO IDs with permissive licenses
     n_examples : int
-        Number of example images to show
+        Number of example images to save
     cluster_id : int, optional
-        Specific cluster to plot. If None, plots all clusters.
-    filename : str, optional
-        Custom filename (default: cluster_{id}_examples)
+        Specific cluster to process. If None, processes all clusters.
 
     Returns
     -------
     list[dict]
-        List of dicts with coco_id and license info for plotted examples
+        List of dicts with coco_id and cluster info for saved examples
     """
-    sns.set_context("poster")
+    # Load license info
+    df_licenses = pd.read_csv(permissive_csv)
 
     clusters_to_plot = [cluster_id] if cluster_id is not None else sorted(df_embeddings['cluster'].unique())
-    all_plotted_examples = []
+    all_saved_examples = []
 
     for cid in clusters_to_plot:
         cluster_df = df_embeddings[df_embeddings['cluster'] == cid]
@@ -399,102 +418,69 @@ def plot_cluster_examples(
         n_to_sample = min(n_examples, len(cluster_df))
         examples = cluster_df.sample(n=n_to_sample, random_state=42)
 
-        # Load and plot images in a row
-        fig_width = 4 * n_to_sample
-        plt.figure(figsize=(fig_width, 4))
+        # Create cluster subfolder
+        cluster_subdir = os.path.join(output_dir, f"cluster_{cid}")
+        os.makedirs(cluster_subdir, exist_ok=True)
 
-        for idx, (_, row) in enumerate(examples.iterrows()):
+        cluster_license_info = []
+
+        for _, row in examples.iterrows():
             coco_id = int(row['cocoID'])
 
-            # Find image file
-            img_path = _find_coco_image(coco_dir, coco_id)
-            if img_path is None:
+            # Find source image (AVS-sized)
+            src_path = _find_avs_scene_image(avs_scenes_dir, coco_id)
+            if src_path is None:
                 logger.warning(f"Image not found for coco_id {coco_id}")
                 continue
 
-            img = Image.open(img_path)
+            # Copy image to cluster subfolder
+            dst_filename = f"{coco_id:012d}.jpg"
+            dst_path = os.path.join(cluster_subdir, dst_filename)
+            shutil.copy2(src_path, dst_path)
 
-            ax = plt.subplot(1, n_to_sample, idx + 1)
-            ax.imshow(img)
-            ax.axis('off')
+            # Get license info for this image
+            license_row = df_licenses[df_licenses['coco_id'] == coco_id]
+            if len(license_row) > 0:
+                license_data = license_row.iloc[0].to_dict()
+                # Convert numpy types to Python types for JSON serialization
+                license_data = {k: (int(v) if isinstance(v, (np.integer,)) else
+                                   float(v) if isinstance(v, (np.floating,)) else
+                                   str(v) if pd.notna(v) else None)
+                               for k, v in license_data.items()}
+            else:
+                license_data = {'coco_id': coco_id, 'license_id': None, 'license_name': 'Unknown'}
 
-            all_plotted_examples.append({
+            license_data['cluster'] = int(cid)
+            cluster_license_info.append(license_data)
+
+            all_saved_examples.append({
                 'cluster': cid,
                 'coco_id': coco_id,
-                'image_path': str(img_path)
+                'saved_path': dst_path
             })
 
-        plt.tight_layout()
+        # Save license info as JSON for this cluster
+        if cluster_license_info:
+            license_json_path = os.path.join(cluster_subdir, 'licenses.json')
+            with open(license_json_path, 'w') as f:
+                json.dump(cluster_license_info, f, indent=2)
+            logger.info(f"Saved {len(cluster_license_info)} examples to {cluster_subdir}")
 
-        out_filename = filename if filename else f"cluster_{cid}_examples"
-        os.makedirs(output_dir, exist_ok=True)
-        pdf_path = os.path.join(output_dir, f"{out_filename}.pdf")
-        png_path = os.path.join(output_dir, f"{out_filename}.png")
-
-        plt.savefig(pdf_path, format='pdf', bbox_inches='tight', facecolor='white')
-        plt.savefig(png_path, dpi=300, bbox_inches='tight', facecolor='white')
-        plt.close()
-
-        logger.info(f"Saved: {pdf_path}")
-
-    return all_plotted_examples
+    return all_saved_examples
 
 
-def _find_coco_image(coco_dir: str, coco_id: int) -> Optional[Path]:
-    """Find COCO image file by ID, checking common naming patterns."""
-    coco_dir = Path(coco_dir)
+def _find_avs_scene_image(avs_scenes_dir: str, coco_id: int) -> Optional[Path]:
+    """Find AVS-sized scene image by COCO ID."""
+    avs_scenes_dir = Path(avs_scenes_dir)
 
-    # Try common patterns
-    patterns = [
-        f"{coco_id:012d}.jpg",]
-    
+    # AVS scenes use zero-padded 12-digit filenames
+    filename = f"{coco_id:012d}.jpg"
+    path = avs_scenes_dir / filename
 
-    for pattern in patterns:
-        path = coco_dir / pattern
-        if path.exists():
-            return path
-
-    # Try recursive search
-    for path in coco_dir.rglob(f"*{coco_id}*.jpg"):
+    if path.exists():
         return path
 
     return None
-
-
-def save_example_licenses(
-    plotted_examples: list[dict],
-    permissive_csv: str,
-    output_path: str
-) -> None:
-    """
-    Save license information for all plotted example images.
-
-    Parameters
-    ----------
-    plotted_examples : list[dict]
-        List of dicts with coco_id info from plot_cluster_examples
-    permissive_csv : str
-        Path to CSV with coco_id and license info
-    output_path : str
-        Output path for license CSV
-    """
-    if not plotted_examples:
-        logger.warning("No examples to save license info for")
-        return
-
-    df_licenses = pd.read_csv(permissive_csv)
-    plotted_ids = [ex['coco_id'] for ex in plotted_examples]
-
-    # Get license info for plotted images
-    license_info = df_licenses[df_licenses['coco_id'].isin(plotted_ids)].copy()
-
-    # Add cluster info
-    id_to_cluster = {ex['coco_id']: ex['cluster'] for ex in plotted_examples}
-    license_info['cluster'] = license_info['coco_id'].map(id_to_cluster)
-
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    license_info.to_csv(output_path, index=False)
-    logger.info(f"Saved license info to: {output_path}")
 
 
 def plot_individual_cluster_tsne(
@@ -591,10 +577,10 @@ def main():
     )
 
     parser.add_argument(
-        '--coco-dir',
+        '--avs-scenes-dir',
         type=str,
-        default=os.path.join(DEFAULT_INPUT_DIR, 'mscoco_scenes'),
-        help='Directory containing COCO scene images'
+        default=os.path.join(DEFAULT_AVS_UTILS_DIR, 'avs_scenes'),
+        help='Directory containing AVS-sized scene images'
     )
 
     parser.add_argument(
@@ -669,7 +655,7 @@ def main():
     for path_arg, path_val in [
         ('embeddings-csv', args.embeddings_csv),
         ('avs-scenes', args.avs_scenes),
-        ('coco-dir', args.coco_dir),
+        ('avs-scenes-dir', args.avs_scenes_dir),
         ('permissive-csv', args.permissive_csv),
     ]:
         if not os.path.exists(path_val):
@@ -729,8 +715,6 @@ def main():
 
     df_avs_only = df_embeddings[df_embeddings['cocoID'].isin(avs_coco_ids)]
     cluster_ids = sorted(df_avs_only['cluster'].unique())[:args.n_clusters_to_plot]
-    
-    avs_tsne_coords = tsne_coords[df_embeddings['cocoID'].isin(avs_coco_ids)]
 
     for cid in cluster_ids:
         # Individual t-SNE highlight
@@ -741,25 +725,17 @@ def main():
             args.output_dir
         )
 
-        # Example images
-        examples = plot_cluster_examples(
+        # Save example images to cluster subfolder (with license JSON)
+        examples = save_cluster_examples(
             df_avs_only,
-            args.coco_dir,
+            args.avs_scenes_dir,
             individual_dir,
+            args.permissive_csv,
             paper_safe_ids=paper_safe_ids,
             n_examples=args.n_examples,
             cluster_id=cid
         )
         all_plotted_examples.extend(examples)
-
-    # Save license info for all plotted examples
-    if all_plotted_examples:
-        license_output = os.path.join(args.output_dir, 'example_licenses.csv')
-        save_example_licenses(
-            all_plotted_examples,
-            args.permissive_csv,
-            license_output
-        )
 
     logger.info("=" * 70)
     logger.info("Visualization complete!")

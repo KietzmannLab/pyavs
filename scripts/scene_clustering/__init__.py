@@ -4,7 +4,7 @@ Scene clustering visualization submodule.
 This module provides visualization tools for semantic scene clustering:
 - t-SNE visualization of scene embeddings colored by cluster
 - AVS vs NSD comparison plots
-- Example image grids with license filtering for paper-safe outputs
+- Example images saved to subfolders with license JSON for paper-safe outputs
 """
 
 from .plot_scene_clusters import (
@@ -13,8 +13,8 @@ from .plot_scene_clusters import (
     compute_tsne_embedding,
     plot_tsne_clusters,
     plot_cluster_share_comparison,
-    plot_cluster_examples,
-    save_example_licenses,
+    save_cluster_examples,
+    plot_individual_cluster_tsne,
 )
 
 __all__ = [
@@ -23,6 +23,6 @@ __all__ = [
     'compute_tsne_embedding',
     'plot_tsne_clusters',
     'plot_cluster_share_comparison',
-    'plot_cluster_examples',
-    'save_example_licenses',
+    'save_cluster_examples',
+    'plot_individual_cluster_tsne',
 ]
