@@ -52,6 +52,35 @@ FLICKR_API_URL = "https://api.flickr.com/services/rest/"
 FLICKR_REQUEST_DELAY = 0.1  # seconds between requests (~36000/hour, well under 3600 limit)
 
 
+def get_avs_scene_ids(avs_scenes_dir: str) -> set[int]:
+    """
+    Get set of COCO IDs for AVS scenes from the scenes directory.
+
+    Parameters
+    ----------
+    avs_scenes_dir : str
+        Path to AVS scenes directory containing scene images
+
+    Returns
+    -------
+    set[int]
+        Set of COCO image IDs used as AVS scenes
+    """
+    scene_ids = set()
+    scenes_path = Path(avs_scenes_dir)
+
+    for ext in ['.jpg', '.jpeg', '.png']:
+        for filepath in scenes_path.glob(f'*{ext}'):
+            # Extract ID from filename (e.g., "171201_MEG_size.jpg" -> 171201)
+            try:
+                scene_id = int(filepath.stem.split('_')[0])
+                scene_ids.add(scene_id)
+            except (ValueError, IndexError):
+                continue
+
+    return scene_ids
+
+
 def extract_flickr_photo_id(flickr_url: str) -> str | None:
     """
     Extract photo ID from Flickr static URL.
@@ -427,6 +456,13 @@ Examples:
       --coco-dir /path/to/coco/annotations \\
       --output permissive_coco_images.csv
 
+  # Filter to AVS scenes only (recommended for faster processing)
+  python -m pyavs.scenes.coco_licenses \\
+      --coco-dir /path/to/coco/annotations \\
+      --avs-scenes-dir /share/klab/datasets/avs/AVS-UTILS/avs_scenes \\
+      --output avs_permissive_images.csv \\
+      --flickr-api-key YOUR_API_KEY
+
 Permissive licenses included (IDs 1, 2, 5, 7, 8):
   1: Attribution License (CC-BY)
   2: Attribution-ShareAlike License (CC-BY-SA)
@@ -475,6 +511,12 @@ See README_coco_licenses.md for full license documentation.
         help='Skip Flickr metadata enrichment even if API key is available'
     )
 
+    parser.add_argument(
+        '--avs-scenes-dir',
+        type=str,
+        help='Path to AVS scenes directory. If provided, only fetch Flickr metadata for these scenes.'
+    )
+
     args = parser.parse_args()
 
     # Extract licensed images
@@ -494,6 +536,23 @@ See README_coco_licenses.md for full license documentation.
     if len(df) == 0:
         print("Warning: No images with permissive licenses found")
         return 1
+
+    # Filter to AVS scenes if directory provided
+    if args.avs_scenes_dir:
+        avs_path = Path(args.avs_scenes_dir)
+        if not avs_path.exists():
+            print(f"Error: AVS scenes directory not found: {avs_path}")
+            return 1
+        avs_scene_ids = get_avs_scene_ids(str(avs_path))
+        print(f"\n=== Filtering to AVS Scenes ===")
+        print(f"Found {len(avs_scene_ids)} AVS scene IDs")
+        original_count = len(df)
+        df = df[df['coco_id'].isin(avs_scene_ids)].reset_index(drop=True)
+        print(f"Filtered from {original_count} to {len(df)} images")
+
+        if len(df) == 0:
+            print("Warning: No AVS scenes found with permissive licenses")
+            return 1
 
     # Enrich with Flickr metadata if API key is available
     if args.flickr_api_key and not args.skip_flickr:
