@@ -11,13 +11,23 @@ Features:
 - Example image grids with license filtering for paper-safe outputs
 - License metadata export for all plotted example images
 
-Usage:
+Usage (with defaults on UOS server):
+    python -m scripts.scene_clustering.plot_scene_clusters
+
+Usage (with custom paths):
     python -m scripts.scene_clustering.plot_scene_clusters \\
         --embeddings-csv /path/to/df_mean_embeddings_clustered_60.csv \\
         --avs-scenes /path/to/experiment_cocoIDs.csv \\
         --coco-dir /path/to/mscoco_scenes \\
         --permissive-csv /path/to/ms_coco_permissive_images.csv \\
         --output-dir /path/to/output
+
+Default paths (UOS server):
+    embeddings-csv: /share/klab/datasets/avs/input/scene_sampling_MEG/df_mean_embeddings_clustered_60.csv
+    avs-scenes: /share/klab/datasets/avs/input/scene_sampling_MEG/experiment_cocoIDs.csv
+    coco-dir: /share/klab/datasets/avs/input/mscoco_scenes
+    permissive-csv: /share/klab/datasets/avs/AVS-UTILS/avs_scene_annotations/ms_coco_permissive_images.csv
+    output-dir: /share/klab/psulewski/psulewski/pyavs/scene_clustering
 
 Author: P. Sulewski (psulewski@uos.de)
 """
@@ -191,9 +201,6 @@ def plot_tsne_clusters(
     df['tsne_1'] = tsne_coords[:, 0]
     df['tsne_2'] = tsne_coords[:, 1]
     df['in_avs'] = df['coco_id'].isin(avs_coco_ids)
-
-    n_clusters = df['cluster'].nunique()
-    cmap = plt.cm.get_cmap('magma', n_clusters)
 
     # Plot NSD scenes (not in AVS) first
     plt.figure(figsize=(10, 10))
@@ -536,6 +543,12 @@ def plot_individual_cluster_tsne(
     logger.info(f"Saved: {png_path}")
 
 
+# Default paths (UOS server)
+DEFAULT_INPUT_DIR = '/share/klab/datasets/avs/input'
+DEFAULT_AVS_UTILS_DIR = '/share/klab/datasets/avs/AVS-UTILS'
+DEFAULT_OUTPUT_DIR = '/share/klab/psulewski/psulewski/pyavs/scene_clustering'
+
+
 def main():
     """Command-line interface for scene cluster visualization."""
     parser = argparse.ArgumentParser(
@@ -545,35 +558,35 @@ def main():
     parser.add_argument(
         '--embeddings-csv',
         type=str,
-        required=True,
+        default=os.path.join(DEFAULT_INPUT_DIR, 'scene_sampling_MEG', 'df_mean_embeddings_clustered_60.csv'),
         help='Path to CSV with scene embeddings and cluster assignments'
     )
 
     parser.add_argument(
         '--avs-scenes',
         type=str,
-        required=True,
+        default=os.path.join(DEFAULT_INPUT_DIR, 'scene_sampling_MEG', 'experiment_cocoIDs.csv'),
         help='Path to CSV with AVS experiment COCO IDs'
     )
 
     parser.add_argument(
         '--coco-dir',
         type=str,
-        required=True,
+        default=os.path.join(DEFAULT_INPUT_DIR, 'mscoco_scenes'),
         help='Directory containing COCO scene images'
     )
 
     parser.add_argument(
         '--permissive-csv',
         type=str,
-        required=True,
+        default=os.path.join(DEFAULT_AVS_UTILS_DIR, 'avs_scene_annotations', 'ms_coco_permissive_images.csv'),
         help='Path to CSV with COCO image license info'
     )
 
     parser.add_argument(
         '--output-dir',
         type=str,
-        required=True,
+        default=DEFAULT_OUTPUT_DIR,
         help='Output directory for plots and data'
     )
 
