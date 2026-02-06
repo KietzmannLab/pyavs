@@ -11,10 +11,7 @@ Usage:
         --output permissive_images.csv
 
     # With Flickr metadata enrichment
-    python -m pyavs.scenes.coco_licenses \
-        --coco-dir /share/klab/datasets/avs/input/annotations/
-        --output permissive_images.csv \
-        --flickr-api-key YOUR_API_KEY
+    python /home/student/p/psulewski/pyAVS/pyavs/scenes/coco_licenses.py --coco-dir /share/klab/datasets/avs/input/annotations/ --output permissive_images.csv --flickr-api-key YOUR_API_KEY
 
 Author: psulewski
 """
@@ -279,11 +276,16 @@ def enrich_with_flickr_metadata(df: pd.DataFrame, api_key: str) -> pd.DataFrame:
 
     # Fetch metadata with progress bar and rate limiting
     metadata_cache = {}
+    counter = 0
     for photo_id in tqdm(unique_photo_ids, desc="Fetching Flickr metadata"):
+        
         metadata = fetch_flickr_metadata(photo_id, api_key)
         metadata_cache[photo_id] = metadata
         time.sleep(FLICKR_REQUEST_DELAY)
-
+        counter += 1
+        if counter % 100 == 0:
+            print(f"  Fetched metadata example: {metadata_cache[photo_id]}")
+            
     # Apply cached metadata to DataFrame
     for idx, row in df.iterrows():
         photo_id = row['flickr_photo_id']
