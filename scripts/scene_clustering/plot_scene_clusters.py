@@ -259,8 +259,8 @@ def plot_tsne_clusters(
         avs_scenes['tsne_2'],
         c=avs_scenes['cluster'],
         cmap=cmap,
-        s=40,
-        alpha=0.6,
+        s=60,
+        alpha=0.8,
         edgecolors='white',
         label='avs', linewidth=1
     )
