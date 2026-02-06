@@ -7,10 +7,10 @@ allow usage in academic publications (with proper attribution).
 
 Usage:
     python -m pyavs.scenes.coco_licenses \
-        --coco-dir /path/to/coco/annotations \
+        --coco-dir /share/klab/datasets/avs/input/annotations/
         --output permissive_images.csv
 
-Author: pyAVS development team
+Author: psulewski
 """
 
 import argparse
@@ -60,7 +60,9 @@ def extract_licensed_images(annotation_file: str, split: str = None) -> pd.DataF
 
     # Get license definitions from the dataset
     licenses = {lic['id']: lic for lic in coco.dataset.get('licenses', [])}
-
+    print("License types in dataset:")
+    for lic_id, lic in licenses.items():
+        print(f"  {lic_id}: {lic.get('name', 'Unknown')} - {lic.get('url', '')}")
     print(f"Found {len(licenses)} license types in dataset")
     print(f"Total images in dataset: {len(coco.getImgIds())}")
 
@@ -70,24 +72,34 @@ def extract_licensed_images(annotation_file: str, split: str = None) -> pd.DataF
         img_info = coco.loadImgs(img_id)[0]
         license_id = img_info.get('license')
 
-        if license_id in PERMISSIVE_LICENSE_IDS:
-            lic = licenses.get(license_id, {})
-            record = {
-                'coco_id': img_id,
-                'file_name': img_info.get('file_name'),
-                'license_id': license_id,
-                'license_name': lic.get('name', 'Unknown'),
-                'license_url': lic.get('url', ''),
-                'flickr_url': img_info.get('flickr_url', ''),
-                'width': img_info.get('width'),
-                'height': img_info.get('height'),
-            }
-            if split:
-                record['split'] = split
-            results.append(record)
+       
+        lic = licenses.get(license_id, {})
+        record = {
+            'coco_id': img_id,
+            'file_name': img_info.get('file_name'),
+            'license_id': license_id,
+            'license_name': lic.get('name', 'Unknown'),
+            'license_url': lic.get('url', ''),
+            'flickr_url': img_info.get('flickr_url', ''),
+            'width': img_info.get('width'),
+            'height': img_info.get('height'),
+        }
+        if split:
+            record['split'] = split
+        results.append(record)
 
     df = pd.DataFrame(results)
     print(f"Found {len(df)} images with permissive licenses")
+    
+    # how many licenses and counts?
+    license_counts = df['license_id'].value_counts()
+    print("\nLicense distribution among permissive images:")
+    for license_id, count in license_counts.items():
+        license_name = LICENSE_INFO.get(license_id, {}).get('name', 'Unknown')
+        print(f"  {license_id}: {license_name} - {count} images")
+        
+    # filter for permissive licenses
+    df = df[df['license_id'].isin(PERMISSIVE_LICENSE_IDS)].reset_index(drop=True)
 
     return df
 
