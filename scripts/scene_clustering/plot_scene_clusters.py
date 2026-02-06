@@ -65,8 +65,8 @@ from pyavs.utils.logging import get_logger
 logger = get_logger('scripts.scene_clustering')
 
 # License filter constants
-DEFAULT_LICENSE_IDS = [1, 2, 7, 8]#[8]  # US Government (safest for derivatives)
-DERIVATIVE_SAFE_LICENSE_IDS = [1, 2, 7, 8]  # CC-BY, CC-BY-SA, Public Domain, US Gov
+DEFAULT_LICENSE_IDS = [ 6]
+DERIVATIVE_SAFE_LICENSE_IDS = [6]  
 
 
 def get_paper_safe_coco_ids(
@@ -242,7 +242,7 @@ def plot_tsne_clusters(
         nsd_only['tsne_2'],
         c="darkgray",
         #cmap="Greys",
-        s=10,
+        s=20,
         alpha=0.15,
         label='nsd only'
     )
@@ -257,7 +257,7 @@ def plot_tsne_clusters(
         avs_scenes['tsne_2'],
         c=avs_scenes['cluster'],
         cmap=cmap,
-        s=20,
+        s=40,
         alpha=0.6,
         edgecolors='white',
         label='avs', linewidth=1
@@ -278,7 +278,7 @@ def plot_tsne_clusters(
     png_path = os.path.join(output_dir, f"{filename}.png")
     pdf_path = os.path.join(output_dir, f"{filename}.pdf")
 
-    plt.savefig(png_path, dpi=300, bbox_inches='tight', transparent=True)
+    plt.savefig(png_path, dpi=300, bbox_inches='tight', facecolor='white')
     plt.savefig(pdf_path, format='pdf', bbox_inches='tight', facecolor='white')
     plt.close()
 
@@ -472,9 +472,11 @@ def save_cluster_examples(
 def _find_avs_scene_image(avs_scenes_dir: str, coco_id: int) -> Optional[Path]:
     """Find AVS-sized scene image by COCO ID."""
     avs_scenes_dir = Path(avs_scenes_dir)
-
+    # list files in avs_scenes_dir and find one that contains the coco_id as a substring
+    
     # AVS scenes use zero-padded 12-digit filenames
-    filename = f"{coco_id:012d}.jpg"
+    filename = f"{coco_id:012d}_MEG_size.jpg"
+    print()
     path = avs_scenes_dir / filename
 
     if path.exists():
@@ -518,7 +520,7 @@ def plot_individual_cluster_tsne(
         other['tsne_1'],
         other['tsne_2'],
         c='lightgray',
-        s=10,
+        s=20,
         alpha=0.3
     )
 
