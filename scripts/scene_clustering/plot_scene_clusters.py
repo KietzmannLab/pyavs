@@ -50,7 +50,7 @@ from pyavs.utils.logging import get_logger
 logger = get_logger('scripts.scene_clustering')
 
 # License filter constants
-DEFAULT_LICENSE_IDS = [8]  # US Government (safest for derivatives)
+DEFAULT_LICENSE_IDS = [1, 2, 7, 8]#[8]  # US Government (safest for derivatives)
 DERIVATIVE_SAFE_LICENSE_IDS = [1, 2, 7, 8]  # CC-BY, CC-BY-SA, Public Domain, US Gov
 
 
@@ -100,12 +100,14 @@ def load_embeddings_data(
     """
     df_embeddings = pd.read_csv(embeddings_csv)
     logger.info(f"Loaded {len(df_embeddings)} scene embeddings")
-
+    print("DF Embeddings head:")
+    print(df_embeddings.head())
     df_avs = pd.read_csv(avs_scenes_csv)
-    if 'nsd_id' in df_avs.columns:
-        avs_coco_ids = set(df_avs['nsd_id'].astype(int))
-    elif 'coco_id' in df_avs.columns:
-        avs_coco_ids = set(df_avs['coco_id'].astype(int))
+    print("DF AVS head:")
+    print(df_avs.head())
+  
+    if 'cocoID' in df_avs.columns:
+        avs_coco_ids = set(df_avs['cocoID'].astype(int))
     else:
         raise ValueError("AVS scenes CSV must have 'nsd_id' or 'coco_id' column")
 
@@ -126,7 +128,7 @@ def compute_tsne_embedding(
     Parameters
     ----------
     df_embeddings : pd.DataFrame
-        Dataframe with embedding columns (e.g., embed_0, embed_1, ...)
+        Dataframe with embedding column ('average_embedding')
     perplexity : int
         t-SNE perplexity parameter
     random_state : int
@@ -139,27 +141,41 @@ def compute_tsne_embedding(
     np.ndarray
         2D t-SNE coordinates (n_samples, 2)
     """
-    # Check for cached results
+    #Check for cached results
     if cache_path and os.path.exists(cache_path):
         logger.info(f"Loading cached t-SNE from {cache_path}")
         cached = np.load(cache_path)
         return cached
 
-    # Extract embedding columns
-    embed_cols = [c for c in df_embeddings.columns if c.startswith('embed_')]
-    if not embed_cols:
-        raise ValueError("No embedding columns found (expected 'embed_0', 'embed_1', ...)")
-
-    X = df_embeddings[embed_cols].values
+    # DF Embeddings head:
+    # Unnamed: 0  cocoID                                  average_embedding  average_dissimilarity  cluster
+    # 0           0  100000  [ 1.23275381e-01 -8.39807987e-01 -5.73737839e-...                  False       39
+    # 1           1  100001  [-1.33775626e-01  5.65687791e-02 -1.33664732e-...                  False       28
+    # 2           2  100006  [-0.19743581 -0.06948316 -0.3960614  -0.085605...                  False       26
+    # 3           3  100008  [-1.00147521e-01 -4.94576231e-01  7.31885880e-...                  False       39
+    # 4           4  100010  [-3.01789528e-01 -8.05207714e-02 -1.86983920e-...                  False        4
+    # Extract average embedding from string representation
+    #np.array([np.fromstring(embedding[1:-1], sep=' ') for embedding in df_mean_embeddings['average_embedding']])
+    def parse_embedding(embedding_series: pd.Series) -> np.ndarray:
+        """Convert string embeddings to numpy array."""
+        return np.array([
+            np.fromstring(embedding[1:-1], sep=' ')
+            for embedding in embedding_series
+        ])
+    X = parse_embedding(df_embeddings['average_embedding'])
+    logger.info(f"Parsed embeddings into array of shape {X.shape}")
+    
+    
+    
+    
     logger.info(f"Computing t-SNE on {X.shape[0]} samples with {X.shape[1]} dimensions")
 
     tsne = TSNE(
-        n_components=2,
-        perplexity=perplexity,
-        random_state=random_state,
-        n_iter=1000,
-        init='pca'
-    )
+        n_components=2, perplexity=perplexity, random_state=random_state,
+                            early_exaggeration=12.0, learning_rate=200.0, 
+                            n_iter_without_progress=300, min_grad_norm=1e-07, metric='euclidean',
+                            angle=0.5, n_jobs=-1)
+    
     tsne_coords = tsne.fit_transform(X)
 
     # Cache results
@@ -200,7 +216,7 @@ def plot_tsne_clusters(
     df = df_embeddings.copy()
     df['tsne_1'] = tsne_coords[:, 0]
     df['tsne_2'] = tsne_coords[:, 1]
-    df['in_avs'] = df['coco_id'].isin(avs_coco_ids)
+    df['in_avs'] = df['cocoID'].isin(avs_coco_ids)
 
     # Plot NSD scenes (not in AVS) first
     plt.figure(figsize=(10, 10))
@@ -209,37 +225,45 @@ def plot_tsne_clusters(
     plt.scatter(
         nsd_only['tsne_1'],
         nsd_only['tsne_2'],
-        c=nsd_only['cluster'],
-        cmap='magma',
+        c="darkgray",
+        #cmap="Greys",
         s=10,
-        alpha=0.2,
+        alpha=0.15,
         label='nsd only'
     )
 
     # Overlay AVS scenes with edge highlight
+    # use husl 60
+    cmap = 'jet'  # qualitative color palette for clusters
+    
     avs_scenes = df[df['in_avs']]
     plt.scatter(
         avs_scenes['tsne_1'],
         avs_scenes['tsne_2'],
         c=avs_scenes['cluster'],
-        cmap='magma',
-        s=40,
-        alpha=0.9,
+        cmap=cmap,
+        s=20,
+        alpha=0.6,
         edgecolors='white',
-        label='avs'
+        label='avs', linewidth=1
     )
 
-    plt.xlabel('t-sne dimension 1 [a.u.]')
-    plt.ylabel('t-sne dimension 2 [a.u.]')
-    plt.legend(frameon=False, loc='upper right')
-    sns.despine()
+    plt.xlabel(None)
+    plt.ylabel(None)
+    #plt.legend(frameon=False, loc='upper right')
+    # full despine for cleaner look
+    # remove axes and ticks for a cleaner look
+    plt.gca().set_xticks([])
+    plt.gca().set_yticks([])
+    
+    sns.despine(left=True, bottom=True)
     plt.tight_layout()
 
     os.makedirs(output_dir, exist_ok=True)
     png_path = os.path.join(output_dir, f"{filename}.png")
     pdf_path = os.path.join(output_dir, f"{filename}.pdf")
 
-    plt.savefig(png_path, dpi=300, bbox_inches='tight', facecolor='white')
+    plt.savefig(png_path, dpi=300, bbox_inches='tight', transparent=True)
     plt.savefig(pdf_path, format='pdf', bbox_inches='tight', facecolor='white')
     plt.close()
 
@@ -270,7 +294,7 @@ def plot_cluster_share_comparison(
     sns.set_context("poster")
 
     df = df_embeddings.copy()
-    df['in_avs'] = df['coco_id'].isin(avs_coco_ids)
+    df['in_avs'] = df['cocoID'].isin(avs_coco_ids)
 
     # Compute cluster shares
     avs_clusters = df[df['in_avs']]['cluster'].value_counts(normalize=True) * 100
@@ -365,7 +389,7 @@ def plot_cluster_examples(
 
         # Filter to paper-safe images if specified
         if paper_safe_ids is not None:
-            cluster_df = cluster_df[cluster_df['coco_id'].isin(paper_safe_ids)]
+            cluster_df = cluster_df[cluster_df['cocoID'].isin(paper_safe_ids)]
 
         if len(cluster_df) == 0:
             logger.warning(f"Cluster {cid}: No paper-safe images available")
@@ -380,7 +404,7 @@ def plot_cluster_examples(
         plt.figure(figsize=(fig_width, 4))
 
         for idx, (_, row) in enumerate(examples.iterrows()):
-            coco_id = int(row['coco_id'])
+            coco_id = int(row['cocoID'])
 
             # Find image file
             img_path = _find_coco_image(coco_dir, coco_id)
@@ -422,11 +446,8 @@ def _find_coco_image(coco_dir: str, coco_id: int) -> Optional[Path]:
 
     # Try common patterns
     patterns = [
-        f"{coco_id:012d}.jpg",
-        f"{coco_id}.jpg",
-        f"COCO_train2014_{coco_id:012d}.jpg",
-        f"COCO_val2014_{coco_id:012d}.jpg",
-    ]
+        f"{coco_id:012d}.jpg",]
+    
 
     for pattern in patterns:
         path = coco_dir / pattern
@@ -701,8 +722,15 @@ def main():
     logger.info(f"Creating plots for {args.n_clusters_to_plot} clusters...")
     all_plotted_examples = []
 
-    cluster_ids = sorted(df_embeddings['cluster'].unique())[:args.n_clusters_to_plot]
+  
     individual_dir = os.path.join(args.output_dir, 'individual_clusters')
+    
+    # only use avs scenes 
+
+    df_avs_only = df_embeddings[df_embeddings['cocoID'].isin(avs_coco_ids)]
+    cluster_ids = sorted(df_avs_only['cluster'].unique())[:args.n_clusters_to_plot]
+    
+    avs_tsne_coords = tsne_coords[df_embeddings['cocoID'].isin(avs_coco_ids)]
 
     for cid in cluster_ids:
         # Individual t-SNE highlight
@@ -715,7 +743,7 @@ def main():
 
         # Example images
         examples = plot_cluster_examples(
-            df_embeddings,
+            df_avs_only,
             args.coco_dir,
             individual_dir,
             paper_safe_ids=paper_safe_ids,
