@@ -67,8 +67,8 @@ from pyavs.utils.logging import get_logger
 logger = get_logger('scripts.scene_clustering')
 
 # License filter constants
-DEFAULT_LICENSE_IDS = [ 6]
-DERIVATIVE_SAFE_LICENSE_IDS = [6]  
+DEFAULT_LICENSE_IDS = [1,5]
+DERIVATIVE_SAFE_LICENSE_IDS = [1,5]  
 
 
 def get_paper_safe_coco_ids(
@@ -246,7 +246,7 @@ def plot_tsne_clusters(
         #cmap="Greys",
         s=20,
         alpha=0.15,
-        label='nsd only'
+        label='nsd only', rasterized=True)
     )
 
     # Overlay AVS scenes with edge highlight
@@ -262,7 +262,7 @@ def plot_tsne_clusters(
         s=60,
         alpha=0.8,
         edgecolors='white',
-        label='avs', linewidth=1
+        label='avs', linewidth=1, rasterized=True)
     )
 
     plt.xlabel(None)
@@ -565,7 +565,7 @@ def plot_individual_cluster_tsne(
         other['tsne_2'],
         c='lightgray',
         s=20,
-        alpha=0.3
+        alpha=0.3, rasterized=True)
     )
 
     # Highlight target cluster
@@ -577,7 +577,7 @@ def plot_individual_cluster_tsne(
         s=40,
         alpha=0.9,
         edgecolors='white',
-        label=f'cluster {cluster_id}'
+        label=f'cluster {cluster_id}', rasterized=True)
     )
 
     plt.xlabel('t-sne dimension 1 [a.u.]')
