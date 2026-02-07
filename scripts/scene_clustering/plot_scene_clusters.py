@@ -56,6 +56,7 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
+import matplotlib.colors
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -235,6 +236,16 @@ def plot_tsne_clusters(
     df['tsne_2'] = tsne_coords[:, 1]
     df['in_avs'] = df['cocoID'].isin(avs_coco_ids)
 
+    # Create HUSL color mapping for clusters
+    unique_clusters = sorted(df['cluster'].unique())
+    n_colors = len(unique_clusters)
+    colors_space = sns.color_palette("husl", n_colors=n_colors)
+    cluster_to_color = {
+        cluster: matplotlib.colors.to_hex(colors_space[i])
+        for i, cluster in enumerate(unique_clusters)
+    }
+    df['color'] = df['cluster'].map(cluster_to_color)
+
     # Plot NSD scenes (not in AVS) first
     plt.figure(figsize=(10, 10))
 
@@ -243,26 +254,22 @@ def plot_tsne_clusters(
         nsd_only['tsne_1'],
         nsd_only['tsne_2'],
         c="darkgray",
-        #cmap="Greys",
         s=20,
         alpha=0.15,
+        edgecolors='none',
         label='nsd only', rasterized=True)
     )
 
-    # Overlay AVS scenes with edge highlight
-    # use husl 60
-    cmap = 'jet'  # qualitative color palette for clusters
-    
+    # Overlay AVS scenes with HUSL cluster colors and white edge
     avs_scenes = df[df['in_avs']]
     plt.scatter(
         avs_scenes['tsne_1'],
         avs_scenes['tsne_2'],
-        c=avs_scenes['cluster'],
-        cmap=cmap,
+        c=avs_scenes['color'],
         s=60,
         alpha=0.8,
         edgecolors='white',
-        label='avs', linewidth=1, rasterized=True)
+        label='avs', rasterized=True)
     )
 
     plt.xlabel(None)
