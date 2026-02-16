@@ -239,38 +239,39 @@ def plot_tsne_clusters(
     # Create HUSL color mapping for clusters
     unique_clusters = sorted(df['cluster'].unique())
     n_colors = len(unique_clusters)
-    colors_space = sns.color_palette("husl", n_colors=n_colors)
-    cluster_to_color = {
-        cluster: matplotlib.colors.to_hex(colors_space[i])
-        for i, cluster in enumerate(unique_clusters)
-    }
-    df['color'] = df['cluster'].map(cluster_to_color)
+    colors_space = "hsv"#sns.color_palette("jet", n_colors=n_colors)
+    # cluster_to_color = {
+    #     cluster: matplotlib.colors.to_hex(colors_space[i])
+    #     for i, cluster in enumerate(unique_clusters)
+    # }
+    #df['color'] = df['cluster'].map(cluster_to_color)
 
     # Plot NSD scenes (not in AVS) first
-    plt.figure(figsize=(10, 10))
+    plt.figure(figsize=(12, 12))
 
     nsd_only = df[~df['in_avs']]
     plt.scatter(
         nsd_only['tsne_1'],
         nsd_only['tsne_2'],
         c="darkgray",
-        s=20,
+        s=40,
         alpha=0.15,
         edgecolors='none',
         label='nsd only', rasterized=True)
-    )
+    
 
     # Overlay AVS scenes with HUSL cluster colors and white edge
     avs_scenes = df[df['in_avs']]
     plt.scatter(
         avs_scenes['tsne_1'],
         avs_scenes['tsne_2'],
-        c=avs_scenes['color'],
-        s=60,
-        alpha=0.8,
+        c=avs_scenes['cluster'],
+        cmap=colors_space,#avs_scenes['color'],
+        s=100,
+        alpha=0.9,
         edgecolors='white',
         label='avs', rasterized=True)
-    )
+    
 
     plt.xlabel(None)
     plt.ylabel(None)
@@ -287,8 +288,8 @@ def plot_tsne_clusters(
     png_path = os.path.join(output_dir, f"{filename}.png")
     pdf_path = os.path.join(output_dir, f"{filename}.pdf")
 
-    plt.savefig(png_path, dpi=300, bbox_inches='tight', facecolor='white')
-    plt.savefig(pdf_path, format='pdf', bbox_inches='tight', facecolor='white')
+    plt.savefig(png_path, dpi=600, bbox_inches='tight', facecolor=None, transparent=True)
+    plt.savefig(pdf_path, format='pdf', bbox_inches='tight', facecolor='white', dpi=600, transparent=True)
     plt.close()
 
     logger.info(f"Saved: {png_path}")
@@ -616,8 +617,7 @@ def plot_individual_cluster_tsne(
         c='lightgray',
         s=20,
         alpha=0.3, rasterized=True)
-    )
-
+    
     # Highlight target cluster
     target = df[df['is_target']]
     plt.scatter(
@@ -628,7 +628,7 @@ def plot_individual_cluster_tsne(
         alpha=0.9,
         edgecolors='white',
         label=f'cluster {cluster_id}', rasterized=True)
-    )
+    
 
     plt.xlabel('t-sne dimension 1 [a.u.]')
     plt.ylabel('t-sne dimension 2 [a.u.]')
