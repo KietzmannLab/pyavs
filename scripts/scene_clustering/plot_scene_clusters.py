@@ -294,6 +294,29 @@ def plot_tsne_clusters(
     logger.info(f"Saved: {png_path}")
     logger.info(f"Saved: {pdf_path}")
 
+    # Export source data for Fig 1C: t-SNE scatter
+    source_dir = os.path.join(output_dir, "source_data")
+    os.makedirs(source_dir, exist_ok=True)
+
+    source_data = df[['cocoID', 'cluster', 'tsne_1', 'tsne_2', 'in_avs']].copy()
+    source_csv = os.path.join(source_dir, "sourcedata_fig1c_tsne_clusters.csv")
+    source_data.to_csv(source_csv, index=False)
+
+    with open(source_csv.replace(".csv", "_stats.txt"), "w") as f:
+        n_total = len(source_data)
+        n_avs = source_data['in_avs'].sum()
+        n_nsd_only = n_total - n_avs
+        n_clusters = source_data['cluster'].nunique()
+        f.write("Figure 1C: t-SNE scatter of scene embeddings by cluster\n")
+        f.write("Plot type: scatter (no statistical aggregation)\n")
+        f.write(f"N scenes total: {n_total}\n")
+        f.write(f"N AVS scenes (colored): {n_avs}\n")
+        f.write(f"N NSD-only scenes (gray): {n_nsd_only}\n")
+        f.write(f"N clusters: {n_clusters}\n")
+        f.write("Columns: cocoID, cluster, tsne_1, tsne_2, in_avs\n")
+
+    logger.info(f"Saved source data: {source_csv}")
+
 
 def plot_cluster_share_comparison(
     df_embeddings: pd.DataFrame,
@@ -367,6 +390,26 @@ def plot_cluster_share_comparison(
 
     logger.info(f"Saved: {png_path}")
     logger.info(f"Saved: {pdf_path}")
+
+    # Export source data for Fig 1D: cluster proportion comparison
+    source_dir = os.path.join(output_dir, "source_data")
+    os.makedirs(source_dir, exist_ok=True)
+
+    source_csv = os.path.join(source_dir, "sourcedata_fig1d_cluster_share_avs_nsd.csv")
+    comparison_df.to_csv(source_csv, index=False)
+
+    with open(source_csv.replace(".csv", "_stats.txt"), "w") as f:
+        n_avs = df['in_avs'].sum()
+        n_nsd = len(df)
+        n_clusters = len(all_clusters)
+        f.write("Figure 1D: AVS vs NSD cluster proportion comparison\n")
+        f.write("Plot type: barplot (no statistical aggregation, deterministic proportions)\n")
+        f.write(f"N AVS scenes: {n_avs}\n")
+        f.write(f"N NSD scenes (total): {n_nsd}\n")
+        f.write(f"N clusters: {n_clusters}\n")
+        f.write("Columns: cluster, dataset (avs/nsd), share [%]\n")
+
+    logger.info(f"Saved source data: {source_csv}")
 
 
 def save_cluster_examples(
