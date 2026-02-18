@@ -329,7 +329,89 @@ def get_meg_timestamp(meg_events: np.ndarray, trial: int, block: int,
     return timestamp_onset
 
 
-def add_fix_event_trigger(raw: mne.io.Raw, blocks: List[int], et_events: pd.DataFrame, 
+def get_trigger_epochs_metadata(trigger_events: np.ndarray, trigger_id: int,
+                                blocks: np.ndarray,
+                                block_trigger_offset: int = 1000) -> pd.DataFrame:
+    """
+    For each occurrence of trigger_id in trigger_events, find the associated
+    trial number and block by looking at preceding triggers.
+
+    The trigger sequence in the repaired events array is:
+        block_trigger (1000+block) -> trial_number (1-30) -> ... -> trigger_id
+
+    This function walks backward from each trigger_id occurrence to find the
+    most recent trial-number trigger (value 1-30 preceded by a block trigger).
+
+    Parameters
+    ----------
+    trigger_events : numpy.ndarray
+        Repaired events array (N x 3: [timestamp, prev_trigger, trigger_value])
+    trigger_id : int
+        The trigger code to find (e.g. 110 for mic_on)
+    blocks : numpy.ndarray
+        Array of block numbers expected in this session
+    block_trigger_offset : int, optional
+        Offset used for block triggers (default: 1000)
+
+    Returns
+    -------
+    pandas.DataFrame
+        DataFrame with columns: ['event_index', 'sample', 'block', 'trial_per_block']
+        One row per occurrence of trigger_id found in trigger_events.
+    """
+    # Find all occurrences of the target trigger
+    target_indices = np.where(trigger_events[:, 2] == trigger_id)[0]
+
+    if len(target_indices) == 0:
+        logger.warning(f"No events with trigger ID {trigger_id} found in events array")
+        return pd.DataFrame(columns=['event_index', 'sample', 'block', 'trial_per_block'])
+
+    # Build set of valid block triggers for fast lookup
+    valid_block_triggers = set(blocks + block_trigger_offset)
+
+    records = []
+    for idx in target_indices:
+        sample = trigger_events[idx, 0]
+        block = None
+        trial = None
+
+        # Walk backward to find the preceding trial number trigger (1-30)
+        # which itself should be preceded by a block trigger (1000+block)
+        for back in range(1, min(idx + 1, 200)):  # Look back up to 200 events
+            prev_idx = idx - back
+            prev_value = trigger_events[prev_idx, 2]
+
+            # Trial number triggers are 1-30
+            if 1 <= prev_value <= 30:
+                # Check that this trial trigger was preceded by a block trigger
+                prev_prev_value = trigger_events[prev_idx, 1]
+                if prev_prev_value in valid_block_triggers:
+                    trial = int(prev_value)
+                    block = int(prev_prev_value - block_trigger_offset)
+                    break
+
+        if block is not None and trial is not None:
+            records.append({
+                'event_index': idx,
+                'sample': sample,
+                'block': block,
+                'trial_per_block': trial,
+            })
+        else:
+            logger.warning(
+                f"Could not find trial/block for trigger {trigger_id} at sample {sample} "
+                f"(event index {idx}). Skipping this event."
+            )
+
+    result = pd.DataFrame(records)
+    logger.info(
+        f"Mapped {len(result)}/{len(target_indices)} occurrences of trigger {trigger_id} "
+        f"to trial metadata"
+    )
+    return result
+
+
+def add_fix_event_trigger(raw: mne.io.Raw, blocks: List[int], et_events: pd.DataFrame,
                          session: int, block_trigger_offset: int = 1000, 
                          stim_channel: str = 'STI101', verbose: bool = True,
                          event_types: List[str] = ['fixation', 'saccade', 'blink'],

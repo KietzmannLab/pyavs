@@ -259,7 +259,6 @@ def plot_tsne_clusters(
         edgecolors='none',
         label='nsd only', rasterized=True)
     
-
     # Overlay AVS scenes with HUSL cluster colors and white edge
     avs_scenes = df[df['in_avs']]
     plt.scatter(
@@ -616,8 +615,9 @@ def plot_individual_cluster_tsne(
         other['tsne_2'],
         c='lightgray',
         s=20,
-        alpha=0.3, rasterized=True)
-    
+        alpha=0.3, rasterized=True
+    )
+
     # Highlight target cluster
     target = df[df['is_target']]
     plt.scatter(
@@ -627,8 +627,8 @@ def plot_individual_cluster_tsne(
         s=40,
         alpha=0.9,
         edgecolors='white',
-        label=f'cluster {cluster_id}', rasterized=True)
-    
+        label=f'cluster {cluster_id}', rasterized=True
+    )
 
     plt.xlabel('t-sne dimension 1 [a.u.]')
     plt.ylabel('t-sne dimension 2 [a.u.]')

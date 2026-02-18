@@ -24,7 +24,7 @@ from ..utils.config import get_data_path
 from ..utils.paths import get_subject_session_id, get_max_blocks
 from ..utils.validation import validate_subject_id, validate_session
 from ..utils.logging import get_logger
-from .trigger_tools import get_meg_trigger_dict, repair_meg_trigger_events, add_fix_event_trigger, get_avs_blocks
+from .trigger_tools import get_meg_trigger_dict, repair_meg_trigger_events, add_fix_event_trigger, get_avs_blocks, get_trigger_epochs_metadata
 from .meg import preprocess_meg_block
 from ..io.write import save_annotated_raw
 
@@ -716,6 +716,145 @@ class AVSComposer:
             output='onset',
             uint_cast=True
         )
+
+    def make_trigger_locked_epochs(
+        self,
+        trigger_name: str = 'mic_on',
+        tmin: float = -0.5,
+        tmax: float = 9.0,
+        baseline: Optional[Tuple[float, float]] = None,
+        preload: bool = True
+    ) -> mne.Epochs:
+        """
+        Create epochs locked to a specific MEG trigger (e.g. mic_on, caption_on).
+
+        Finds all occurrences of the named trigger in the repaired events array,
+        maps each to its trial via preceding trial-number/block triggers, joins
+        with the experiment log to attach metadata (sceneID, caption_task, etc.),
+        and returns an MNE Epochs object with metadata set.
+
+        Parameters
+        ----------
+        trigger_name : str, optional
+            Name of the trigger as defined in get_meg_trigger_dict().
+            Valid options: 'mic_on', 'mic_off', 'caption_on', 'caption_off',
+            'scene_on', 'scene_off', 'fixcross_on', 'fixcross_off'.
+            Default: 'mic_on'.
+        tmin : float, optional
+            Start of epoch relative to trigger onset in seconds (default: -0.2).
+        tmax : float, optional
+            End of epoch relative to trigger onset in seconds (default: 1.0).
+        baseline : tuple of (float, float) or None, optional
+            Baseline correction window. Default: None (no baseline correction).
+        preload : bool, optional
+            Whether to preload epoch data into memory (default: True).
+
+        Returns
+        -------
+        mne.Epochs
+            Epochs locked to the specified trigger, with trial metadata attached.
+
+        Notes
+        -----
+        Requires that load_meg_data(), concatenate_raws_per_session(), and
+        find_events_in_raw() have been called first. The experiment log is loaded
+        on the fly if not already available.
+        """
+        meg_trigger_dict = get_meg_trigger_dict()
+
+        if trigger_name not in meg_trigger_dict:
+            raise ValueError(
+                f"Unknown trigger name '{trigger_name}'. "
+                f"Valid options: {list(meg_trigger_dict.keys())}"
+            )
+
+        trigger_id = meg_trigger_dict[trigger_name]
+
+        # Ensure we have repaired trigger events
+        if self.meg_trigger_events is None:
+            raise RuntimeError(
+                "No MEG trigger events found. Call find_events_in_raw() first."
+            )
+
+        # Repair trigger events for this session
+        events_repaired = repair_meg_trigger_events(
+            events=self.meg_trigger_events,
+            session=self.session_num,
+            new_block_trigger_offset=1000,
+            initial_block_trigger_offset=50,
+            verbose=self.verbose
+        )
+
+        # Map each trigger occurrence to its trial/block
+        trigger_meta = get_trigger_epochs_metadata(
+            trigger_events=events_repaired,
+            trigger_id=trigger_id,
+            blocks=self.blocks_this_session,
+            block_trigger_offset=1000
+        )
+
+        if trigger_meta.empty:
+            logger.warning(f"No {trigger_name} triggers could be mapped to trials")
+            self.trigger_epochs = None
+            return None
+
+        # Build MNE events array from matched triggers (N x 3)
+        n_events = len(trigger_meta)
+        mne_events = np.zeros((n_events, 3), dtype=int)
+        mne_events[:, 0] = trigger_meta['sample'].values
+        mne_events[:, 2] = trigger_id
+
+        # Load experiment log for metadata enrichment
+        if self.explog is None:
+            from ..dataloader.loaders import load_experiment_log
+            self.explog = load_experiment_log(
+                self.subject, self.session_num, data_path=self.data_path
+            )
+
+        # Merge trigger metadata with experiment log
+        metadata = trigger_meta[['block', 'trial_per_block']].copy()
+        metadata['subject'] = self.subject
+        metadata['session'] = self.session_num
+
+        if self.explog is not None and not self.explog.empty:
+            # Merge on block + trial_per_block
+            explog_cols = self.explog.columns.tolist()
+            merge_cols = ['block', 'trial_per_block']
+            # Only merge columns that exist in explog and aren't already in metadata
+            extra_cols = [c for c in explog_cols if c not in metadata.columns]
+            if extra_cols:
+                explog_subset = self.explog[merge_cols + extra_cols].drop_duplicates(subset=merge_cols)
+                metadata = metadata.merge(explog_subset, on=merge_cols, how='left')
+        else:
+            logger.warning("No experiment log available — metadata will only contain block/trial info")
+
+        # Reset index for clean metadata alignment
+        metadata = metadata.reset_index(drop=True)
+
+        if self.verbose:
+            logger.info(
+                f"Creating {n_events} epochs locked to '{trigger_name}' "
+                f"(trigger {trigger_id}), tmin={tmin}, tmax={tmax}"
+            )
+
+        # Create MNE Epochs
+        self.trigger_epochs = mne.Epochs(
+            self.raws_concatenated,
+            mne_events,
+            event_id={trigger_name: trigger_id},
+            tmin=tmin,
+            tmax=tmax,
+            baseline=baseline,
+            preload=preload,
+            metadata=metadata
+        )
+
+        logger.info(
+            f"Created {len(self.trigger_epochs)} {trigger_name} epochs "
+            f"(metadata columns: {list(metadata.columns)})"
+        )
+
+        return self.trigger_epochs
 
     def get_et_annotations(
         self,
