@@ -163,7 +163,8 @@ def process_single_subject_session(subject_id: int, session: int,
             'time_range': f"{epochs.tmin:.3f} to {epochs.tmax:.3f} s",
             'sampling_rate': epochs.info['sfreq']
         }
-
+        print(epochs.metadata.head())  # Print first few rows of metadata for verification
+        print(epochs.metadata.columns)  # Print metadata columns for verification
         # Save metadata as CSV
         if epochs.metadata is not None and not epochs.metadata.empty:
             metadata_path = save_metadata_csv(
@@ -328,7 +329,7 @@ Examples:
                         help=f'Epoch end time relative to trigger in seconds (default: {DEFAULT_TMAX})')
 
     # Data path
-    parser.add_argument('--data-path', type=str, required=True,
+    parser.add_argument('--data-path', type=str, default='/share/klab/datasets/avs',
                         help='Path to AVS data directory')
 
     # Processing options
