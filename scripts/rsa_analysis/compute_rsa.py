@@ -127,10 +127,10 @@ def match_epochs_to_embeddings(metadata: pd.DataFrame, file_names: List[str]) ->
 
 def group_by_objects(epochs_data: np.ndarray, embeddings: np.ndarray,
                     metadata: pd.DataFrame, data_path: str, object_column: str = 'object_label', ) -> Tuple[np.ndarray, np.ndarray, List[str]]:
-    """Group data by object labels using complete 80 MSCOCO classes, loading object labels if needed."""
+    """Group data by object labels using 171 COCO-Stuff classes (things + stuff), loading object labels if needed."""
 
-    # Import MSCOCO classes from objects module
-    from pyavs.scenes.objects import MSCOCO_CLASSES
+    # Import COCO-Stuff classes (80 things + 91 stuff = 171 valid classes)
+    from pyavs.scenes.cocostuff_classes import COCOSTUFF_CLASSES, MISSING_COCO_INDICES
 
     # Check if object labels are present in metadata
     if object_column not in metadata.columns:
@@ -139,7 +139,7 @@ def group_by_objects(epochs_data: np.ndarray, embeddings: np.ndarray,
         # Add object labels using the objects module
         from pyavs.scenes.objects import get_fixated_objects
 
-        transformed_annotations_dir = os.path.join(data_path, 'AVS-UTILS', "avs_scene_annotations", "coco_objects")
+        transformed_annotations_dir = os.path.join(data_path, 'AVS-UTILS', "avs_scene_annotations", "cocostuff")
 
         if not os.path.exists(transformed_annotations_dir):
             raise FileNotFoundError(f"Cannot find transformed annotations at {transformed_annotations_dir}")
@@ -147,6 +147,7 @@ def group_by_objects(epochs_data: np.ndarray, embeddings: np.ndarray,
         metadata = get_fixated_objects(
             events_df=metadata,
             transformed_annotations_dir=transformed_annotations_dir,
+            use_cocostuff=True,
             verbose=True,
             error_margin_pixels=10
         )
@@ -161,8 +162,9 @@ def group_by_objects(epochs_data: np.ndarray, embeddings: np.ndarray,
     logger.info(f"Filtered out {(~valid_mask).sum()} fixations with object IDs -2 or -1")
     logger.info(f"Remaining fixations: {valid_mask.sum()}")
 
-    # Use the complete ordered list of 80 MSCOCO classes
-    object_labels = MSCOCO_CLASSES.copy()
+    # Build label list: all COCOSTUFF_CLASSES except index 0 (unlabeled) and missing COCO indices
+    excluded_indices = {0} | set(MISSING_COCO_INDICES)
+    object_labels = [cls for i, cls in enumerate(COCOSTUFF_CLASSES) if i not in excluded_indices]
     n_objects = len(object_labels)
     n_channels, n_times = epochs_data_filtered.shape[1], epochs_data_filtered.shape[2]
     n_features = embeddings_filtered.shape[1]
@@ -175,7 +177,7 @@ def group_by_objects(epochs_data: np.ndarray, embeddings: np.ndarray,
     available_objects = set(metadata_filtered[object_column].dropna().unique())
     available_objects = {obj for obj in available_objects if obj not in ['unknown', 'None', 'outside']}
 
-    print(f"Grouping {len(epochs_data_filtered)} filtered epochs into {n_objects} MSCOCO object categories")
+    print(f"Grouping {len(epochs_data_filtered)} filtered epochs into {n_objects} COCO-Stuff categories")
     print(f"Available objects in data: {len(available_objects)}")
     print(f"Missing objects will have NaN values: {len(object_labels) - len(available_objects & set(object_labels))}")
 
