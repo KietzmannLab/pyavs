@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from glob import glob
 from scipy.cluster.hierarchy import linkage, dendrogram, leaves_list
-from scipy.spatial.distance import squareform
+from scipy.spatial.distance import squareform, pdist
 from scipy.stats import rankdata
 
 # Add pyavs to path for development
@@ -362,7 +362,7 @@ def plot_dendrogram_figure(linkage_matrix: np.ndarray, object_labels: List[str],
     plt.figure(figsize=(24, 6))
     ax = plt.gca()
 
-    dendrogram(
+    dend = dendrogram(
         linkage_matrix,
         labels=object_labels,
         leaf_rotation=90,
@@ -371,11 +371,15 @@ def plot_dendrogram_figure(linkage_matrix: np.ndarray, object_labels: List[str],
         ax=ax,
     )
 
-    # Colour leaf labels by COCO supercategory
+    # Keep leaf text black; add a coloured square marker at each leaf base
     for tick_label in ax.get_xticklabels():
-        label_text = tick_label.get_text()
-        supercat = COCO_SUPERCATEGORY_MAP.get(label_text, 'unknown')
-        tick_label.set_color(SUPERCATEGORY_PALETTE[supercat])
+        tick_label.set_color('k')
+
+    xticks = ax.get_xticks()
+    for x_pos, label in zip(xticks, dend['ivl']):
+        supercat = COCO_SUPERCATEGORY_MAP.get(label, 'unknown')
+        ax.plot(x_pos, 0, 's', color=SUPERCATEGORY_PALETTE[supercat],
+                clip_on=False, zorder=5)
 
     # Legend: only supercategories present in the data
     present = {COCO_SUPERCATEGORY_MAP.get(lbl, 'unknown') for lbl in object_labels}
@@ -385,7 +389,8 @@ def plot_dendrogram_figure(linkage_matrix: np.ndarray, object_labels: List[str],
     ]
     ax.legend(handles=legend_handles, frameon=False, loc='upper right')
 
-    ax.set_ylabel('linkage distance')
+    ax.invert_xaxis()  # ascending: small (tight) clusters on the left
+    ax.set_ylabel('correlation distance')
     ax.set_xlabel('objects')
     sns.despine()
     plt.tight_layout()
@@ -521,14 +526,14 @@ Examples:
     if not object_labels or len(object_labels) != n_objects:
         object_labels = [str(i) for i in range(n_objects)]
 
-    # Rank-transform
+    # Rank-transform (used for heatmap only)
     logger.info("Rank-transforming RDM upper triangle...")
     rdm_ranked = rank_transform_rdm(grand_rdm)
 
-    # Hierarchical clustering on condensed ranked RDM
-    logger.info("Computing hierarchical clustering...")
-    condensed = squareform(rdm_ranked, checks=False)
-    Z = linkage(condensed, method=DENDRO_CONFIG['linkage_method'], metric='euclidean')
+    # Hierarchical clustering using correlation distance on the RDM rows
+    logger.info("Computing hierarchical clustering (correlation distance)...")
+    condensed = pdist(grand_rdm, metric='correlation')
+    Z = linkage(condensed, method=DENDRO_CONFIG['linkage_method'])
 
     # Plot clustered RDM heatmap
     logger.info("Plotting clustered RDM heatmap...")
