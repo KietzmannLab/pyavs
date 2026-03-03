@@ -518,7 +518,7 @@ def main():
     )
     parser.add_argument(
         '--n-jobs', '-j',
-        type=int, default=1,
+        type=int, default=-1,
         help='Parallel jobs for session loading per subject (default: 1)',
     )
     parser.add_argument(
