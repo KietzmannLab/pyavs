@@ -4,7 +4,7 @@
 #SBATCH --mem=600G
 #SBATCH --cpus-per-task=50
 
-#SBATCH -p workq
+#SBATCH -p klab-cpu
 #SBATCH --job-name=rsa
 #SBATCH --error=error_rsa_%A_%a.err
 #SBATCH --output=output_rsa_%A_%a.out
@@ -27,7 +27,8 @@ data_path="/share/klab/datasets/avs/"
 subject=$SLURM_ARRAY_TASK_ID
 
 # Layers to process
-layers=("layer1")
+layers=("avgpool")
+# "layer2" "layer3")
 # "layer2" "layer3")
 
 echo "==================================================="

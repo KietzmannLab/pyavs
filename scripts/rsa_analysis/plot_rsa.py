@@ -665,6 +665,53 @@ def compute_intersubject_noise_ceiling(rsa_data_list: List[Dict[str, Any]], n_bo
     return lower_bound, upper_bound
 
 
+def plot_noise_ceiling_only(rsa_data_list: List[Dict[str, Any]], output_dir: Path,
+                           save_fig: bool = True) -> plt.Figure:
+    """
+    Plot inter-subject noise ceiling as a standalone figure (no RSA timeseries).
+
+    Parameters
+    ----------
+    rsa_data_list : list of dict
+        List of RSA results dictionaries from multiple subjects
+    output_dir : Path
+        Output directory for plots
+    save_fig : bool, default True
+        Whether to save the figure
+
+    Returns
+    -------
+    plt.Figure
+        Created figure
+    """
+    sns.set_context("poster")
+    plt.figure(figsize=(8, 6))
+
+    nc_lower, nc_upper = compute_intersubject_noise_ceiling(rsa_data_list)
+    times_ms = rsa_data_list[0]['times'] * 1000
+
+    plt.fill_between(times_ms, nc_lower, nc_upper, alpha=0.2, color='gray',
+                     label='inter-subject noise ceiling')
+    plt.plot(times_ms, nc_lower, color='cornflowerblue', label='NC lower bound')
+    plt.plot(times_ms, nc_upper, color='cornflowerblue', label='NC upper bound')
+    plt.axvline(x=0, color='k', linestyle='--', alpha=0.3, label='fixation onset')
+
+    plt.xlabel('time [ms]')
+    plt.ylabel("RDM similarity [spearman's rho]")
+    plt.xlim(-200, 500)
+    plt.legend(frameon=False)
+    sns.despine()
+    plt.tight_layout()
+
+    if save_fig:
+        plt.savefig(output_dir / 'noise_ceiling_full.pdf', dpi=PLOT_CONFIG['figure_dpi'])
+        logger.info("Saved noise ceiling plot: noise_ceiling_full.pdf")
+
+    fig = plt.gcf()
+    plt.close()
+    return fig
+
+
 def plot_grand_average_rsa(rsa_data_list: List[Dict[str, Any]], output_dir: Path,
                           save_fig: bool = True) -> plt.Figure:
     """
@@ -1043,6 +1090,86 @@ def plot_multi_layer_comparison(data_by_layer: Dict[str, List[Dict[str, Any]]],
     return fig
 
 
+def plot_multi_layer_nc_focus(data_by_layer: Dict[str, List[Dict[str, Any]]],
+                              output_dir: Path, save_fig: bool = True) -> plt.Figure:
+    """
+    Plot grand average RSA timeseries comparing multiple layers with y-axis cropped
+    to the peak of the noise ceiling lower bound, making the NC the visual focus.
+
+    Parameters
+    ----------
+    data_by_layer : dict
+        Dictionary mapping layer names to lists of RSA data for that layer
+    output_dir : Path
+        Output directory for plots
+    save_fig : bool, default True
+        Whether to save the figure
+
+    Returns
+    -------
+    plt.Figure
+        Created figure
+    """
+    if not data_by_layer or len(data_by_layer) < 2:
+        logger.info("Need at least 2 layers for NC-focus comparison plot")
+        return None
+
+    sns.set_context("poster")
+    fig, ax = plt.subplots(figsize=(8, 8))
+
+    first_layer_data = list(data_by_layer.values())[0]
+    times = first_layer_data[0]['times']
+    times_ms = times * 1000
+
+    n_layers = len(data_by_layer)
+    colors = plt.cm.magma(np.linspace(0.2, 0.8, n_layers))
+
+    # Compute noise ceiling from first layer (MEG data, same for all layers)
+    nc_data = list(data_by_layer.values())[0]
+    logger.info("Computing inter-subject noise ceiling for NC-focus plot...")
+    nc_lower, nc_upper = compute_intersubject_noise_ceiling(nc_data)
+
+    ax.fill_between(times_ms, nc_lower, nc_upper, alpha=0.2, color='gray',
+                   label='inter-subject noise ceiling')
+    ax.plot(times_ms, nc_lower, color='cornflowerblue', label='NC lower bound')
+
+    # Plot each layer
+    for (layer_name, layer_data_list), color in zip(sorted(data_by_layer.items()), colors):
+        all_rsa = []
+        for rsa_data in layer_data_list:
+            all_rsa.append(rsa_data['rsa_timeseries'])
+
+        df_layer = pd.DataFrame(all_rsa).T
+        df_layer['time'] = times_ms
+        df_melted = df_layer.melt(id_vars='time', var_name='subject', value_name='rsa')
+
+        sns.lineplot(data=df_melted, x='time', y='rsa', errorbar=("ci", 95), ax=ax,
+                     label=f'{layer_name} (n={len(layer_data_list)})', color=color, alpha=0.8)
+
+    ax.axvline(x=0, color='k', linestyle='--', alpha=0.3, label='fixation onset')
+
+    ax.set_xlabel('time [ms]')
+    ax.set_ylabel("RDM similarity [spearman's rho]")
+    ax.set_xlim(-200, 350)
+
+    # Crop y-axis so the upper NC is off-screen, focusing on the NC lower bound
+    ymax = float(np.max(nc_lower))
+    ax.set_ylim(-0.1, ymax)
+
+    ax.legend(frameon=False, loc='upper right')
+    sns.despine()
+    plt.tight_layout()
+
+    if save_fig:
+        first_data = list(data_by_layer.values())[0][0]
+        model_name = first_data['model_name']
+        filename = f"grand_average_model-{model_name}_all_layers_nc_focus.pdf"
+        fig.savefig(output_dir / filename, dpi=PLOT_CONFIG['figure_dpi'])
+        logger.info(f"Saved NC-focus multi-layer plot: {filename}")
+
+    return fig
+
+
 def plot_multi_network_grand_average(multi_network_data_list: List[Dict[str, Any]],
                                      output_dir: Path, save_fig: bool = True) -> plt.Figure:
     """
@@ -1350,6 +1477,13 @@ Examples:
         logger.info("Creating multi-layer comparison plot with magma palette...")
         logger.info(f"{'='*60}")
         plot_multi_layer_comparison(data_by_layer, output_dir)
+        plot_multi_layer_nc_focus(data_by_layer, output_dir)
+
+    # Standalone noise ceiling figure (uses all loaded subjects from first layer)
+    first_layer_data = list(data_by_layer.values())[0]
+    if len(first_layer_data) > 1:
+        logger.info("Creating standalone noise ceiling figure...")
+        plot_noise_ceiling_only(first_layer_data, output_dir)
 
     logger.info("RSA plotting completed successfully")
     return 0
