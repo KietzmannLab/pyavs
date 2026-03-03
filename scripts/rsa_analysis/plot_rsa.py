@@ -310,14 +310,14 @@ def plot_rdm_sorted_by_supercategory(
     object_labels: List[str],
     output_dir: Path,
     label: str = 'rdm',
-    save_fig: bool = True,
+    save_fig: bool = True, ranked: bool = True
 ) -> plt.Figure:
     """
     Plot an RDM with rows/cols sorted by COCO-Stuff supercategory.
 
     Objects are grouped by COCO_SUPERCATEGORY_MAP in SUPERCATEGORY_ORDER.
-    Category boundaries are drawn as white lines; supercategory names appear
-    as coloured y-axis tick labels at the midpoint of each block.
+    supercategory names appear
+    as coloured y-axis tick labels at the midpoint of each block. Further we colour the axis spine to visually separate supercategories. The same colour scheme is used as in the pyAVS object visualisation.
 
     Parameters
     ----------
@@ -353,6 +353,7 @@ def plot_rdm_sorted_by_supercategory(
     # --- Category block boundaries and midpoints ---
     boundaries = []
     block_info = []  # (midpoint, supercategory_name)
+    start_end_block_indices = []
     prev = supercats_sorted[0]
     start = 0
     for i, sc in enumerate(supercats_sorted):
@@ -361,35 +362,54 @@ def plot_rdm_sorted_by_supercategory(
             block_info.append((start + (i - start) / 2, prev))
             start = i
             prev = sc
+            start_end_block_indices.append((start, i))
     block_info.append((start + (len(supercats_sorted) - start) / 2, prev))
 
     # --- Plot ---
-    plt.figure(figsize=(8, 8))
+    plt.figure(figsize=(9, 9))
     ax = plt.gca()
-
+      # nan the main diagonal
+      
+    if ranked: # ranktransform the RDM for better visualization of relative distances (using scipy's rankdata)
+        from scipy.stats import rankdata
+        rdm_sorted = rankdata(rdm_sorted, method='average').reshape(rdm_sorted.shape)
+        
+    
+    np.fill_diagonal(rdm_sorted, np.nan)
     ax.imshow(rdm_sorted, cmap='magma', aspect='equal', interpolation='nearest')
 
-    # Category boundary lines
-    for b in boundaries:
-        ax.axhline(b - 0.5, color='white')
-        ax.axvline(b - 0.5, color='white')
+   # add cbar with label
+    cbar = plt.colorbar(ax.imshow(rdm_sorted, cmap='magma', aspect='equal', interpolation='nearest'), ax=ax, fraction=0.046, pad=0.04)
+    cbar.set_label('correlation distance')
+    if ranked:
+        cbar.set_label('correlation distance [ranked]')
+    # despine the colorbar
+    cbar.ax.spines['top'].set_visible(False)
+    cbar.ax.spines['right'].set_visible(False)
+    cbar.ax.spines['bottom'].set_visible(False)
+    cbar.ax.spines['left'].set_visible(False)
+  
 
     # Y-axis: category name at midpoint of each block, coloured by supercategory
     tick_positions = [mi for mi, _ in block_info]
     tick_labels_list = [sc for _, sc in block_info]
     ax.set_yticks(tick_positions)
-    ax.set_yticklabels(tick_labels_list)
+    ax.set_yticklabels(tick_labels_list, fontsize=18)
+    ax.set_xticks(tick_positions)
     for tick, sc in zip(ax.get_yticklabels(), tick_labels_list):
         tick.set_color(palette.get(sc, (0.4, 0.4, 0.4)))
+        # also colou the actual tick not just the label text
+       
 
-    ax.set_xticks([])
-    ax.set_xlabel('objects')
-    ax.set_ylabel('objects')
+
+    ax.set_xticklabels([])
+    #ax.set_xlabel('objects')
+    #ax.set_ylabel('objects')
     sns.despine(left=True, bottom=True)
     plt.tight_layout()
 
     if save_fig:
-        filename = f"rdm_sorted_supercategory_{label}.pdf"
+        filename = f"rdm_sorted_supercategory_{label}_{ 'ranked' if ranked else 'raw' }.pdf"
         plt.savefig(output_dir / filename, dpi=PLOT_CONFIG['figure_dpi'],
                     bbox_inches='tight')
         logger.info(f"Saved sorted RDM: {filename}")
@@ -481,13 +501,13 @@ def main():
         logger.info(f"\n{'='*60}")
         logger.info("Creating multi-layer comparison plot with magma palette...")
         logger.info(f"{'='*60}")
-        plot_multi_layer_comparison(data_by_layer, output_dir)
-        plot_multi_layer_nc_focus(data_by_layer, output_dir)
+        #plot_multi_layer_comparison(data_by_layer, output_dir)
+        #plot_multi_layer_nc_focus(data_by_layer, output_dir)
 
     first_layer_data = list(data_by_layer.values())[0]
     if len(first_layer_data) > 1:
         logger.info("Creating standalone noise ceiling figure...")
-        plot_noise_ceiling_only(first_layer_data, output_dir)
+        #plot_noise_ceiling_only(first_layer_data, output_dir)
 
     # Sorted-RDM plots (embedding RDM + MEG RDM at peak RSA time)
     first_subject_data = list(data_by_layer.values())[0][0]
