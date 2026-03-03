@@ -1,636 +1,153 @@
 #!/usr/bin/env python3
 """
-Plot RSA analysis results with noise ceiling.
+Plot RSA analysis results with noise ceiling + clustered RSA/RDM visuals.
 
-This script visualizes the RSA time series computed by compute_rsa.py, including
-noise ceiling calculations using the rsatoolbox package. It creates publication-ready
-plots of RSA correlations over time for MEG-ANN comparisons.
+Updates (requested):
+A) Noise ceiling-only figure: shaded full NC + *cornflowerblue* edge lines.
+B) Main RSA figure: noise ceiling shown but y-limited to ymax = peak(lower NC),
+   and then plot resnet layer results in the established style.
+C) Hierarchically clustered (rank-transformed) matrix + an extra wide dendrogram
+   figure with 90° rotated leaf labels.
 
-Usage:
-    python plot_rsa.py --rsa-dir /path/to/rsa/results --output-dir /path/to/plots
-    python plot_rsa.py --subjects 1 2 3 --model resnet50_ecoset_crop --layer avgpool
-    python plot_rsa.py --single-subject 1 --save-individual
-
-Author: pyAVS development team
+Author: pyAVS development team (modified)
 """
 
 import argparse
 import os
 import sys
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 import logging
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-from glob import glob
 
 # Add pyavs to path for development
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 from pyavs.utils.logging import get_logger
 
-# Initialize logger
-logger = get_logger('scripts.rsa_analysis.plot_rsa')
-
-# RSA dependencies
 from rsatoolbox.rdm import RDMs
 from rsatoolbox.inference.noise_ceiling import boot_noise_ceiling
+
+from scipy.signal import medfilt
+from scipy.spatial.distance import squareform
+from scipy.cluster.hierarchy import linkage, dendrogram, leaves_list
+from scipy.stats import rankdata
+
+# Initialize logger
+logger = get_logger("scripts.rsa_analysis.plot_rsa")
 
 # =============================
 # PLOTTING PARAMETERS
 # =============================
-# Set these parameters instead of using command line arguments
 PLOT_CONFIG = {
-    'model_name': 'resnet50_ecoset_crop',  # Model name filter
-    'layer': 'avgpool',  # Layer name filter
-    'save_individual': True,  # Save individual subject plots
-    'compute_noise_ceiling': True,  # Compute noise ceiling
-    'save_summary': True,  # Save summary statistics
-    'figure_dpi': 300,  # Figure DPI for saving
-    'plot_rdms': True,  # Plot RDMs at specific timepoint
-    'rdm_timepoint_ms': 110.0,  # Timepoint in ms for RDM plotting
-    'categorize_level': 'subcategory',  # Level for object categorization in RDMs
+    "model_name": "resnet50_ecoset_crop",
+    "save_individual": True,
+    "compute_noise_ceiling": True,
+    "save_summary": True,
+    "figure_dpi": 300,
+    "plot_rdms": False,
+
+    # Matrix / clustering
+    "plot_clustered_matrix": True,
+    "cluster_source": "meg",          # "meg" or "embedding"
+    "cluster_timepoint_ms": 110.0,    # used for MEG RDM timeseries
+    "rank_transform": True,           # requested: ranktransformed values
 }
 
-# Set matplotlib style with seaborn poster context
 sns.set_context("poster")
 
 
-
 def load_rsa_results(rsa_file: str) -> Dict[str, Any]:
-    """
-    Load RSA results from NPZ file (supports both old and new formats).
-
-    Parameters
-    ----------
-    rsa_file : str
-        Path to RSA results file
-
-    Returns
-    -------
-    dict
-        RSA results dictionary with metadata extracted from filename if needed
-    """
     if not os.path.exists(rsa_file):
         raise FileNotFoundError(f"RSA file not found: {rsa_file}")
 
     data = np.load(rsa_file, allow_pickle=True)
     filename = Path(rsa_file).name
 
-    # New format has metadata in the file
-    if 'subject_id' in data:
-        subject_id = int(data['subject_id'])
-        # Handle both single session (legacy) and multiple sessions (new format)
-        if 'sessions' in data:
-            sessions = list(data['sessions'])
-            session = sessions[0] if len(sessions) == 1 else None  # For backward compatibility
-        elif 'session' in data:
-            session = int(data['session'])
+    if "subject_id" in data:
+        subject_id = int(data["subject_id"])
+        if "sessions" in data:
+            sessions = list(data["sessions"])
+            session = sessions[0] if len(sessions) == 1 else None
+        elif "session" in data:
+            session = int(data["session"])
             sessions = [session]
         else:
             session = None
             sessions = []
-        model_name = str(data['model_name']) if 'model_name' in data else 'unknown'
-        layer = str(data['layer']) if 'layer' in data else 'unknown'
+        model_name = str(data["model_name"]) if "model_name" in data else "unknown"
+        layer = str(data["layer"]) if "layer" in data else "unknown"
     else:
-        # Old format - extract from filename
-        # Expected format: sub-XX_ses-YY_model-NAME_layer-LAYER_rsa.npz
-        parts = filename.replace('.npz', '').split('_')
+        parts = filename.replace(".npz", "").split("_")
         subject_id = None
         session = None
         sessions = []
-        model_name = 'unknown'
-        layer = 'unknown'
-
+        model_name = "unknown"
+        layer = "unknown"
         for part in parts:
-            if part.startswith('sub-'):
-                subject_id = int(part.replace('sub-', ''))
-            elif part.startswith('ses-'):
-                session = int(part.replace('ses-', ''))
+            if part.startswith("sub-"):
+                subject_id = int(part.replace("sub-", ""))
+            elif part.startswith("ses-"):
+                session = int(part.replace("ses-", ""))
                 sessions = [session]
-            elif part.startswith('model-'):
-                model_name = part.replace('model-', '')
-            elif part.startswith('layer-'):
-                layer = part.replace('layer-', '')
-    #logger.info("Shape of rsa_timeseries: %s", data['meg_rdm_timeseries'].shape, "Subject ID:", subject_id, "Session(s):", sessions, "Model:", model_name, "Layer:", layer)
+            elif part.startswith("model-"):
+                model_name = part.replace("model-", "")
+            elif part.startswith("layer-"):
+                layer = part.replace("layer-", "")
+
     result = {
-        'rsa_timeseries': data['rsa_timeseries'],
-        'times': data['times'],
-        'meg_rdm_timeseries': data['meg_rdm_timeseries'],
-        'embedding_rdm': data['embedding_rdm'],
-        'epoch_indices': data['epoch_indices'],
-        'embedding_indices': data['embedding_indices'],
-        'object_labels': data['object_labels'].tolist() if 'object_labels' in data else None,
-        'distance_metric': str(data['distance_metric']),
-        'subject_id': subject_id,
-        'session': session,  # For backward compatibility
-        'sessions': sessions,  # New format with multiple sessions
-        'model_name': model_name,
-        'layer': layer
+        "rsa_timeseries": data["rsa_timeseries"],
+        "times": data["times"],
+        "meg_rdm_timeseries": data["meg_rdm_timeseries"],
+        "embedding_rdm": data["embedding_rdm"],
+        "epoch_indices": data["epoch_indices"],
+        "embedding_indices": data["embedding_indices"],
+        "object_labels": data["object_labels"].tolist() if "object_labels" in data else None,
+        "distance_metric": str(data["distance_metric"]) if "distance_metric" in data else "unknown",
+        "subject_id": subject_id,
+        "session": session,
+        "sessions": sessions,
+        "model_name": model_name,
+        "layer": layer,
     }
-
-    # Add baseline timeseries if available
-    if 'baseline_timeseries' in data:
-        result['baseline_timeseries'] = data['baseline_timeseries']
-
+    if "baseline_timeseries" in data:
+        result["baseline_timeseries"] = data["baseline_timeseries"]
     return result
 
 
-def compute_noise_ceiling_timeseries(meg_rdm_timeseries: np.ndarray, 
-                                   n_bootstrap: int = 1000) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Compute noise ceiling for MEG RDM time series.
-    
-    Parameters
-    ----------
-    meg_rdm_timeseries : np.ndarray
-        MEG RDM time series (n_times, n_conditions, n_conditions)
-    n_bootstrap : int, default 1000
-        Number of bootstrap samples for noise ceiling
-        
-    Returns
-    -------
-    tuple
-        (lower_bound, upper_bound) noise ceiling time series
-    """
-   
-    n_times, n_conditions, _ = meg_rdm_timeseries.shape
-    lower_bound = np.zeros(n_times)
-    upper_bound = np.zeros(n_times)
-    
-    logger.info(f"Computing noise ceiling with {n_bootstrap} bootstrap samples...")
-    
-    for t in range(n_times):
-        # Get RDM at time t
-        rdm_t = meg_rdm_timeseries[t]
-        
-        # Create RDMs object for rsatoolbox
-        rdms = RDMs(rdm_t[np.newaxis, :, :])  # Add singleton dimension for one RDM
-        
-        # Compute noise ceiling using rsatoolbox
-        try:
-            nc_lower, nc_upper = boot_noise_ceiling(rdms, method='spearman')
-            lower_bound[t] = nc_lower
-            upper_bound[t] = nc_upper
-        except:
-            # Simple fallback for single RDM
-            lower_bound[t] = 0.5
-            upper_bound[t] = 1.0
-    
-    return lower_bound, upper_bound
-
-
-def plot_single_rsa_timeseries(rsa_data: Dict[str, Any], output_dir: Path,
-                              compute_nc: bool = True, save_fig: bool = True) -> plt.Figure:
-    """
-    Plot RSA time series for a single subject/session with consistency.
-
-    Parameters
-    ----------
-    rsa_data : dict
-        RSA results dictionary (must contain 'consistency_timeseries' if available)
-    output_dir : Path
-        Output directory for plots
-    compute_nc : bool, default True
-        Whether to compute and plot noise ceiling
-    save_fig : bool, default True
-        Whether to save the figure
-
-    Returns
-    -------
-    plt.Figure
-        Created figure
-    """
-    fig, ax = plt.subplots(figsize=(12, 6))
-
-    times = rsa_data['times']
-    rsa_timeseries = rsa_data['rsa_timeseries']
-
-    # Plot RSA time series
-    ax.plot(times, rsa_timeseries, 'b-', linewidth=2, label='MEG-ANN RSA')
-
-    # Plot shuffled labels baseline if available
-    if 'baseline_timeseries' in rsa_data and rsa_data['baseline_timeseries'] is not None:
-        baseline = rsa_data['baseline_timeseries']  # Shape: (n_permutations, n_times)
-        # Compute percentiles
-        baseline_95 = np.percentile(baseline, 95, axis=0)
-        baseline_99 = np.percentile(baseline, 99, axis=0)
-        baseline_mean = np.mean(baseline, axis=0)
-
-        # Plot mean baseline
-        ax.plot(times, baseline_mean, 'r--', alpha=0.5, linewidth=1.5, label='Baseline (mean)')
-        # Plot 95th percentile threshold
-        ax.plot(times, baseline_95, 'r-', alpha=0.7, linewidth=1, label='Baseline (p<0.05)')
-        logger.info("Plotted shuffled labels baseline")
-
-    # Compute and plot noise ceiling if requested
-    if compute_nc:
-        try:
-            nc_lower, nc_upper = compute_noise_ceiling_timeseries(rsa_data['meg_rdm_timeseries'])
-            ax.fill_between(times, nc_lower, nc_upper, alpha=0.3, color='gray',
-                          label='Noise Ceiling')
-            ax.plot(times, nc_lower, 'k--', alpha=0.7, linewidth=1)
-            ax.plot(times, nc_upper, 'k--', alpha=0.7, linewidth=1)
-        except Exception as e:
-            logger.warning(f"Could not compute noise ceiling: {e}")
-    
-    # Add zero line
-    ax.axhline(y=0, color='k', linestyle='-', alpha=0.3)
-    ax.axvline(x=0, color='k', linestyle='-', alpha=0.3, label='Fixation onset')
-    ax.set_xlim(-0.2, 0.5)
-    # Formatting
-    ax.set_xlabel('time [s]')
-    ax.set_ylabel("RDM similarity [spearman's rho]")
-    # Create session info string
-    sessions_str = ""
-    if rsa_data.get("sessions") and len(rsa_data["sessions"]) > 1:
-        sessions_str = f', Sessions {rsa_data["sessions"]}'
-    elif rsa_data.get("session"):
-        sessions_str = f', Session {rsa_data["session"]}'
-
-    ax.set_title(f'Subject {rsa_data["subject_id"]}{sessions_str}\n'
-                f'Model: {rsa_data["model_name"]}, Layer: {rsa_data["layer"]}')
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    
-    # Set reasonable y limits
-    y_min = min(0, np.nanmin(rsa_timeseries) - 0.05)
-    y_max = max(0.5, np.nanmax(rsa_timeseries) + 0.05)
-    ax.set_ylim(y_min, y_max)
-    
-    plt.tight_layout()
-    
-    if save_fig:
-        # Create filename based on available session info
-        if rsa_data.get("sessions") and len(rsa_data["sessions"]) > 1:
-            sessions_str = f"ses-{'_'.join(map(str, rsa_data['sessions']))}"
-        elif rsa_data.get("session"):
-            sessions_str = f"ses-{rsa_data['session']:02d}"
-        else:
-            sessions_str = "all-ses"
-
-        filename = f"sub-{rsa_data['subject_id']:02d}_{sessions_str}_" \
-                  f"model-{rsa_data['model_name']}_layer-{rsa_data['layer']}_rsa_timeseries.png"
-        fig.savefig(output_dir / filename, dpi=PLOT_CONFIG['figure_dpi'], bbox_inches='tight')
-        logger.info(f"Saved plot: {filename}")
-    
-    return fig
-
-
-def plot_group_rsa_timeseries(rsa_data_list: List[Dict[str, Any]], output_dir: Path,
-                            compute_nc: bool = True, save_fig: bool = True) -> plt.Figure:
-    """
-    Plot group-average RSA time series with individual subjects.
-    
-    Parameters
-    ----------
-    rsa_data_list : list of dict
-        List of RSA results dictionaries
-    output_dir : Path
-        Output directory for plots
-    compute_nc : bool, default True
-        Whether to compute and plot noise ceiling
-    save_fig : bool, default True
-        Whether to save the figure
-        
-    Returns
-    -------
-    plt.Figure
-        Created figure
-    """
-    if not rsa_data_list:
-        raise ValueError("No RSA data provided")
-    
-    fig, ax = plt.subplots(figsize=(12, 6))
-    
-    # Get common time points (assuming all have same timing)
-    times = rsa_data_list[0]['times']
-    
-    # Collect all RSA time series
-    all_rsa_timeseries = []
-    all_nc_lower = []
-    all_nc_upper = []
-    
-    for i, rsa_data in enumerate(rsa_data_list):
-        rsa_timeseries = rsa_data['rsa_timeseries']
-        all_rsa_timeseries.append(rsa_timeseries)
-        
-        # Plot individual subject (semi-transparent)
-        ax.plot(times, rsa_timeseries, alpha=0.3, color='blue', linewidth=1)
-        
-        # Compute noise ceiling for this subject
-        if compute_nc:
-            try:
-                nc_lower, nc_upper = compute_noise_ceiling_timeseries(rsa_data['meg_rdm_timeseries'])
-                all_nc_lower.append(nc_lower)
-                all_nc_upper.append(nc_upper)
-            except Exception as e:
-                logger.warning(f"Could not compute noise ceiling for subject {rsa_data['subject_id']}: {e}")
-    
-    # Compute group statistics
-    all_rsa_timeseries = np.array(all_rsa_timeseries)
-    mean_rsa = np.nanmean(all_rsa_timeseries, axis=0)
-    sem_rsa = np.nanstd(all_rsa_timeseries, axis=0) / np.sqrt(len(all_rsa_timeseries))
-    
-    # Plot group average
-    ax.plot(times, mean_rsa, 'b-', linewidth=3, label=f'Group Average (n={len(rsa_data_list)})')
-    ax.fill_between(times, mean_rsa - sem_rsa, mean_rsa + sem_rsa, alpha=0.3, color='blue')
-    
-    # Plot group noise ceiling if available
-    if all_nc_lower and all_nc_upper:
-        all_nc_lower = np.array(all_nc_lower)
-        all_nc_upper = np.array(all_nc_upper)
-        mean_nc_lower = np.nanmean(all_nc_lower, axis=0)
-        mean_nc_upper = np.nanmean(all_nc_upper, axis=0)
-        
-        ax.fill_between(times, mean_nc_lower, mean_nc_upper, alpha=0.2, color='gray',
-                       label='Noise Ceiling')
-        ax.plot(times, mean_nc_lower, 'k--', alpha=0.7, linewidth=1)
-        ax.plot(times, mean_nc_upper, 'k--', alpha=0.7, linewidth=1)
-    
-    # Add reference lines
-    #ax.axhline(y=0, color='k', linestyle='-', alpha=0.3)
-    ax.axvline(x=0, color='k', linestyle='-', alpha=0.3, label='fixation onset')
-    ax.set_xlim(-0.2, 0.5)
-    # Formatting
-    ax.set_xlabel('time [s]')
-    ax.set_ylabel("RDM similarity [spearman's rho]")
-    
-    # Get model and layer info from first result
-    model_name = rsa_data_list[0]['model_name']
-    layer = rsa_data_list[0]['layer']
-    ax.set_title(f'Group RSA Time Series\nModel: {model_name}, Layer: {layer}', fontsize=14)
-    
-    ax.legend()
-    #ax.grid(True, alpha=0.3)
-    sns.despine()
-    
-    # Set reasonable y limits
-    y_min = 0#min(0, np.nanmin(mean_rsa) - 0.05)
-    y_max = 1
-    ax.set_ylim(y_min, y_max)
-    
-    plt.tight_layout()
-    
-    if save_fig:
-        filename = f"group_model-{model_name}_layer-{layer}_rsa_timeseries.png"
-        
-        fig.savefig(output_dir / filename, dpi=PLOT_CONFIG['figure_dpi'], bbox_inches='tight')
-        logger.info(f"Saved group plot: {output_dir / filename}")
-    
-    return fig
-
-
-def create_summary_dataframe(rsa_data_list: List[Dict[str, Any]]) -> pd.DataFrame:
-    """
-    Create summary DataFrame with peak RSA values and timing.
-    
-    Parameters
-    ----------
-    rsa_data_list : list of dict
-        List of RSA results dictionaries
-        
-    Returns
-    -------
-    pd.DataFrame
-        Summary statistics DataFrame
-    """
-    summary_data = []
-    
-    for rsa_data in rsa_data_list:
-        times = rsa_data['times']
-        rsa_timeseries = rsa_data['rsa_timeseries']
-        
-        # Find peak RSA
-        peak_idx = np.nanargmax(rsa_timeseries)
-        peak_rsa = rsa_timeseries[peak_idx]
-        peak_time = times[peak_idx]
-        
-        # Calculate mean RSA in different time windows
-        # Pre-stimulus (-200 to 0 ms)
-        pre_mask = (times >= -0.2) & (times < 0)
-        pre_rsa = np.nanmean(rsa_timeseries[pre_mask]) if np.any(pre_mask) else np.nan
-        
-        # Early (0 to 200 ms)
-        early_mask = (times >= 0) & (times < 0.2)
-        early_rsa = np.nanmean(rsa_timeseries[early_mask]) if np.any(early_mask) else np.nan
-        
-        # Late (200 to 500 ms)
-        late_mask = (times >= 0.2) & (times < 0.5)
-        late_rsa = np.nanmean(rsa_timeseries[late_mask]) if np.any(late_mask) else np.nan
-        
-        summary_data.append({
-            'subject_id': rsa_data['subject_id'],
-            'sessions': rsa_data.get('sessions', [rsa_data.get('session')] if rsa_data.get('session') else []),
-            'model_name': rsa_data['model_name'],
-            'layer': rsa_data['layer'],
-            'peak_rsa': peak_rsa,
-            'peak_time': peak_time,
-            'pre_rsa': pre_rsa,
-            'early_rsa': early_rsa,
-            'late_rsa': late_rsa,
-            'n_epochs': len(rsa_data['epoch_indices'])
-        })
-    
-    return pd.DataFrame(summary_data)
-
-
-def plot_rdms_at_timepoint(rsa_data: Dict[str, Any], timepoint_ms: float = 110.0,
-                          output_dir: Path = None, save_fig: bool = True,
-                          categorize_level: str = 'subcategory') -> plt.Figure:
-    """
-    Plot MEG and embedding RDMs at a specific timepoint with categorized sorting.
-
-    Parameters
-    ----------
-    rsa_data : dict
-        RSA results dictionary
-    timepoint_ms : float, default 110.0
-        Timepoint in milliseconds to plot RDMs
-    output_dir : Path, optional
-        Output directory for plots
-    save_fig : bool, default True
-        Whether to save the figure
-    categorize_level : str, default 'subcategory'
-        Level for object categorization: 'main_category', 'subcategory', or 'hierarchical'
-
-    Returns
-    -------
-    plt.Figure
-        Created figure
-    """
-    times = rsa_data['times']
-    meg_rdm_timeseries = rsa_data['meg_rdm_timeseries']
-    embedding_rdm = rsa_data['embedding_rdm']
-    object_labels = rsa_data.get('object_labels', [])
-
-    # Find closest timepoint
-    timepoint_s = timepoint_ms / 1000.0
-    time_idx = np.argmin(np.abs(times - timepoint_s))
-    actual_time_ms = times[time_idx] * 1000
-
-    # Get RDM at timepoint
-    meg_rdm = meg_rdm_timeseries[time_idx]
-    n_objects = meg_rdm.shape[0]
-
-    # Sort objects by category if labels are available
-    if object_labels and len(object_labels) == n_objects:
-        # Import categorization functions
-        from pyavs.scenes.objects import sort_objects_by_category, categorize_objects
-
-        # Sort objects by category
-        sorted_objects, sort_indices = sort_objects_by_category(object_labels, level=categorize_level)
-
-        # Reorder RDMs according to categorization
-        meg_rdm = meg_rdm[np.ix_(sort_indices, sort_indices)]
-        embedding_rdm = embedding_rdm[np.ix_(sort_indices, sort_indices)]
-
-        # Get category labels for display
-        category_labels = categorize_objects(sorted_objects, level=categorize_level)
-        display_labels = category_labels
-    else:
-        sorted_objects = object_labels
-        display_labels = object_labels
-
-    # Create figure with subplots - make it larger and square
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 8))
-
-    # Plot MEG RDM
-    im1 = ax1.imshow(meg_rdm, cmap='RdYlBu_r', aspect='equal')
-    ax1.set_title(f'MEG RDM at {actual_time_ms:.1f} ms\nSubject {rsa_data["subject_id"]}',
-                  fontsize=16, pad=20)
-
-    # Add colorbar for MEG RDM
-    cbar1 = plt.colorbar(im1, ax=ax1, shrink=0.7)
-    cbar1.set_label('Distance', rotation=270, labelpad=20, fontsize=14)
-
-    # Handle category labels intelligently
-    if display_labels and len(display_labels) == n_objects:
-        # Only show labels if there aren't too many
-        if n_objects <= 20:
-            # Show all category labels with better formatting
-            ax1.set_xticks(range(n_objects))
-            ax1.set_yticks(range(n_objects))
-            ax1.set_xticklabels(display_labels, rotation=90, ha='center', fontsize=10)
-            ax1.set_yticklabels(display_labels, fontsize=10)
-        else:
-            # Show only every nth label to avoid overcrowding
-            step = max(1, n_objects // 10)  # Show max 10 labels
-            indices = range(0, n_objects, step)
-            ax1.set_xticks(indices)
-            ax1.set_yticks(indices)
-            ax1.set_xticklabels([display_labels[i] for i in indices],
-                               rotation=90, ha='center', fontsize=10)
-            ax1.set_yticklabels([display_labels[i] for i in indices], fontsize=10)
-    else:
-        # No labels - just show indices
-        ax1.set_xlabel('Object Index', fontsize=12)
-        ax1.set_ylabel('Object Index', fontsize=12)
-
-    # Plot embedding RDM
-    im2 = ax2.imshow(embedding_rdm, cmap='RdYlBu_r', aspect='equal')
-    ax2.set_title(f'Embedding RDM\nModel: {rsa_data["model_name"]}, Layer: {rsa_data["layer"]}',
-                  fontsize=16, pad=20)
-
-    # Add colorbar for embedding RDM
-    cbar2 = plt.colorbar(im2, ax=ax2, shrink=0.7)
-    cbar2.set_label('Distance', rotation=270, labelpad=20, fontsize=14)
-
-    # Handle category labels for embedding RDM
-    if display_labels and len(display_labels) == embedding_rdm.shape[0]:
-        if n_objects <= 20:
-            ax2.set_xticks(range(n_objects))
-            ax2.set_yticks(range(n_objects))
-            ax2.set_xticklabels(display_labels, rotation=90, ha='center', fontsize=10)
-            ax2.set_yticklabels(display_labels, fontsize=10)
-        else:
-            step = max(1, n_objects // 10)
-            indices = range(0, n_objects, step)
-            ax2.set_xticks(indices)
-            ax2.set_yticks(indices)
-            ax2.set_xticklabels([display_labels[i] for i in indices],
-                               rotation=90, ha='center', fontsize=10)
-            ax2.set_yticklabels([display_labels[i] for i in indices], fontsize=10)
-    else:
-        ax2.set_xlabel('Object Index', fontsize=12)
-        ax2.set_ylabel('Object Index', fontsize=12)
-
-    # Adjust layout
-    plt.tight_layout()
-
-    if save_fig and output_dir:
-        # Create filename based on available session info
-        if rsa_data.get("sessions") and len(rsa_data["sessions"]) > 1:
-            sessions_str = f"ses-{'_'.join(map(str, rsa_data['sessions']))}"
-        elif rsa_data.get("session"):
-            sessions_str = f"ses-{rsa_data['session']:02d}"
-        else:
-            sessions_str = "all-ses"
-
-        filename = f"sub-{rsa_data['subject_id']:02d}_{sessions_str}_" \
-                  f"model-{rsa_data['model_name']}_layer-{rsa_data['layer']}_rdms_{actual_time_ms:.0f}ms.png"
-        fig.savefig(output_dir / filename, dpi=PLOT_CONFIG['figure_dpi'], bbox_inches='tight')
-        logger.info(f"Saved RDM plot: {filename}")
-
-    return fig
-
-
-def compute_intersubject_noise_ceiling(rsa_data_list: List[Dict[str, Any]], n_bootstrap: int = 1000) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Compute noise ceiling based on inter-subject RDM correlations using RSA toolbox.
-
-    Parameters
-    ----------
-    rsa_data_list : list of dict
-        List of RSA results dictionaries from multiple subjects
-    n_bootstrap : int, default 1000
-        Number of bootstrap samples
-
-    Returns
-    -------
-    tuple
-        (lower_bound, upper_bound) noise ceiling time series
-    """
+def compute_intersubject_noise_ceiling(
+    rsa_data_list: List[Dict[str, Any]],
+    n_bootstrap: int = 1000,
+) -> Tuple[np.ndarray, np.ndarray]:
     if len(rsa_data_list) < 2:
-        logger.warning("Need at least 2 subjects for noise ceiling calculation")
-        times = rsa_data_list[0]['times']
+        times = rsa_data_list[0]["times"]
         return np.zeros(len(times)), np.ones(len(times))
 
-    # Get common time points
-    times = rsa_data_list[0]['times']
+    times = rsa_data_list[0]["times"]
     n_times = len(times)
     n_subjects = len(rsa_data_list)
 
-    # Collect all MEG RDM time series
-    all_rdm_timeseries = []
-    for rsa_data in rsa_data_list:
-        all_rdm_timeseries.append(rsa_data['meg_rdm_timeseries'])
-    
-    all_rdm_timeseries = np.array(all_rdm_timeseries)  # (n_subjects, n_times, n_conditions, n_conditions)
+    all_rdm_timeseries = np.array([d["meg_rdm_timeseries"] for d in rsa_data_list])
+    lower = np.zeros(n_times)
+    upper = np.zeros(n_times)
 
-    lower_bound = np.zeros(n_times)
-    upper_bound = np.zeros(n_times)
-
-    logger.info(f"Computing inter-subject noise ceiling with {n_subjects} subjects and {n_bootstrap} bootstrap samples...")
+    logger.info(
+        f"Computing inter-subject noise ceiling with {n_subjects} subjects "
+        f"and {n_bootstrap} bootstrap samples..."
+    )
 
     for t in range(n_times):
-        # Get RDMs at time t from all subjects
-        rdms_t = all_rdm_timeseries[:, t, :, :]  # (n_subjects, n_conditions, n_conditions)
-
+        rdms_t = all_rdm_timeseries[:, t, :, :]
         try:
-            # set nans to zero
             rdms_t = np.nan_to_num(rdms_t, nan=0.0)
-            # Create RDMs object for rsatoolbox
             rdms = RDMs(rdms_t)
-            # set nans to zero
-            
-            # Compute noise ceiling using bootstrap
-            nc_lower, nc_upper = boot_noise_ceiling(rdms,method='spearman')
-            lower_bound[t] = nc_lower
-            upper_bound[t] = nc_upper
-
+            nc_l, nc_u = boot_noise_ceiling(rdms, method="spearman")
+            lower[t] = nc_l
+            upper[t] = nc_u
         except Exception as e:
             logger.warning(f"Error computing noise ceiling at time {times[t]:.3f}s: {e}")
             # Fallback to correlation-based estimate
@@ -760,156 +277,35 @@ def plot_grand_average_rsa(rsa_data_list: List[Dict[str, Any]], output_dir: Path
         if 'baseline_timeseries' in rsa_data and rsa_data['baseline_timeseries'] is not None:
             all_baselines.append(rsa_data['baseline_timeseries'])  # Shape: (n_permutations, n_times)
 
-    # Plot group-level baseline if available
-    if len(all_baselines) >= 1:
-        # Make df for baseline data: concatenate into shape (n_samples, n_times)
-        baselines_combined = np.concatenate(all_baselines, axis=0)  # shape: (n_samples, n_times)
-        
-        # Create DataFrame with timepoints as rows (index) and each column a permutation/sample
-        df_baselines = pd.DataFrame(baselines_combined.T, index=times * 1000)
-        df_baselines.index.name = 'time'
-        df_baselines = df_baselines.reset_index() 
-        print(df_baselines.head())  # columns: 'time', 0,1,2,...
-        
-        # melt for seaborn so each row is (time, permutation, baseline)
-        df_melted_baseline = df_baselines.melt(id_vars='time', var_name='permutation', value_name='baseline')
-        print(df_melted_baseline.head())  # columns: time, permutation, baseline
-        # plot lineplot with seaborn with 95th percentile shading
-        sns.lineplot(data=df_melted_baseline, x='time', y='baseline', errorbar=("ci", 95), ax=ax,
-                     label='shuffle baseline', color="#62241d", linestyle='--')
-    
-        
-      
-        logger.info("Plotted group-level shuffled labels baseline")
+    # requested: edges in cornflowerblue
+    ax.plot(times_ms, nc_lower, color="cornflowerblue", label="NC lower", linestyle="-.")
+    ax.plot(times_ms, nc_upper, color="cornflowerblue", label="NC upper")
 
-    # Compute grand average
-    # make this a df to plot with seaborn
-
-    df_rsa = pd.DataFrame(all_rsa_timeseries).T
-    df_rsa['time'] = times*1000
-    df_melted = df_rsa.melt(id_vars='time', var_name='subject', value_name='rsa')
-    
-    
-    sns.lineplot(data=df_melted, x='time', y='rsa', errorbar=("ci",95), ax=ax, 
-                 label=f'grand average (n = {len(rsa_data_list)})', color="#991fb4")
-
-    # Compute and plot inter-subject noise ceiling
-    logger.info("Computing inter-subject noise ceiling...")
-    nc_lower, nc_upper = compute_intersubject_noise_ceiling(rsa_data_list)
-
-    ax.fill_between(times*1000, nc_lower, nc_upper, alpha=0.2, color='gray',
-                   label='inter-subject noise ceiling')
-
-
-    # Add reference lines
-    #ax.axhline(y=0, color='k', linestyle='-', alpha=0.3)
-    ax.axvline(x=0, color='k', linestyle='--', alpha=0.3, label='fixation onset')
-
-    # Formatting
-    ax.set_xlabel('time [ms]')
+    ax.axvline(x=0, color="k", linestyle="--", alpha=0.3, label="fixation onset")
+    ax.set_xlabel("time [ms]")
     ax.set_ylabel("RDM similarity [spearman's rho]")
     ax.set_xlim(-200, 500)
-
-    # Get model and layer info from first result
-    model_name = rsa_data_list[0]['model_name']
-    layer = rsa_data_list[0]['layer']
-   
-
-   
-
-    # Set reasonable y limits
-    y_min = -0.1#max(0.1, np.nanmin(df_melted['rsa']) - 0.05)
-    y_max = 1#max(0.6, np.nanmax(df_melted['rsa']) + 0.2)
-    #ax.set_ylim(y_min, y_max)
-    # despine for cleaner look
+    ax.set_ylim(-0.1, 1.0)
+    ax.legend(frameon=False, loc="upper right")
     sns.despine()
-    # no grid
-    #ax.grid(False)
-    ax.legend(frameon=False, loc='upper right')
     plt.tight_layout()
 
     if save_fig:
-        filename = f"grand_average_model-{model_name}_layer-{layer}_rsa_timeseries.pdf"
-        fig.savefig(output_dir / filename, dpi=PLOT_CONFIG['figure_dpi'])
-        logger.info(f"Saved grand average plot: {filename}")
+        out = output_dir / f"{filename_stem}_A_noise_ceiling_only.pdf"
+        fig.savefig(out, dpi=PLOT_CONFIG["figure_dpi"])
+        logger.info(f"Saved: {out}")
 
     return fig
 
 
-def load_multi_network_results(rsa_file: str) -> Dict[str, Any]:
-    """
-    Load multi-network RSA results from NPZ file.
-
-    Parameters
-    ----------
-    rsa_file : str
-        Path to multi-network RSA results file
-
-    Returns
-    -------
-    dict
-        Multi-network RSA results with all models
-    """
-    if not os.path.exists(rsa_file):
-        raise FileNotFoundError(f"RSA file not found: {rsa_file}")
-
-    data = np.load(rsa_file, allow_pickle=True)
-
-    # Check if this is a multi-network file
-    if 'model_specs' not in data:
-        # Single model file - convert to multi-network format
-        return {
-            'times': data['times'],
-            'meg_rdm_timeseries': data['meg_rdm_timeseries'],
-            'subject_id': int(data['subject_id']),
-            'sessions': list(data['sessions']) if 'sessions' in data else [],
-            'model_specs': [(str(data['model_name']), str(data['layer']))],
-            'rsa_timeseries': {f"{data['model_name']}_{data['layer']}": data['rsa_timeseries']},
-            'embedding_rdm': {f"{data['model_name']}_{data['layer']}": data['embedding_rdm']},
-            'consistency_timeseries': data['consistency_timeseries'] if 'consistency_timeseries' in data else None
-        }
-
-    # Multi-network file
-    model_specs = [tuple(spec) for spec in data['model_specs']]
-    rsa_timeseries_dict = {}
-    embedding_rdm_dict = {}
-
-    for model_name, layer in model_specs:
-        model_key = f"{model_name}_{layer}"
-        rsa_timeseries_dict[model_key] = data[f'rsa_timeseries_{model_key}']
-        embedding_rdm_dict[model_key] = data[f'embedding_rdm_{model_key}']
-
-    return {
-        'times': data['times'],
-        'meg_rdm_timeseries': data['meg_rdm_timeseries'],
-        'subject_id': int(data['subject_id']),
-        'sessions': list(data['sessions']) if 'sessions' in data else [],
-        'model_specs': model_specs,
-        'rsa_timeseries': rsa_timeseries_dict,
-        'embedding_rdm': embedding_rdm_dict,
-        'consistency_timeseries': data['consistency_timeseries'] if 'consistency_timeseries' in data else None
-    }
-
-
-def plot_multi_network_rsa(multi_network_data: Dict[str, Any], output_dir: Path,
-                           save_fig: bool = True) -> plt.Figure:
-    """
-    Plot RSA timeseries for multiple network models on the same plot.
-
-    Parameters
-    ----------
-    multi_network_data : dict
-        Multi-network RSA results dictionary
-    output_dir : Path
-        Output directory for plots
-    save_fig : bool, default True
-        Whether to save the figure
-
-    Returns
-    -------
-    plt.Figure
-        Created figure
-    """
+# -----------------------------
+# B) Main figure with clipped NC + layer RSA
+# -----------------------------
+def plot_layers_with_clipped_noise_ceiling_B(
+    data_by_layer: Dict[str, List[Dict[str, Any]]],
+    output_dir: Path,
+    save_fig: bool = True,
+) -> plt.Figure:
     sns.set_context("poster")
     fig, ax = plt.subplots(figsize=(12, 8))
 
@@ -1170,250 +566,194 @@ def plot_multi_layer_nc_focus(data_by_layer: Dict[str, List[Dict[str, Any]]],
     return fig
 
 
-def plot_multi_network_grand_average(multi_network_data_list: List[Dict[str, Any]],
-                                     output_dir: Path, save_fig: bool = True) -> plt.Figure:
+# -----------------------------
+# C) Clustered rank-transformed matrix + wide dendrogram
+# -----------------------------
+def _rank_transform_square(mat: np.ndarray) -> np.ndarray:
+    """Rank-transform off-diagonals (upper triangle), keep symmetry, diag=0."""
+    m = np.array(mat, dtype=float, copy=True)
+    np.fill_diagonal(m, 0.0)
+    iu = np.triu_indices_from(m, k=1)
+    vals = m[iu]
+    ranks = rankdata(vals, method="average")  # 1..N
+    # normalize to [0,1] for nicer plotting
+    ranks = (ranks - ranks.min()) / (ranks.max() - ranks.min() + 1e-12)
+    m2 = np.zeros_like(m)
+    m2[iu] = ranks
+    m2 = m2 + m2.T
+    return m2
+
+
+def plot_clustered_matrix_C(
+    mat: np.ndarray,
+    labels: List[str],
+    output_dir: Path,
+    filename_stem: str,
+    rank_transform: bool = True,
+    save_fig: bool = True,
+) -> Tuple[plt.Figure, plt.Figure]:
     """
-    Plot grand average RSA timeseries for multiple networks across subjects.
-
-    Parameters
-    ----------
-    multi_network_data_list : list of dict
-        List of multi-network RSA results from multiple subjects
-    output_dir : Path
-        Output directory for plots
-    save_fig : bool, default True
-        Whether to save the figure
-
-    Returns
-    -------
-    plt.Figure
-        Created figure
+    Returns:
+      fig_mat: clustered heatmap (manual reorder)
+      fig_tree: wide dendrogram with labels rotated 90 under leaves
     """
-    sns.set_context("poster")
-    fig, ax = plt.subplots(figsize=(12, 8))
+    if rank_transform:
+        mat_use = _rank_transform_square(mat)
+    else:
+        mat_use = np.array(mat, dtype=float, copy=True)
 
-    times = multi_network_data_list[0]['times']
-    model_specs = multi_network_data_list[0]['model_specs']
+    # linkage on condensed distances; if this is a similarity matrix instead of distance,
+    # this will be wrong. Here we assume mat_use behaves like a distance/RDM.
+    condensed = squareform(mat_use, checks=False)
+    Z = linkage(condensed, method="average")
 
-    # Define colors
-    colors = plt.cm.tab10(np.linspace(0, 1, len(model_specs)))
+    order = leaves_list(Z)
+    mat_ord = mat_use[np.ix_(order, order)]
+    labels_ord = [labels[i] for i in order]
 
-    # Collect RSA timeseries for each network across subjects
-    for (model_name, layer), color in zip(model_specs, colors):
-        model_key = f"{model_name}_{layer}"
-        all_rsa = []
-
-        for data in multi_network_data_list:
-            rsa_timeseries = data['rsa_timeseries'][model_key]
-            # Apply smoothing
-            window_size = 10
-            boxcar = np.ones(window_size) / window_size
-            smoothed_rsa = np.convolve(rsa_timeseries, boxcar, mode='same')
-            all_rsa.append(smoothed_rsa)
-
-        # Compute statistics
-        all_rsa = np.array(all_rsa)
-        mean_rsa = np.nanmean(all_rsa, axis=0)
-        sem_rsa = np.nanstd(all_rsa, axis=0) / np.sqrt(len(all_rsa))
-
-        # Plot
-        ax.plot(times, mean_rsa, linewidth=2.5, color=color,
-               label=f'{model_name} ({layer})')
-        ax.fill_between(times, mean_rsa - sem_rsa, mean_rsa + sem_rsa,
-                       alpha=0.2, color=color)
-
-    # Plot group consistency if available
-    all_consistency = []
-    for data in multi_network_data_list:
-        if data['consistency_timeseries'] is not None:
-            window_size = 10
-            boxcar = np.ones(window_size) / window_size
-            smoothed = np.convolve(data['consistency_timeseries'], boxcar, mode='same')
-            all_consistency.append(smoothed)
-
-    if len(all_consistency) >= 2:
-        all_consistency = np.array(all_consistency)
-        mean_consistency = np.nanmean(all_consistency, axis=0)
-        ax.fill_between(times, 0, mean_consistency, alpha=0.15, color='gray',
-                       label='Within-subject consistency')
-        ax.plot(times, mean_consistency, 'k--', alpha=0.5, linewidth=1.5)
-
-    # Add reference lines
-    ax.axvline(x=0, color='k', linestyle='--', alpha=0.3, label='Fixation onset')
-
-    # Formatting
-    ax.set_xlabel('Time [s]')
-    ax.set_ylabel("RDM similarity [Spearman's rho]")
-    ax.set_xlim(-0.2, 0.5)
-    ax.set_title(f'Multi-Network Grand Average RSA (n={len(multi_network_data_list)})',
-                fontsize=16)
-
-    ax.legend(loc='best', frameon=True, fontsize=10)
+    # heatmap figure
+    fig_mat, ax = plt.subplots(figsize=(10, 10))
+    im = ax.imshow(mat_ord, aspect="equal")
+    ax.set_title("Hierarchically clustered matrix (rank-transformed)" if rank_transform else "Hierarchically clustered matrix")
+    ax.set_xticks(range(len(labels_ord)))
+    ax.set_yticks(range(len(labels_ord)))
+    ax.set_xticklabels(labels_ord, rotation=90, ha="center", fontsize=8)
+    ax.set_yticklabels(labels_ord, fontsize=8)
+    plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
     sns.despine()
-    ax.grid(False)
+    plt.tight_layout()
 
+    # wide dendrogram figure (requested)
+    fig_tree, ax2 = plt.subplots(figsize=(max(12, 0.35 * len(labels_ord)), 6))
+    dendrogram(
+        Z,
+        labels=labels,
+        leaf_rotation=90,          # requested: 90 rotated under each leaf
+        leaf_font_size=22,
+        ax=ax2,
+        color_threshold=None,
+    )
+    ax2.set_title("Clustered labels (dendrogram)")
+    ax2.set_ylabel("linkage distance")
+    sns.despine()
     plt.tight_layout()
 
     if save_fig:
-        filename = f"grand_average_multi_network_rsa_comparison.pdf"
-        fig.savefig(output_dir / filename, dpi=PLOT_CONFIG['figure_dpi'])
-        logger.info(f"Saved multi-network grand average plot: {filename}")
+        out_mat = output_dir / f"{filename_stem}_C_clustered_matrix.pdf"
+        out_tree = output_dir / f"{filename_stem}_C_clustered_dendrogram_wide.pdf"
+        fig_mat.savefig(out_mat, dpi=PLOT_CONFIG["figure_dpi"])
+        fig_tree.savefig(out_tree, dpi=PLOT_CONFIG["figure_dpi"])
+        logger.info(f"Saved: {out_mat}")
+        logger.info(f"Saved: {out_tree}")
 
-    return fig
+    return fig_mat, fig_tree
+
+
+def _group_average_meg_rdm_at_timepoint(
+    rsa_data_list: List[Dict[str, Any]],
+    timepoint_ms: float,
+) -> Tuple[np.ndarray, Optional[List[str]]]:
+    """Average MEG RDM across subjects at the nearest timepoint."""
+    times = rsa_data_list[0]["times"]
+    t_s = timepoint_ms / 1000.0
+    tidx = int(np.argmin(np.abs(times - t_s)))
+
+    mats = []
+    labels = None
+    for d in rsa_data_list:
+        mats.append(d["meg_rdm_timeseries"][tidx])
+        if labels is None and d.get("object_labels") is not None:
+            labels = list(d["object_labels"])
+    mat_avg = np.nanmean(np.stack(mats, axis=0), axis=0)
+    return mat_avg, labels
+
+
+def _group_average_embedding_rdm(
+    rsa_data_list: List[Dict[str, Any]],
+) -> Tuple[np.ndarray, Optional[List[str]]]:
+    mats = []
+    labels = None
+    for d in rsa_data_list:
+        mats.append(d["embedding_rdm"])
+        if labels is None and d.get("object_labels") is not None:
+            labels = list(d["object_labels"])
+    mat_avg = np.nanmean(np.stack(mats, axis=0), axis=0)
+    return mat_avg, labels
 
 
 def main():
-    """Main function for RSA plotting."""
-    parser = argparse.ArgumentParser(
-        description="Plot RSA analysis results with noise ceiling",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-    # Plot all RSA results in directory
-    python plot_rsa.py --rsa-dir /path/to/rsa/results --output-dir /path/to/plots
-    
-    # Plot specific subjects and model
-    python plot_rsa.py --subjects 1 2 3 --model resnet50_ecoset_crop --layer avgpool
-    
-    # Plot single subject with individual plots
-    python plot_rsa.py --single-subject 1 --save-individual --no-noise-ceiling
-        """
-    )
-    
-    # Input specification
-    parser.add_argument('--rsa-dir', type=str, help='Directory containing RSA results', default="/share/klab/psulewski/psulewski/pyavs/rsa")
-    parser.add_argument('--data-path', type=str, help='Base data path (for automatic RSA dir detection)')
-    
-    # Subject selection
-    parser.add_argument('--subjects', type=int, nargs='+', help='Specific subject IDs to plot', default=[1,2,3,4,5])
-    parser.add_argument('--single-subject', type=int, help='Single subject ID to plot')
-    parser.add_argument('--sessions', type=int, nargs='+', help='Specific session numbers to plot', default=np.arange(1,11).tolist())
-    
-    # Model filtering
-    parser.add_argument('--model', '--model-name', dest='model_name',
-                       help='Filter by model name (e.g., resnet50_ecoset_crop)', default='resnet50_ecoset_crop')
-    parser.add_argument('--layers', nargs='+', help='Filter by layer names (e.g., layer1 layer2 layer3)', default=['layer1','layer2','layer3','avgpool'])
-    parser.add_argument('--layer', help='Single layer name (deprecated, use --layers)', default=None)
-    
-    # Plot options
-    parser.add_argument('--output-dir', type=str, help='Output directory for plots', default="/share/klab/psulewski/psulewski/pyavs/rsa")
-    parser.add_argument('--save-individual', action='store_true',
-                       help='Save individual subject plots', default=False)
-    parser.add_argument('--no-noise-ceiling', action='store_true',
-                       help='Skip noise ceiling computation')
-    parser.add_argument('--save-summary', action='store_true',
-                       help='Save summary statistics CSV')
-    parser.add_argument('--plot-rdms', action='store_true',
-                       help='Plot RDMs at specific timepoint', default=False)
-    parser.add_argument('--rdm-timepoint', type=float, default=110.0,
-                       help='Timepoint in ms for RDM plotting (default: 110.0)')
-    parser.add_argument('--verbose', '-v', action='store_true', help='Increase verbosity')
-    
+    parser = argparse.ArgumentParser(description="Plot RSA analysis results with noise ceiling + clustering")
+
+    parser.add_argument("--rsa-dir", type=str, default="/share/klab/psulewski/psulewski/pyavs/rsa")
+    parser.add_argument("--output-dir", type=str, default="/share/klab/psulewski/psulewski/pyavs/rsa")
+
+    parser.add_argument("--subjects", type=int, nargs="+", default=[1, 2, 3, 4, 5])
+    parser.add_argument("--single-subject", type=int, default=None)
+
+    parser.add_argument("--model", "--model-name", dest="model_name", default="resnet50_ecoset_crop")
+    parser.add_argument("--layers", nargs="+", default=["layer1", "layer2", "layer3", "avgpool"])
+    parser.add_argument("--layer", default=None)  # deprecated
+
+    parser.add_argument("--save-individual", action="store_true", default=False)
+    parser.add_argument("--save-summary", action="store_true", default=False)
+    parser.add_argument("--no-noise-ceiling", action="store_true", default=False)
+    parser.add_argument("--verbose", "-v", action="store_true")
+
     args = parser.parse_args()
-    
-    # Set up logging
+
     if args.verbose:
-        logging.getLogger('pyavs').setLevel(logging.DEBUG)
-    
-    # Check dependencies
-   
-    
-    # Determine RSA results directory
-    if args.rsa_dir:
-        rsa_dir = Path(args.rsa_dir)
-    elif args.data_path:
-        rsa_dir = Path(args.data_path) / 'rsa_results'
-    else:
-        from pyavs.utils.config import get_data_path
-        data_path = get_data_path()
-        if data_path:
-            rsa_dir = Path(data_path) / 'rsa_results'
-        else:
-            parser.error("Must specify --rsa-dir or --data-path")
-    
+        logging.getLogger("pyavs").setLevel(logging.DEBUG)
+
+    rsa_dir = Path(args.rsa_dir)
     if not rsa_dir.exists():
-        parser.error(f"RSA directory does not exist: {rsa_dir}")
-    
-    # Set up output directory as subfolder of RSA results
-    if args.output_dir:
-        output_dir = Path(args.output_dir)
-    else:
-        output_dir = rsa_dir / 'plots'
-    
+        raise FileNotFoundError(f"RSA directory does not exist: {rsa_dir}")
+
+    output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"Saving plots to: {output_dir}")
-    
-    # loop through the selected subjects and collect the path to the results
-    # Collect RSA files only for requested subjects
+
+    # Collect RSA files
     rsa_files = []
-    # Use single-subject override if provided, otherwise the subjects list
     subject_list = [args.single_subject] if args.single_subject is not None else list(args.subjects or [])
     for subj in subject_list:
-        # Match both zero-padded and non-padded folder names (e.g., sub-01 and sub-1)
         for subj_tag in (f"sub-{subj}", f"sub-{subj:02d}"):
-            for p in rsa_dir.glob(f"{subj_tag}/*_rsa_results.npz"):
-                rsa_files.append(str(p))
-
-    # Deduplicate and sort
+            rsa_files.extend([str(p) for p in rsa_dir.glob(f"{subj_tag}/*_rsa_results.npz")])
     rsa_files = sorted(dict.fromkeys(rsa_files))
-    
 
-   
     if not rsa_files:
         logger.error(f"No RSA files found in {rsa_dir}")
         return 1
-    
-    logger.info(f"Found {len(rsa_files)} RSA result files")
 
-    # Handle backward compatibility: --layer (single) vs --layers (multiple)
     layers_to_plot = args.layers if args.layers else []
-    if args.layer:  # If deprecated --layer is used, add it to the list
+    if args.layer:
         layers_to_plot = [args.layer]
 
-    logger.info(f"Filtering for layers: {layers_to_plot}")
-
-    # Load and filter RSA results
     rsa_data_list = []
-    for rsa_file in rsa_files:
+    for f in rsa_files:
         try:
-            rsa_data = load_rsa_results(rsa_file)
-
-            # Filter by model and layer
-            if args.model_name and rsa_data['model_name'] != args.model_name:
+            d = load_rsa_results(f)
+            if args.model_name and d["model_name"] != args.model_name:
                 continue
-            if layers_to_plot and rsa_data['layer'] not in layers_to_plot:
+            if layers_to_plot and d["layer"] not in layers_to_plot:
                 continue
-
-            rsa_data_list.append(rsa_data)
-            logger.debug(f"Loaded: Subject {rsa_data['subject_id']}, Layer {rsa_data['layer']}")
-
+            rsa_data_list.append(d)
         except Exception as e:
-            logger.warning(f"Could not load {rsa_file}: {e}")
+            logger.warning(f"Could not load {f}: {e}")
 
     if not rsa_data_list:
         logger.error("No RSA data matched the specified criteria")
         return 1
 
-    logger.info(f"Loaded {len(rsa_data_list)} RSA results matching criteria")
-
-    # Group data by layer
+    # Group by layer
     from collections import defaultdict
     data_by_layer = defaultdict(list)
-    for rsa_data in rsa_data_list:
-        data_by_layer[rsa_data['layer']].append(rsa_data)
+    for d in rsa_data_list:
+        data_by_layer[d["layer"]].append(d)
 
-    logger.info(f"Grouped into {len(data_by_layer)} layers: {list(data_by_layer.keys())}")
-
-    compute_nc = not args.no_noise_ceiling
-    
-    # lowpass filter RSA data to 30 Hz to reduce high-frequency noise
-    from scipy.signal import medfilt
-    # determine the right kernel size to achieve 30 hz
-    # estimate sampling rate from times array
-    times = rsa_data['times']
-    fs = 1.0 / np.mean(np.diff(times))  # sampling frequency in Hz
-    # kernel size should be odd; approximate cutoff at 30 Hz
-    # median filter kernel ~ fs / cutoff_freq, ensure odd
+    # Median-filter RSA time series (as in your current script)
+    # kernel ~ fs/40, odd, >=3
+    times = rsa_data_list[0]["times"]
+    fs = 1.0 / np.mean(np.diff(times))
     kernel = int(fs / 40)
     if kernel % 2 == 0:
         kernel += 1
@@ -1485,9 +825,9 @@ Examples:
         logger.info("Creating standalone noise ceiling figure...")
         plot_noise_ceiling_only(first_layer_data, output_dir)
 
-    logger.info("RSA plotting completed successfully")
+    logger.info("Done.")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())
