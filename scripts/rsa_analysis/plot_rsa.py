@@ -173,7 +173,7 @@ def plot_noise_ceiling_only(rsa_data_list: List[Dict[str, Any]], output_dir: Pat
     plt.plot(times_ms, nc_upper, color='cornflowerblue', label='NC upper bound')
     plt.axvline(x=0, color='k', linestyle='--', alpha=0.3, label='fixation onset')
     plt.xlabel('time [ms]')
-    plt.ylabel("RDM similarity [spearman's rho]")
+    plt.ylabel("RDM similarity\n[spearman's rho]")
     plt.xlim(-200, 500)
     plt.legend(frameon=False)
     sns.despine()
@@ -195,7 +195,7 @@ def plot_multi_layer_comparison(data_by_layer: Dict[str, List[Dict[str, Any]]],
         logger.info("Need at least 2 layers for comparison plot")
         return None
 
-    plt.figure(figsize=(8, 8))
+    plt.figure(figsize=(8, 6))
     ax = plt.gca()
 
     times_ms = list(data_by_layer.values())[0][0]['times'] * 1000
@@ -238,7 +238,7 @@ def plot_multi_layer_comparison(data_by_layer: Dict[str, List[Dict[str, Any]]],
 
     ax.axvline(x=0, color='k', linestyle='--', alpha=0.3, label='fixation onset')
     ax.set_xlabel('time [ms]')
-    ax.set_ylabel("RDM similarity [spearman's rho]")
+    ax.set_ylabel("RDM similarity\n[spearman's rho]")
     ax.set_xlim(-200, 350)
     ax.set_ylim(-0.1, .9)
     ax.legend(frameon=False, loc='upper right')
@@ -264,7 +264,7 @@ def plot_multi_layer_nc_focus(data_by_layer: Dict[str, List[Dict[str, Any]]],
         logger.info("Need at least 2 layers for NC-focus comparison plot")
         return None
 
-    plt.figure(figsize=(8, 8))
+    plt.figure(figsize=(8, 6))
     ax = plt.gca()
 
     times_ms = list(data_by_layer.values())[0][0]['times'] * 1000
@@ -277,7 +277,7 @@ def plot_multi_layer_nc_focus(data_by_layer: Dict[str, List[Dict[str, Any]]],
 
     ax.fill_between(times_ms, nc_lower, nc_upper, alpha=0.2, color='gray',
                     label='inter-subject noise ceiling')
-    ax.plot(times_ms, nc_lower, color='cornflowerblue', label='NC lower bound')
+    #ax.plot(times_ms, nc_lower, color='cornflowerblue', label='NC lower bound')
 
     for (layer_name, layer_data_list), color in zip(sorted(data_by_layer.items()), colors):
         all_rsa = [d['rsa_timeseries'] for d in layer_data_list]
@@ -289,7 +289,7 @@ def plot_multi_layer_nc_focus(data_by_layer: Dict[str, List[Dict[str, Any]]],
 
     ax.axvline(x=0, color='k', linestyle='--', alpha=0.3, label='fixation onset')
     ax.set_xlabel('time [ms]')
-    ax.set_ylabel("RDM similarity [spearman's rho]")
+    ax.set_ylabel("RDM similarity\n[spearman's rho]")
     ax.set_xlim(-200, 350)
     ax.set_ylim(-0.1, float(np.max(nc_lower)))
     ax.legend(frameon=False, loc='upper right')
