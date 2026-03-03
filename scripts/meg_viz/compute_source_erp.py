@@ -5,7 +5,8 @@ Compute source-reconstructed fixation/saccade ERP for MEG data.
 This script runs on the HPC cluster. It:
   1. Loads preprocessed MEG epochs using AVSComposer
   2. Computes the sensor-level evoked response (ERP) per subject
-  3. Applies pre-computed LCMV beamformer filters to project to source space
+  3. Applies dSPM (minimum-norm) inverse solution to project to source space
+     using an ad-hoc noise covariance (no empty-room recording required)
   4. Morphs each subject's source estimate to fsaverage (or a chosen target)
   5. Saves the morphed .stc files to disk
 
@@ -17,7 +18,6 @@ Usage:
         --subjects 1 2 3 4 5 \\
         --sessions 1 2 3 4 5 6 7 8 9 10 \\
         --event-type fixation \\
-        --filters-dir /share/klab/datasets/avs/derivatives/pyavs/filters/fixation_HASH/ \\
         --subjects-dir /share/klab/datasets/avs/rawdir/ \\
         --output-dir /share/klab/psulewski/psulewski/pyavs/source_erp/
 
@@ -26,17 +26,15 @@ Author: P. Sulewski (psulewski@uos.de)
 
 import argparse
 import os
-from collections import defaultdict
-from pathlib import Path
-from typing import List, Optional, Dict, Tuple
+from typing import List, Optional, Tuple
 
-import numpy as np
 import mne
 import logging
 from joblib import Parallel, delayed
 
 import pyavs
 from pyavs.preprocessing.composer import AVSComposer
+from pyavs.source.forward import load_forward_model
 from pyavs.utils.logging import get_logger
 
 logger = get_logger('scripts.meg_viz.compute_source_erp')
@@ -158,52 +156,12 @@ def _load_session_wrapper(
 # Source reconstruction helpers
 # ============================================================================
 
-def load_lcmv_filter(
-    subject_id: int,
-    filter_session: int,
-    filters_dir: str,
-) -> mne.beamformer.Beamformer:
-    """
-    Load a pre-computed LCMV beamformer filter.
-
-    Parameters
-    ----------
-    subject_id : int
-        Subject ID
-    filter_session : int
-        Session whose filter to load (1-indexed)
-    filters_dir : str
-        Root of the filters directory (event-type + hash subdirectory)
-
-    Returns
-    -------
-    mne.beamformer.Beamformer
-    """
-    filter_path = (
-        Path(filters_dir)
-        / f"sub-{subject_id:02d}"
-        / f"lcmv_filters_ses-{filter_session:02d}-lcmv.h5"
-    )
-
-    if not filter_path.exists():
-        raise FileNotFoundError(
-            f"LCMV filter not found: {filter_path}\n"
-            f"  Check --filters-dir and --filter-session."
-        )
-
-    logger.info(f"  Loading filter: {filter_path.name}")
-    lcmv_filter = mne.beamformer.read_beamformer(str(filter_path))
-    logger.info(f"  Filter has {lcmv_filter['n_sources']} sources")
-    return lcmv_filter
-
-
 def compute_subject_source_erp(
     subject: int,
     sessions: List[int],
     event_type: str,
     data_path: str,
-    filters_dir: str,
-    filter_session: int,
+    fwd_session: int,
     tmin: float,
     tmax: float,
     baseline: Optional[Tuple[float, float]],
@@ -224,10 +182,8 @@ def compute_subject_source_erp(
         Event type
     data_path : str
         AVS data path
-    filters_dir : str
-        Root of pre-computed LCMV filters
-    filter_session : int
-        Which session's filter to use
+    fwd_session : int
+        Which session's forward solution to load
     tmin, tmax : float
         Epoch time window [s]
     baseline : tuple or None
@@ -283,21 +239,31 @@ def compute_subject_source_erp(
         evoked.apply_baseline(baseline)
         logger.info(f"Applied baseline: {baseline}")
 
-    # --- 4. Load LCMV filter and project to source space ---
+    # --- 4. Load forward solution ---
     try:
-        lcmv_filter = load_lcmv_filter(subject, filter_session, filters_dir)
+        fwd = load_forward_model(subject, fwd_session, data_path)
     except FileNotFoundError as e:
         logger.error(str(e))
         return None
 
+    # --- 5. Noise covariance: ad-hoc (no empty room needed) ---
+    noise_cov = mne.make_ad_hoc_cov(evoked.info)
+
+    # --- 6. Build inverse operator and apply dSPM ---
     try:
-        stc = mne.beamformer.apply_lcmv(evoked, lcmv_filter)
+        inv = mne.minimum_norm.make_inverse_operator(
+            evoked.info, fwd, noise_cov, loose=0.2, depth=0.8, verbose=False
+        )
+        lambda2 = 1.0 / 9.0  # SNR = 3
+        stc = mne.minimum_norm.apply_inverse(
+            evoked, inv, lambda2=lambda2, method='dSPM', verbose=False
+        )
         logger.info(
             f"Source ERP: {stc.data.shape[0]} vertices "
             f"× {stc.data.shape[1]} time points"
         )
     except Exception as e:
-        logger.error(f"Error applying beamformer for subject {subject}: {e}")
+        logger.error(f"Error computing dSPM for subject {subject}: {e}")
         return None
 
     return stc
@@ -387,10 +353,9 @@ def run(
     event_type: str,
     timing: str,
     data_path: str,
-    filters_dir: str,
     subjects_dir: str,
     output_dir: str,
-    filter_session: int = 1,
+    fwd_session: int = 1,
     tmin: float = -0.2,
     tmax: float = 0.5,
     baseline: Optional[Tuple[float, float]] = (-0.2, 0.0),
@@ -407,7 +372,7 @@ def run(
     logger.info(f"Sessions:       {sessions}")
     logger.info(f"Event type:     {event_type}")
     logger.info(f"Timing:         {timing}")
-    logger.info(f"Filter session: {filter_session}")
+    logger.info(f"Fwd session:    {fwd_session}")
     logger.info(f"Morph target:   {morph_to}")
     logger.info(f"Output:         {output_dir}")
 
@@ -423,8 +388,7 @@ def run(
             sessions=sessions,
             event_type=event_type,
             data_path=data_path,
-            filters_dir=filters_dir,
-            filter_session=filter_session,
+            fwd_session=fwd_session,
             tmin=tmin,
             tmax=tmax,
             baseline=baseline,
@@ -468,15 +432,6 @@ def main():
         help='AVS data directory',
     )
     parser.add_argument(
-        '--filters-dir',
-        type=str,
-        required=True,
-        help=(
-            'Path to LCMV filter directory for this event type '
-            '(e.g., .../derivatives/pyavs/filters/fixation_HASH/)'
-        ),
-    )
-    parser.add_argument(
         '--subjects-dir',
         type=str,
         default='/share/klab/datasets/avs/rawdir/',
@@ -511,9 +466,9 @@ def main():
         help='Timing mode: onset or offset',
     )
     parser.add_argument(
-        '--filter-session',
+        '--fwd-session',
         type=int, default=1,
-        help='Which session\'s LCMV filter to use (default: 1)',
+        help='Which session\'s forward solution to use (default: 1)',
     )
     parser.add_argument(
         '--tmin',
@@ -563,10 +518,9 @@ def main():
         event_type=args.event_type,
         timing=args.timing,
         data_path=args.data_path,
-        filters_dir=args.filters_dir,
         subjects_dir=args.subjects_dir,
         output_dir=args.output_dir,
-        filter_session=args.filter_session,
+        fwd_session=args.fwd_session,
         tmin=args.tmin,
         tmax=args.tmax,
         baseline=tuple(args.baseline),
