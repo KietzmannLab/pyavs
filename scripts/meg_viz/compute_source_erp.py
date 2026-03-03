@@ -162,6 +162,7 @@ def compute_subject_source_erp(
     event_type: str,
     data_path: str,
     fwd_session: int,
+    fwd_dir: Optional[str],
     tmin: float,
     tmax: float,
     baseline: Optional[Tuple[float, float]],
@@ -183,7 +184,11 @@ def compute_subject_source_erp(
     data_path : str
         AVS data path
     fwd_session : int
-        Which session's forward solution to load
+        Which session's forward solution to load (BIDS path only)
+    fwd_dir : str or None
+        Root of AVS-UTILS tree. When given, loads pre-computed forward from
+        {fwd_dir}/source/as{id:02d}/src/as{id:02d}-fwd.fif and
+        fwd_session is ignored.
     tmin, tmax : float
         Epoch time window [s]
     baseline : tuple or None
@@ -241,7 +246,7 @@ def compute_subject_source_erp(
 
     # --- 4. Load forward solution ---
     try:
-        fwd = load_forward_model(subject, fwd_session, data_path)
+        fwd = load_forward_model(subject, fwd_session, data_path, fwd_dir=fwd_dir)
     except FileNotFoundError as e:
         logger.error(str(e))
         return None
@@ -356,6 +361,7 @@ def run(
     subjects_dir: str,
     output_dir: str,
     fwd_session: int = 1,
+    fwd_dir: Optional[str] = None,
     tmin: float = -0.2,
     tmax: float = 0.5,
     baseline: Optional[Tuple[float, float]] = (-0.2, 0.0),
@@ -372,7 +378,10 @@ def run(
     logger.info(f"Sessions:       {sessions}")
     logger.info(f"Event type:     {event_type}")
     logger.info(f"Timing:         {timing}")
-    logger.info(f"Fwd session:    {fwd_session}")
+    if fwd_dir is not None:
+        logger.info(f"Fwd dir:        {fwd_dir}")
+    else:
+        logger.info(f"Fwd session:    {fwd_session}")
     logger.info(f"Morph target:   {morph_to}")
     logger.info(f"Output:         {output_dir}")
 
@@ -389,6 +398,7 @@ def run(
             event_type=event_type,
             data_path=data_path,
             fwd_session=fwd_session,
+            fwd_dir=fwd_dir,
             tmin=tmin,
             tmax=tmax,
             baseline=baseline,
@@ -466,9 +476,19 @@ def main():
         help='Timing mode: onset or offset',
     )
     parser.add_argument(
+        '--fwd-dir',
+        type=str, default=None,
+        help=(
+            'Root of AVS-UTILS tree containing pre-computed forward models '
+            '(e.g. /share/klab/datasets/avs/AVS-UTILS). When given, loads '
+            '{fwd-dir}/source/as{id}/src/as{id}-fwd.fif and '
+            '--fwd-session is ignored.'
+        ),
+    )
+    parser.add_argument(
         '--fwd-session',
         type=int, default=1,
-        help='Which session\'s forward solution to use (default: 1)',
+        help='Which session\'s forward solution to use (default: 1, ignored when --fwd-dir is set)',
     )
     parser.add_argument(
         '--tmin',
@@ -521,6 +541,7 @@ def main():
         subjects_dir=args.subjects_dir,
         output_dir=args.output_dir,
         fwd_session=args.fwd_session,
+        fwd_dir=args.fwd_dir,
         tmin=args.tmin,
         tmax=args.tmax,
         baseline=tuple(args.baseline),

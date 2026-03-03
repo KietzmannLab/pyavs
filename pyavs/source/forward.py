@@ -421,48 +421,66 @@ def save_forward_model(fwd: mne.Forward,
 
 
 def load_forward_model(subject_id: int,
-                      session: int, 
+                      session: int,
                       data_path: Optional[str] = None,
+                      fwd_dir: Optional[str] = None,
                       verbose: bool = True) -> mne.Forward:
     """
-    Load forward model from derivatives directory.
-    
+    Load forward model from disk.
+
+    Two path conventions are supported:
+
+    1. **BIDS derivatives** (default, ``fwd_dir=None``):
+       ``{data_path}/derivatives/pyavs/sub-{id:02d}/ses-{sess:02d}/source/
+       sub-{id:02d}_ses-{sess:02d}_task-avs_fwd.fif``
+
+    2. **AVS-UTILS pre-computed** (``fwd_dir`` given):
+       ``{fwd_dir}/source/as{id:02d}/src/as{id:02d}-fwd.fif``
+       e.g. ``fwd_dir=/share/klab/datasets/avs/AVS-UTILS``
+
     Parameters
     ----------
     subject_id : int
         Subject ID
     session : int
-        Session number
+        Session number (only used for the BIDS derivatives path)
     data_path : str, optional
-        Path to data directory. If None, uses configured data path
+        Path to data directory. If None, uses configured data path.
+        Ignored when ``fwd_dir`` is provided.
+    fwd_dir : str, optional
+        Root of the AVS-UTILS tree. When given, the BIDS derivatives path
+        is bypassed and the pre-computed forward is loaded directly.
     verbose : bool, optional
         Whether to print loading information (default: True)
-        
+
     Returns
     -------
     mne.Forward
         Forward solution
     """
     validate_subject_id(subject_id)
-    
-    if data_path is None:
-        data_path = get_data_path()
+
+    if fwd_dir is not None:
+        # AVS-UTILS path: {fwd_dir}/source/as{id:02d}/src/as{id:02d}-fwd.fif
+        sub_name = f'as{subject_id:02d}'
+        fwd_path = os.path.join(fwd_dir, 'source', sub_name, 'src', f'{sub_name}-fwd.fif')
+    else:
         if data_path is None:
-            raise ValueError("No data path configured")
-    
-    # Construct path
-    derivatives_dir = os.path.join(data_path, 'derivatives', 'pyavs')
-    subject_dir = f"sub-{subject_id:02d}"
-    session_dir = f"ses-{session:02d}"
-    fwd_filename = f"sub-{subject_id:02d}_ses-{session:02d}_task-avs_fwd.fif"
-    fwd_path = os.path.join(derivatives_dir, subject_dir, session_dir, 'source', fwd_filename)
-    
+            data_path = get_data_path()
+            if data_path is None:
+                raise ValueError("No data path configured")
+        derivatives_dir = os.path.join(data_path, 'derivatives', 'pyavs')
+        subject_dir = f"sub-{subject_id:02d}"
+        session_dir = f"ses-{session:02d}"
+        fwd_filename = f"sub-{subject_id:02d}_ses-{session:02d}_task-avs_fwd.fif"
+        fwd_path = os.path.join(derivatives_dir, subject_dir, session_dir, 'source', fwd_filename)
+
     if not os.path.exists(fwd_path):
         raise FileNotFoundError(f"Forward model not found: {fwd_path}")
-    
+
     if verbose:
         logger.info(f"Loading forward model from: {fwd_path}")
-    
+
     fwd = mne.read_forward_solution(fwd_path, verbose=verbose)
-    
+
     return fwd
