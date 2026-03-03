@@ -36,119 +36,16 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from matplotlib.patches import Patch
 
 from pyavs.utils.logging import get_logger
-from pyavs.scenes.objects import sort_objects_by_category, categorize_objects
+from pyavs.scenes.objects import (
+    sort_objects_by_category, categorize_objects,
+    COCO_SUPERCATEGORY_MAP, get_supercategory_palette,
+)
 
 # Initialize logger
 logger = get_logger('scripts.rsa_analysis.plot_dendrogram')
 
 # Set seaborn context globally
 sns.set_context("poster")
-
-# =============================
-# COCO SUPERCATEGORY MAPPING
-# =============================
-
-COCO_SUPERCATEGORY_MAP = {
-    # person
-    'person': 'person',
-    # animal
-    'bird': 'animal', 'cat': 'animal', 'dog': 'animal', 'horse': 'animal',
-    'sheep': 'animal', 'cow': 'animal', 'elephant': 'animal', 'bear': 'animal',
-    'zebra': 'animal', 'giraffe': 'animal',
-    # vehicle
-    'bicycle': 'vehicle', 'car': 'vehicle', 'motorcycle': 'vehicle',
-    'airplane': 'vehicle', 'bus': 'vehicle', 'train': 'vehicle',
-    'truck': 'vehicle', 'boat': 'vehicle',
-    # outdoor (things)
-    'traffic light': 'outdoor', 'fire hydrant': 'outdoor',
-    'stop sign': 'outdoor', 'parking meter': 'outdoor',
-    'bench': 'outdoor', 'street sign': 'outdoor',
-    # sports
-    'frisbee': 'sports', 'skis': 'sports', 'snowboard': 'sports',
-    'sports ball': 'sports', 'kite': 'sports',
-    'baseball bat': 'sports', 'baseball glove': 'sports',
-    'skateboard': 'sports', 'surfboard': 'sports', 'tennis racket': 'sports',
-    # accessory
-    'backpack': 'accessory', 'umbrella': 'accessory',
-    'handbag': 'accessory', 'tie': 'accessory',
-    'suitcase': 'accessory', 'shoe': 'accessory',
-    'eye glasses': 'accessory', 'hat': 'accessory',
-    # appliance
-    'microwave': 'appliance', 'oven': 'appliance',
-    'toaster': 'appliance', 'sink': 'appliance',
-    'refrigerator': 'appliance', 'blender': 'appliance',
-    # electronic
-    'tv': 'electronic', 'laptop': 'electronic',
-    'mouse': 'electronic', 'remote': 'electronic',
-    'keyboard': 'electronic', 'cell phone': 'electronic',
-    # furniture (things + stuff combined)
-    'chair': 'furniture', 'couch': 'furniture', 'potted plant': 'furniture',
-    'bed': 'furniture', 'dining table': 'furniture', 'toilet': 'furniture',
-    'window': 'furniture', 'desk': 'furniture', 'mirror': 'furniture',
-    'door': 'furniture',
-    'furniture-other': 'furniture', 'stairs': 'furniture', 'light': 'furniture',
-    'counter': 'furniture', 'cupboard': 'furniture', 'cabinet': 'furniture',
-    'shelf': 'furniture', 'table': 'furniture',
-    # food (things + stuff combined)
-    'banana': 'food', 'apple': 'food', 'sandwich': 'food',
-    'orange': 'food', 'broccoli': 'food', 'carrot': 'food',
-    'hot dog': 'food', 'pizza': 'food', 'donut': 'food', 'cake': 'food',
-    'food-other': 'food', 'vegetable': 'food', 'salad': 'food', 'fruit': 'food',
-    # kitchen
-    'bottle': 'kitchen', 'wine glass': 'kitchen', 'cup': 'kitchen',
-    'fork': 'kitchen', 'knife': 'kitchen', 'spoon': 'kitchen',
-    'bowl': 'kitchen', 'plate': 'kitchen',
-    # indoor misc (things)
-    'hair brush': 'indoor', 'toothbrush': 'indoor', 'hair dryer': 'indoor',
-    'teddy bear': 'indoor', 'scissors': 'indoor', 'vase': 'indoor',
-    'clock': 'indoor', 'book': 'indoor',
-    # water
-    'water-other': 'water', 'waterdrops': 'water', 'sea': 'water',
-    'river': 'water', 'fog': 'water',
-    # ground
-    'ground-other': 'ground', 'playingfield': 'ground', 'platform': 'ground',
-    'railroad': 'ground', 'pavement': 'ground', 'road': 'ground',
-    'gravel': 'ground', 'dirt': 'ground', 'snow': 'ground', 'sand': 'ground',
-    # solid
-    'solid-other': 'solid', 'hill': 'solid', 'mountain': 'solid',
-    'stone': 'solid', 'rock': 'solid', 'wood': 'solid',
-    # sky
-    'sky-other': 'sky', 'clouds': 'sky',
-    # plant
-    'plant-other': 'plant', 'straw': 'plant', 'moss': 'plant',
-    'branch': 'plant', 'flower': 'plant', 'leaves': 'plant',
-    'bush': 'plant', 'tree': 'plant', 'grass': 'plant',
-    # structural
-    'structural-other': 'structural', 'railing': 'structural',
-    'net': 'structural', 'cage': 'structural', 'fence': 'structural',
-    # building
-    'building-other': 'building', 'roof': 'building', 'tent': 'building',
-    'brick': 'building', 'skyscraper': 'building', 'house': 'building',
-    # textile
-    'textile-other': 'textile', 'banner': 'textile', 'pillow': 'textile',
-    'blanket': 'textile', 'curtain': 'textile', 'cloth': 'textile',
-    'clothes': 'textile', 'napkin': 'textile', 'towel': 'textile',
-    'mat': 'textile', 'rug': 'textile',
-    # window
-    'window-other': 'window', 'window-blind': 'window',
-    # floor
-    'floor-other': 'floor', 'floor-stone': 'floor', 'floor-marble': 'floor',
-    'floor-wood': 'floor', 'floor-tile': 'floor', 'floor-carpet': 'floor',
-    # ceiling
-    'ceiling-other': 'ceiling', 'ceiling-tile': 'ceiling',
-    # wall
-    'wall-other': 'wall', 'wall-concrete': 'wall', 'wall-stone': 'wall',
-    'wall-brick': 'wall', 'wall-wood': 'wall', 'wall-panel': 'wall',
-    'wall-tile': 'wall',
-    # raw material
-    'metal': 'raw material', 'plastic': 'raw material',
-    'paper': 'raw material', 'cardboard': 'raw material',
-}
-
-_SUPERCATEGORIES = sorted(set(COCO_SUPERCATEGORY_MAP.values()))
-_colors = sns.color_palette('husl', len(_SUPERCATEGORIES))
-SUPERCATEGORY_PALETTE = dict(zip(_SUPERCATEGORIES, _colors))
-SUPERCATEGORY_PALETTE['unknown'] = (0.6, 0.6, 0.6)
 
 # =============================
 # CONFIGURATION
@@ -384,16 +281,17 @@ def plot_dendrogram_figure(linkage_matrix: np.ndarray, object_labels: List[str],
         # male font  big and bold for better visibility
         tick_label.set_fontsize(20)
 
+    palette = get_supercategory_palette()
     xticks = ax.get_xticks()
     for x_pos, label in zip(xticks, dend['ivl']):
         supercat = COCO_SUPERCATEGORY_MAP.get(label, 'unknown')
-        ax.plot(x_pos, 0, 's', color=SUPERCATEGORY_PALETTE[supercat],
+        ax.plot(x_pos, 0, 's', color=palette[supercat],
                 clip_on=False, zorder=5)
 
     # Legend: only supercategories present in the data
     present = {COCO_SUPERCATEGORY_MAP.get(lbl, 'unknown') for lbl in object_labels}
     legend_handles = [
-        Patch(facecolor=SUPERCATEGORY_PALETTE[sc], label=sc)
+        Patch(facecolor=palette[sc], label=sc)
         for sc in sorted(present)
     ]
     ax.legend(handles=legend_handles, frameon=False, loc='upper right')

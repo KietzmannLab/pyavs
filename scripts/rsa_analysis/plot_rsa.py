@@ -24,6 +24,8 @@ import seaborn as sns
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 from pyavs.utils.logging import get_logger
+from pyavs.scenes.objects import COCO_SUPERCATEGORY_MAP, SUPERCATEGORY_ORDER, get_supercategory_palette
+from matplotlib.patches import Patch
 
 from rsatoolbox.rdm import RDMs
 from rsatoolbox.inference.noise_ceiling import boot_noise_ceiling
@@ -303,6 +305,100 @@ def plot_multi_layer_nc_focus(data_by_layer: Dict[str, List[Dict[str, Any]]],
     return plt.gcf()
 
 
+def plot_rdm_sorted_by_supercategory(
+    rdm: np.ndarray,
+    object_labels: List[str],
+    output_dir: Path,
+    label: str = 'rdm',
+    save_fig: bool = True,
+) -> plt.Figure:
+    """
+    Plot an RDM with rows/cols sorted by COCO-Stuff supercategory.
+
+    Objects are grouped by COCO_SUPERCATEGORY_MAP in SUPERCATEGORY_ORDER.
+    Category boundaries are drawn as white lines; supercategory names appear
+    as coloured y-axis tick labels at the midpoint of each block.
+
+    Parameters
+    ----------
+    rdm : np.ndarray
+        Square (n_objects, n_objects) dissimilarity matrix.
+    object_labels : list of str
+        Object names matching the rows/cols of rdm.
+    output_dir : Path
+        Directory for saved figure.
+    label : str
+        Filename tag, e.g. 'meg_t140ms' or 'embedding'.
+    save_fig : bool
+
+    Returns
+    -------
+    plt.Figure
+    """
+    palette = get_supercategory_palette()
+
+    # --- Build sort order ---
+    def _cat_key(lbl):
+        sc = COCO_SUPERCATEGORY_MAP.get(lbl, 'unknown')
+        try:
+            return (SUPERCATEGORY_ORDER.index(sc), lbl)
+        except ValueError:
+            return (len(SUPERCATEGORY_ORDER), lbl)
+
+    sort_indices = sorted(range(len(object_labels)), key=lambda i: _cat_key(object_labels[i]))
+    labels_sorted = [object_labels[i] for i in sort_indices]
+    rdm_sorted = rdm[np.ix_(sort_indices, sort_indices)]
+    supercats_sorted = [COCO_SUPERCATEGORY_MAP.get(l, 'unknown') for l in labels_sorted]
+
+    # --- Category block boundaries and midpoints ---
+    boundaries = []
+    block_info = []  # (midpoint, supercategory_name)
+    prev = supercats_sorted[0]
+    start = 0
+    for i, sc in enumerate(supercats_sorted):
+        if sc != prev:
+            boundaries.append(i)
+            block_info.append((start + (i - start) / 2, prev))
+            start = i
+            prev = sc
+    block_info.append((start + (len(supercats_sorted) - start) / 2, prev))
+
+    # --- Plot ---
+    plt.figure(figsize=(8, 8))
+    ax = plt.gca()
+
+    ax.imshow(rdm_sorted, cmap='magma', aspect='equal', interpolation='nearest')
+
+    # Category boundary lines
+    for b in boundaries:
+        ax.axhline(b - 0.5, color='white')
+        ax.axvline(b - 0.5, color='white')
+
+    # Y-axis: category name at midpoint of each block, coloured by supercategory
+    tick_positions = [mi for mi, _ in block_info]
+    tick_labels_list = [sc for _, sc in block_info]
+    ax.set_yticks(tick_positions)
+    ax.set_yticklabels(tick_labels_list)
+    for tick, sc in zip(ax.get_yticklabels(), tick_labels_list):
+        tick.set_color(palette.get(sc, (0.4, 0.4, 0.4)))
+
+    ax.set_xticks([])
+    ax.set_xlabel('objects')
+    ax.set_ylabel('objects')
+    sns.despine(left=True, bottom=True)
+    plt.tight_layout()
+
+    if save_fig:
+        filename = f"rdm_sorted_supercategory_{label}.pdf"
+        plt.savefig(output_dir / filename, dpi=PLOT_CONFIG['figure_dpi'],
+                    bbox_inches='tight')
+        logger.info(f"Saved sorted RDM: {filename}")
+
+    fig = plt.gcf()
+    plt.close()
+    return fig
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Plot RSA analysis results: multi-layer timeseries with noise ceiling"
@@ -392,6 +488,35 @@ def main():
     if len(first_layer_data) > 1:
         logger.info("Creating standalone noise ceiling figure...")
         plot_noise_ceiling_only(first_layer_data, output_dir)
+
+    # Sorted-RDM plots (embedding RDM + MEG RDM at peak RSA time)
+    first_subject_data = list(data_by_layer.values())[0][0]
+    object_labels = first_subject_data.get('object_labels') or []
+
+    if object_labels:
+        # Embedding RDM (same for all subjects / same model)
+        emb_rdm = first_subject_data['embedding_rdm']
+        plot_rdm_sorted_by_supercategory(
+            emb_rdm, object_labels, output_dir,
+            label=f"embedding_model-{first_subject_data['model_name']}"
+        )
+
+        # Grand-average MEG RDM at peak time
+        all_meg_rdms = np.array([
+            d['meg_rdm_timeseries']
+            for layer_list in data_by_layer.values()
+            for d in layer_list
+        ])
+        peak_idx = int(np.argmax(
+            np.nanmean([d['rsa_timeseries'] for d in list(data_by_layer.values())[0]], axis=0)
+        ))
+        grand_meg_rdm = np.nanmean(all_meg_rdms[:, peak_idx, :, :], axis=0)
+        peak_ms = int(round(rsa_data_list[0]['times'][peak_idx] * 1000))
+
+        plot_rdm_sorted_by_supercategory(
+            grand_meg_rdm, object_labels, output_dir,
+            label=f"meg_t{peak_ms}ms"
+        )
 
     logger.info("Done.")
     return 0

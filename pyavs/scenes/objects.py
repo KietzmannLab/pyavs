@@ -1005,3 +1005,130 @@ def sort_objects_by_category(object_names: List[str], level: str = 'subcategory'
     return sorted_objects, sort_indices
 
 
+# =============================
+# COCO SUPERCATEGORY MAPPING
+# =============================
+
+# Official COCO-Stuff supercategory mapping (covers all 171 RSA object labels)
+COCO_SUPERCATEGORY_MAP = {
+    # person
+    'person': 'person',
+    # animal
+    'bird': 'animal', 'cat': 'animal', 'dog': 'animal', 'horse': 'animal',
+    'sheep': 'animal', 'cow': 'animal', 'elephant': 'animal', 'bear': 'animal',
+    'zebra': 'animal', 'giraffe': 'animal',
+    # vehicle
+    'bicycle': 'vehicle', 'car': 'vehicle', 'motorcycle': 'vehicle',
+    'airplane': 'vehicle', 'bus': 'vehicle', 'train': 'vehicle',
+    'truck': 'vehicle', 'boat': 'vehicle',
+    # outdoor (things)
+    'traffic light': 'outdoor', 'fire hydrant': 'outdoor',
+    'stop sign': 'outdoor', 'parking meter': 'outdoor',
+    'bench': 'outdoor', 'street sign': 'outdoor',
+    # sports
+    'frisbee': 'sports', 'skis': 'sports', 'snowboard': 'sports',
+    'sports ball': 'sports', 'kite': 'sports',
+    'baseball bat': 'sports', 'baseball glove': 'sports',
+    'skateboard': 'sports', 'surfboard': 'sports', 'tennis racket': 'sports',
+    # accessory
+    'backpack': 'accessory', 'umbrella': 'accessory',
+    'handbag': 'accessory', 'tie': 'accessory',
+    'suitcase': 'accessory', 'shoe': 'accessory',
+    'eye glasses': 'accessory', 'hat': 'accessory',
+    # appliance
+    'microwave': 'appliance', 'oven': 'appliance',
+    'toaster': 'appliance', 'sink': 'appliance',
+    'refrigerator': 'appliance', 'blender': 'appliance',
+    # electronic
+    'tv': 'electronic', 'laptop': 'electronic',
+    'mouse': 'electronic', 'remote': 'electronic',
+    'keyboard': 'electronic', 'cell phone': 'electronic',
+    # furniture (things + stuff combined)
+    'chair': 'furniture', 'couch': 'furniture', 'potted plant': 'furniture',
+    'bed': 'furniture', 'dining table': 'furniture', 'toilet': 'furniture',
+    'window': 'furniture', 'desk': 'furniture', 'mirror': 'furniture',
+    'door': 'furniture',
+    'furniture-other': 'furniture', 'stairs': 'furniture', 'light': 'furniture',
+    'counter': 'furniture', 'cupboard': 'furniture', 'cabinet': 'furniture',
+    'shelf': 'furniture', 'table': 'furniture',
+    # food (things + stuff combined)
+    'banana': 'food', 'apple': 'food', 'sandwich': 'food',
+    'orange': 'food', 'broccoli': 'food', 'carrot': 'food',
+    'hot dog': 'food', 'pizza': 'food', 'donut': 'food', 'cake': 'food',
+    'food-other': 'food', 'vegetable': 'food', 'salad': 'food', 'fruit': 'food',
+    # kitchen
+    'bottle': 'kitchen', 'wine glass': 'kitchen', 'cup': 'kitchen',
+    'fork': 'kitchen', 'knife': 'kitchen', 'spoon': 'kitchen',
+    'bowl': 'kitchen', 'plate': 'kitchen',
+    # indoor misc (things)
+    'hair brush': 'indoor', 'toothbrush': 'indoor', 'hair dryer': 'indoor',
+    'teddy bear': 'indoor', 'scissors': 'indoor', 'vase': 'indoor',
+    'clock': 'indoor', 'book': 'indoor',
+    # water
+    'water-other': 'water', 'waterdrops': 'water', 'sea': 'water',
+    'river': 'water', 'fog': 'water',
+    # ground
+    'ground-other': 'ground', 'playingfield': 'ground', 'platform': 'ground',
+    'railroad': 'ground', 'pavement': 'ground', 'road': 'ground',
+    'gravel': 'ground', 'dirt': 'ground', 'snow': 'ground', 'sand': 'ground',
+    # solid
+    'solid-other': 'solid', 'hill': 'solid', 'mountain': 'solid',
+    'stone': 'solid', 'rock': 'solid', 'wood': 'solid',
+    # sky
+    'sky-other': 'sky', 'clouds': 'sky',
+    # plant
+    'plant-other': 'plant', 'straw': 'plant', 'moss': 'plant',
+    'branch': 'plant', 'flower': 'plant', 'leaves': 'plant',
+    'bush': 'plant', 'tree': 'plant', 'grass': 'plant',
+    # structural
+    'structural-other': 'structural', 'railing': 'structural',
+    'net': 'structural', 'cage': 'structural', 'fence': 'structural',
+    # building
+    'building-other': 'building', 'roof': 'building', 'tent': 'building',
+    'brick': 'building', 'skyscraper': 'building', 'house': 'building',
+    # textile
+    'textile-other': 'textile', 'banner': 'textile', 'pillow': 'textile',
+    'blanket': 'textile', 'curtain': 'textile', 'cloth': 'textile',
+    'clothes': 'textile', 'napkin': 'textile', 'towel': 'textile',
+    'mat': 'textile', 'rug': 'textile',
+    # window
+    'window-other': 'window', 'window-blind': 'window',
+    # floor
+    'floor-other': 'floor', 'floor-stone': 'floor', 'floor-marble': 'floor',
+    'floor-wood': 'floor', 'floor-tile': 'floor', 'floor-carpet': 'floor',
+    # ceiling
+    'ceiling-other': 'ceiling', 'ceiling-tile': 'ceiling',
+    # wall
+    'wall-other': 'wall', 'wall-concrete': 'wall', 'wall-stone': 'wall',
+    'wall-brick': 'wall', 'wall-wood': 'wall', 'wall-panel': 'wall',
+    'wall-tile': 'wall',
+    # raw material
+    'metal': 'raw material', 'plastic': 'raw material',
+    'paper': 'raw material', 'cardboard': 'raw material',
+}
+
+# Preferred display order for supercategories (animate → inanimate things → stuff)
+SUPERCATEGORY_ORDER = [
+    'person', 'animal',                                          # animate
+    'vehicle', 'outdoor', 'sports', 'accessory',                # inanimate things
+    'appliance', 'electronic', 'kitchen', 'food',
+    'furniture', 'indoor',
+    'water', 'sky', 'plant', 'ground', 'solid',                 # stuff: outdoor
+    'building', 'structural', 'wall', 'ceiling',                # stuff: built environment
+    'floor', 'window', 'textile', 'raw material',               # stuff: surfaces & materials
+]
+
+_SUPERCATEGORY_PALETTE = None   # lazily initialised
+
+
+def get_supercategory_palette():
+    """Return {supercategory: (r,g,b)} using husl palette, cached."""
+    global _SUPERCATEGORY_PALETTE
+    if _SUPERCATEGORY_PALETTE is None:
+        import seaborn as sns
+        colors = sns.color_palette('husl', len(SUPERCATEGORY_ORDER))
+        _SUPERCATEGORY_PALETTE = dict(zip(SUPERCATEGORY_ORDER, colors))
+        _SUPERCATEGORY_PALETTE['unknown'] = (0.6, 0.6, 0.6)
+    return _SUPERCATEGORY_PALETTE
+
+
