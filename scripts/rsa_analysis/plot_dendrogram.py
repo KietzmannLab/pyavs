@@ -322,9 +322,9 @@ def plot_clustered_rdm(rdm_ranked: np.ndarray, object_labels: List[str],
         ax=ax,
         cbar_kws={'label': 'rank distance'},
     )
-
-    plt.xlabel('objects')
-    plt.ylabel('objects')
+    n_objects = rdm_ranked.shape[0]
+    plt.xlabel(f'objects [n={n_objects}]')
+    plt.ylabel(f'objects [n={n_objects}]')
     sns.despine()
     plt.tight_layout()
 
@@ -359,21 +359,30 @@ def plot_dendrogram_figure(linkage_matrix: np.ndarray, object_labels: List[str],
     -------
     plt.Figure
     """
-    plt.figure(figsize=(24, 6))
+    plt.figure(figsize=(24, 8))
     ax = plt.gca()
 
     dend = dendrogram(
         linkage_matrix,
         labels=object_labels,
         leaf_rotation=90,
-        color_threshold=0,
+        # set a threshold to color clusters (optional)
+        #color_threshold=0.001,
+        #truncate_mode='level',
+       # truncate_mode='lastp', p=10,  # show only last p merged clusters
         link_color_func=lambda k: 'k',
         ax=ax,
+        # drop branched that are above 0.5 correlation distance (i.e. below 0.5 similarity) 
+        
     )
+    # set ylim 
+    ax.set_ylim(0, 0.4)
 
     # Keep leaf text black; add a coloured square marker at each leaf base
     for tick_label in ax.get_xticklabels():
         tick_label.set_color('k')
+        # male font  big and bold for better visibility
+        tick_label.set_fontsize(20)
 
     xticks = ax.get_xticks()
     for x_pos, label in zip(xticks, dend['ivl']):
@@ -390,10 +399,10 @@ def plot_dendrogram_figure(linkage_matrix: np.ndarray, object_labels: List[str],
     ax.legend(handles=legend_handles, frameon=False, loc='upper right')
 
     ax.invert_xaxis()  # ascending: small (tight) clusters on the left
-    ax.set_ylabel('correlation distance')
-    ax.set_xlabel('objects')
+    ax.set_ylabel('MEG pattern dissimilarity\n[correlation distance]')
+    ax.set_xlabel(None)
     sns.despine()
-    plt.tight_layout()
+    #plt.tight_layout()
 
     if save_fig:
         filename = f"dendrogram_t{timepoint_ms:.0f}ms.pdf"
