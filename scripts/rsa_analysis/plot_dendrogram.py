@@ -433,12 +433,21 @@ Examples:
     # ------------------------------------------------------------------
     if args.rdm_type == 'embedding':
         logger.info("Using network layer (embedding) RDM...")
-        emb_rdm = rsa_data_list[0].get('embedding_rdm')
-        if emb_rdm is None:
-            logger.error("No embedding_rdm found in RSA results file")
+        emb_rdms = []
+        for d in rsa_data_list:
+            emb_rdm = d.get('embedding_rdm')
+            if emb_rdm is None:
+                logger.warning(f"No embedding_rdm found for subject {d['subject_id']} — skipping")
+                continue
+            emb_rdms.append(np.array(emb_rdm, dtype=float))
+        if not emb_rdms:
+            logger.error("No embedding_rdm found in any RSA results file")
             return 1
-        grand_rdm = np.array(emb_rdm, dtype=float)
-        # Use model/layer as the label instead of a timepoint
+        # Grand-average across subjects (NaN-safe): the embedding RDM is
+        # subject-specific because it is the median over that subject's own
+        # fixation crops, so averaging is the correct approach.
+        grand_rdm = np.nanmean(emb_rdms, axis=0)
+        logger.info(f"Grand-averaged embedding RDM across {len(emb_rdms)} subjects")
         rdm_label = f"embedding_model-{rsa_data_list[0]['model_name']}_layer-{rsa_data_list[0]['layer']}"
         timepoint_ms = None  # not applicable
     else:
