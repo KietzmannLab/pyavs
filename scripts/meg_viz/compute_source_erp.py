@@ -235,7 +235,11 @@ def compute_subject_source_erp(
     n_total = len(combined)
     logger.info(f"Total epochs: {n_total}")
 
+<<<<<<< HEAD
     # --- 2. Compute evoked (mean) ---
+=======
+    # --- 2. Compute evoked (median) ---
+>>>>>>> fe71d68 (median soure erp)
     evoked = combined.average(method='median')
     evoked.nave = n_total
 
@@ -477,7 +481,7 @@ def main():
     )
     parser.add_argument(
         '--fwd-dir',
-        type=str, default=None,
+        type=str, default='/share/klab/datasets/avs/AVS-UTILS',
         help=(
             'Root of AVS-UTILS tree containing pre-computed forward models '
             '(e.g. /share/klab/datasets/avs/AVS-UTILS). When given, loads '

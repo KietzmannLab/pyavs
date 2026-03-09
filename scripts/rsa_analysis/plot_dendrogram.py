@@ -12,8 +12,7 @@ correlation distance), and saves two figures per run:
   specified timepoint.  label = meg_t{X}ms
 
 --rdm-type embedding:
-  Network layer RDM from the first loaded subject file (identical for all
-  subjects with the same model/layer).  label = embedding_model-{M}_layer-{L}
+  Network layer RDMs
 
 Usage:
     python plot_dendrogram.py --rsa-dir /path/to/rsa --output-dir /path/to/plots
@@ -217,7 +216,7 @@ def plot_clustered_rdm(rdm_ranked: np.ndarray, object_labels: List[str],
     rdm_reordered = rdm_ranked[np.ix_(leaf_order, leaf_order)]
     labels_reordered = [object_labels[i] for i in leaf_order]
 
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(5, 4))
     ax = plt.gca()
 
     sns.heatmap(
@@ -226,7 +225,7 @@ def plot_clustered_rdm(rdm_ranked: np.ndarray, object_labels: List[str],
         xticklabels=False,
         yticklabels=False,
         ax=ax,
-        cbar_kws={'label': 'rank distance'},
+        cbar_kws={'label': 'rank distance', 'ticks': []}, square=True
     )
     n_objects = rdm_ranked.shape[0]
     plt.xlabel(f'objects [n={n_objects}]')
