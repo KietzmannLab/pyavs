@@ -236,7 +236,7 @@ def compute_subject_source_erp(
     logger.info(f"Total epochs: {n_total}")
 
     # --- 2. Compute evoked (mean) ---
-    evoked = combined.average(method='mean')
+    evoked = combined.average(method='median')
     evoked.nave = n_total
 
     # --- 3. Baseline correction ---

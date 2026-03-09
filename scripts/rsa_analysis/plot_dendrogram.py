@@ -2,15 +2,22 @@
 """
 Plot hierarchically clustered RDM heatmap and dendrogram from grand-average MEG RDMs.
 
-At the timepoint of peak RSA for the top layer (auto-detected), this script:
-  1. Computes the grand-average MEG RDM across subjects
-  2. Rank-transforms upper-triangle values
-  3. Runs hierarchical clustering (average linkage, euclidean metric)
-  4. Saves a clustered RDM heatmap  → clustered_rdm_t{X}ms.pdf
-  5. Saves a dendrogram tree figure → dendrogram_t{X}ms.pdf
+Rank-transforms the chosen RDM, runs hierarchical clustering (average linkage,
+correlation distance), and saves two figures per run:
+  - clustered RDM heatmap  → clustered_rdm_{label}.pdf
+  - dendrogram tree figure → dendrogram_{label}.pdf
+
+--rdm-type meg (default):
+  Grand-average MEG RDM at the timepoint of peak RSA (auto-detected) or a
+  specified timepoint.  label = meg_t{X}ms
+
+--rdm-type embedding:
+  Network layer RDM from the first loaded subject file (identical for all
+  subjects with the same model/layer).  label = embedding_model-{M}_layer-{L}
 
 Usage:
     python plot_dendrogram.py --rsa-dir /path/to/rsa --output-dir /path/to/plots
+    python plot_dendrogram.py --rdm-type embedding --model resnet50_ecoset_crop --layer avgpool
 
 Author: pyAVS development team
 """
@@ -94,6 +101,7 @@ def load_rsa_results(rsa_file: str) -> Dict[str, Any]:
         'times': data['times'],
         'rsa_timeseries': data['rsa_timeseries'],
         'meg_rdm_timeseries': data['meg_rdm_timeseries'],
+        'embedding_rdm': data['embedding_rdm'] if 'embedding_rdm' in data else None,
         'object_labels': data['object_labels'].tolist() if 'object_labels' in data else None,
         'subject_id': subject_id,
         'sessions': sessions,
@@ -181,7 +189,7 @@ def rank_transform_rdm(rdm: np.ndarray) -> np.ndarray:
 # =============================
 
 def plot_clustered_rdm(rdm_ranked: np.ndarray, object_labels: List[str],
-                       linkage_matrix: np.ndarray, timepoint_ms: float,
+                       linkage_matrix: np.ndarray, label: str,
                        output_dir: Path, save_fig: bool = True) -> plt.Figure:
     """
     Plot hierarchically clustered RDM heatmap.
@@ -194,8 +202,9 @@ def plot_clustered_rdm(rdm_ranked: np.ndarray, object_labels: List[str],
         Object labels in original order
     linkage_matrix : np.ndarray
         Linkage matrix from scipy.cluster.hierarchy.linkage
-    timepoint_ms : float
-        Timepoint label for filename
+    label : str
+        Label used in the output filename (e.g. 'meg_t140ms' or
+        'embedding_model-resnet50_layer-avgpool')
     output_dir : Path
     save_fig : bool
 
@@ -226,7 +235,7 @@ def plot_clustered_rdm(rdm_ranked: np.ndarray, object_labels: List[str],
     plt.tight_layout()
 
     if save_fig:
-        filename = f"clustered_rdm_t{timepoint_ms:.0f}ms.pdf"
+        filename = f"clustered_rdm_{label}.pdf"
         plt.savefig(output_dir / filename, dpi=DENDRO_CONFIG['figure_dpi'])
         logger.info(f"Saved clustered RDM heatmap: {filename}")
 
@@ -236,7 +245,7 @@ def plot_clustered_rdm(rdm_ranked: np.ndarray, object_labels: List[str],
 
 
 def plot_dendrogram_figure(linkage_matrix: np.ndarray, object_labels: List[str],
-                           timepoint_ms: float, output_dir: Path,
+                           label: str, output_dir: Path,
                            save_fig: bool = True) -> plt.Figure:
     """
     Plot dendrogram tree.
@@ -247,8 +256,9 @@ def plot_dendrogram_figure(linkage_matrix: np.ndarray, object_labels: List[str],
         Linkage matrix from scipy.cluster.hierarchy.linkage
     object_labels : list of str
         Object labels in original order
-    timepoint_ms : float
-        Timepoint label for filename
+    label : str
+        Label used in the output filename (e.g. 'meg_t140ms' or
+        'embedding_model-resnet50_layer-avgpool')
     output_dir : Path
     save_fig : bool
 
@@ -283,8 +293,8 @@ def plot_dendrogram_figure(linkage_matrix: np.ndarray, object_labels: List[str],
 
     palette = get_supercategory_palette()
     xticks = ax.get_xticks()
-    for x_pos, label in zip(xticks, dend['ivl']):
-        supercat = COCO_SUPERCATEGORY_MAP.get(label, 'unknown')
+    for x_pos, leaf_label in zip(xticks, dend['ivl']):
+        supercat = COCO_SUPERCATEGORY_MAP.get(leaf_label, 'unknown')
         ax.plot(x_pos, 0, 's', color=palette[supercat],
                 clip_on=False, zorder=5)
 
@@ -303,7 +313,7 @@ def plot_dendrogram_figure(linkage_matrix: np.ndarray, object_labels: List[str],
     #plt.tight_layout()
 
     if save_fig:
-        filename = f"dendrogram_t{timepoint_ms:.0f}ms.pdf"
+        filename = f"dendrogram_{label}.pdf"
         plt.savefig(output_dir / filename, dpi=DENDRO_CONFIG['figure_dpi'])
         logger.info(f"Saved dendrogram: {filename}")
 
@@ -345,7 +355,12 @@ Examples:
                        help='Filter by layer name')
     parser.add_argument('--timepoint', '--timepoint-ms', dest='timepoint_ms',
                        type=float, default=None,
-                       help='Timepoint in ms (default: auto-detect from peak RSA)')
+                       help='Timepoint in ms (default: auto-detect from peak RSA); '
+                            'ignored when --rdm-type=embedding')
+    parser.add_argument('--rdm-type', dest='rdm_type', choices=['meg', 'embedding'],
+                       default='meg',
+                       help='Which RDM to cluster: "meg" (grand-average MEG at peak/specified '
+                            'timepoint) or "embedding" (network layer RDM; no timepoint needed)')
     parser.add_argument('--output-dir', type=str,
                        default="/share/klab/psulewski/psulewski/pyavs/rsa",
                        help='Output directory for plots')
@@ -413,18 +428,33 @@ Examples:
 
     logger.info(f"Loaded {len(rsa_data_list)} subjects")
 
-    # Determine timepoint
-    if args.timepoint_ms is not None:
-        times = rsa_data_list[0]['times']
-        time_idx = int(np.argmin(np.abs(times - args.timepoint_ms / 1000.0)))
-        timepoint_ms = float(times[time_idx] * 1000)
-        logger.info(f"Using specified timepoint: {timepoint_ms:.1f} ms")
+    # ------------------------------------------------------------------
+    # Build the RDM to cluster
+    # ------------------------------------------------------------------
+    if args.rdm_type == 'embedding':
+        logger.info("Using network layer (embedding) RDM...")
+        emb_rdm = rsa_data_list[0].get('embedding_rdm')
+        if emb_rdm is None:
+            logger.error("No embedding_rdm found in RSA results file")
+            return 1
+        grand_rdm = np.array(emb_rdm, dtype=float)
+        # Use model/layer as the label instead of a timepoint
+        rdm_label = f"embedding_model-{rsa_data_list[0]['model_name']}_layer-{rsa_data_list[0]['layer']}"
+        timepoint_ms = None  # not applicable
     else:
-        timepoint_ms, time_idx = find_peak_timepoint(rsa_data_list)
+        # Determine timepoint
+        if args.timepoint_ms is not None:
+            times = rsa_data_list[0]['times']
+            time_idx = int(np.argmin(np.abs(times - args.timepoint_ms / 1000.0)))
+            timepoint_ms = float(times[time_idx] * 1000)
+            logger.info(f"Using specified timepoint: {timepoint_ms:.1f} ms")
+        else:
+            timepoint_ms, time_idx = find_peak_timepoint(rsa_data_list)
 
-    # Grand-average RDM
-    logger.info("Computing grand-average RDM...")
-    grand_rdm = compute_grand_average_rdm(rsa_data_list, time_idx)
+        # Grand-average MEG RDM
+        logger.info("Computing grand-average MEG RDM...")
+        grand_rdm = compute_grand_average_rdm(rsa_data_list, time_idx)
+        rdm_label = f"meg_t{timepoint_ms:.0f}ms"
 
     # Object labels
     object_labels = rsa_data_list[0].get('object_labels') or []
@@ -444,11 +474,11 @@ Examples:
 
     # Plot clustered RDM heatmap
     logger.info("Plotting clustered RDM heatmap...")
-    plot_clustered_rdm(rdm_ranked, object_labels, Z, timepoint_ms, output_dir)
+    plot_clustered_rdm(rdm_ranked, object_labels, Z, rdm_label, output_dir)
 
     # Plot dendrogram
     logger.info("Plotting dendrogram tree...")
-    plot_dendrogram_figure(Z, object_labels, timepoint_ms, output_dir)
+    plot_dendrogram_figure(Z, object_labels, rdm_label, output_dir)
 
     logger.info("Dendrogram plotting completed successfully")
     return 0
