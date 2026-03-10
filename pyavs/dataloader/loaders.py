@@ -80,6 +80,23 @@ def load_eye_events(subject_id: int, session: int,
     return events_df, messages_df
 
 
+def load_eye_samples(subject_id: int, session: int,
+                     data_path: Optional[str] = None,
+                     output_prefix: str = 'as') -> pd.DataFrame:
+    """Load cleaned eye tracking samples (including pupil area) for a subject/session."""
+    validate_subject_id(subject_id)
+    validate_session(session)
+    if data_path is None:
+        data_path = get_data_path()
+        if data_path is None:
+            raise ValueError("No data path configured.")
+    legacy_paths = get_legacy_paths(data_path, subject_id, session, output_prefix)
+    samples_path = legacy_paths['cleaned_samples']
+    if not os.path.exists(samples_path):
+        raise FileNotFoundError(f"Cleaned samples file not found: {samples_path}")
+    return pd.read_csv(samples_path)
+
+
 def load_experiment_log(subject_id: int, session: int,
                        data_path: Optional[str] = None,
                        output_prefix: str = 'as') -> pd.DataFrame:

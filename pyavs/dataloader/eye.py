@@ -27,8 +27,9 @@ def load_and_enrich_eye_events(subjects: List[int], sessions: List[int],
                               fix_multi_saccades: bool = True,
                               verbose: bool = True,
                               include_fixation_zero: bool = False,
-                              offset_scene_triggers_ms: int = 20, 
+                              offset_scene_triggers_ms: int = 20,
                               add_event_sequence_positions: bool = True,
+                              add_pupil_dilation: bool = False,
                               **kwargs
                               ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
@@ -61,7 +62,10 @@ def load_and_enrich_eye_events(subjects: List[int], sessions: List[int],
         Whether to include fixations that partially overlap with fixation cross (default: False)
     offset_scene_triggers_ms : int, optional
         Offset to fix scene trigger delay in milliseconds (default: 20)
-        
+    add_pupil_dilation : bool, optional
+        Whether to compute and add pa_mean and pa_sd per fixation from cleaned
+        samples (default: False). Requires cleaned_samples file to be present.
+
     Returns
     -------
     tuple
@@ -111,7 +115,17 @@ def load_and_enrich_eye_events(subjects: List[int], sessions: List[int],
             
             if add_event_sequence_positions:
                 events = add_fixation_sequence_position(events, verbose=verbose)
-            
+
+            if add_pupil_dilation:
+                try:
+                    from .loaders import load_eye_samples
+                    samples = load_eye_samples(subject, session, data_path, output_prefix)
+                    events = add_pupil_dilation_to_events(events, samples)
+                    if verbose:
+                        logger.info(f'Subject {subject}, session {session}: pupil dilation added')
+                except FileNotFoundError as e:
+                    logger.warning(f'Subject {subject}, session {session}: {e} — skipping pupil dilation')
+
             # Combine with previous subjects/sessions
             if events_all is None:
                 events_all = events.copy(deep=True)
@@ -422,6 +436,142 @@ def add_fixation_sequence_position(events: pd.DataFrame,
                         events.loc[sac_indices, 'sac_sequence_from_last'] = sac_sequence_from_last
     
     return events
+
+
+def add_pupil_dilation_to_events(events_df: pd.DataFrame,
+                                  samples_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Add mean and SD of pupil area to fixation events.
+
+    For each fixation event, all cleaned samples whose smpl_time falls within
+    [start_time, end_time] are aggregated.  Adds columns pa_mean and pa_sd.
+    Non-fixation events receive NaN.
+
+    Parameters
+    ----------
+    events_df : pd.DataFrame
+        Events dataframe (must have start_time, end_time, type columns).
+    samples_df : pd.DataFrame
+        Cleaned samples dataframe with smpl_time and pa columns.
+
+    Returns
+    -------
+    pd.DataFrame
+        events_df with pa_mean and pa_sd columns added.
+    """
+    events_df = events_df.copy()
+    events_df['pa_mean'] = np.nan
+    events_df['pa_sd'] = np.nan
+
+    fix_idx = events_df.index[events_df['type'] == 'fixation']
+    if len(fix_idx) == 0:
+        return events_df
+
+    fix_events = events_df.loc[fix_idx]
+
+    # Build a closed interval index from fixation windows
+    intervals = pd.IntervalIndex.from_arrays(
+        fix_events['start_time'].values,
+        fix_events['end_time'].values,
+        closed='both'
+    )
+
+    # Map each sample to its fixation interval
+    sample_times = samples_df['smpl_time'].values
+    labels = pd.cut(sample_times, bins=intervals)
+
+    # Aggregate pa per interval
+    pa_stats = (samples_df
+                .assign(_interval=labels)
+                .dropna(subset=['_interval'])
+                .groupby('_interval', observed=True)['pa']
+                .agg(pa_mean='mean', pa_sd='std'))
+
+    # Map stats back to the fixation rows (align by interval = [start, end])
+    for fix_row_idx, interval in zip(fix_idx, intervals):
+        if interval in pa_stats.index:
+            events_df.at[fix_row_idx, 'pa_mean'] = pa_stats.at[interval, 'pa_mean']
+            events_df.at[fix_row_idx, 'pa_sd']   = pa_stats.at[interval, 'pa_sd']
+
+    return events_df
+
+
+def extract_pupil_epochs(events_df: pd.DataFrame,
+                         samples_df: pd.DataFrame,
+                         epoch_length_ms: int = 1000,
+                         pre_onset_ms: int = 200) -> Tuple[np.ndarray, pd.DataFrame, np.ndarray]:
+    """
+    Extract per-fixation pupil area timecourses from cleaned samples.
+
+    The epoch window starts `pre_onset_ms` milliseconds before each fixation
+    onset, so index 0 = pre_onset_ms before onset and index pre_onset_ms = onset.
+
+    Fixations shorter than `epoch_length_ms - pre_onset_ms` ms are right-padded
+    with NaN.  Fixations longer than that are truncated at epoch_length_ms.
+
+    Parameters
+    ----------
+    events_df : pd.DataFrame
+        Enriched events dataframe (must have start_time, end_time, type columns).
+        Only fixation rows are processed.
+    samples_df : pd.DataFrame
+        Cleaned samples dataframe for the same recording session, with
+        smpl_time (seconds) and pa columns.
+    epoch_length_ms : int, optional
+        Total epoch length in milliseconds (default 1000).  Assumes 1000 Hz sampling.
+    pre_onset_ms : int, optional
+        Number of milliseconds before fixation onset included at the start of
+        the epoch (default 200).  Must be < epoch_length_ms.
+
+    Returns
+    -------
+    epochs : np.ndarray, shape (n_fixations, epoch_length_ms)
+        Pupil area timecourses; NaN where data is absent.
+        Row index pre_onset_ms corresponds to fixation onset.
+    fix_events : pd.DataFrame
+        Fixation rows from events_df (reset index), row-aligned with epochs.
+    times : np.ndarray, shape (epoch_length_ms,)
+        Time axis in milliseconds relative to fixation onset.
+        times[pre_onset_ms] == 0 by construction.
+    """
+    fix_events = events_df[events_df['type'] == 'fixation'].reset_index(drop=True)
+    n_fix = len(fix_events)
+    epochs = np.full((n_fix, epoch_length_ms), np.nan)
+    times = np.arange(epoch_length_ms, dtype=float) - pre_onset_ms  # ms relative to onset
+
+    if n_fix == 0 or len(samples_df) == 0:
+        return epochs, fix_events, times
+
+    # Pre-sort samples for searchsorted
+    samples_sorted = samples_df.sort_values('smpl_time').reset_index(drop=True)
+    t_samples = samples_sorted['smpl_time'].values
+    pa_values = samples_sorted['pa'].values
+
+    epoch_duration_s = epoch_length_ms / 1000.0
+    pre_onset_s = pre_onset_ms / 1000.0
+
+    for i, row in fix_events.iterrows():
+        t_window_start = row['start_time'] - pre_onset_s
+        t_window_end = t_window_start + epoch_duration_s
+
+        # Find samples in window using binary search
+        idx_lo = np.searchsorted(t_samples, t_window_start, side='left')
+        idx_hi = np.searchsorted(t_samples, t_window_end, side='left')
+
+        if idx_lo >= idx_hi:
+            continue  # No samples in this window — epoch stays NaN
+
+        window_times = t_samples[idx_lo:idx_hi]
+        window_pa = pa_values[idx_lo:idx_hi]
+
+        # Compute integer ms offsets from window start
+        offsets = np.round((window_times - t_window_start) * 1000).astype(int)
+
+        # Keep only offsets within the epoch
+        valid = (offsets >= 0) & (offsets < epoch_length_ms)
+        epochs[i, offsets[valid]] = window_pa[valid]
+
+    return epochs, fix_events, times
 
 
 def add_cross_event_information(events_df: pd.DataFrame, verbose: bool = False) -> pd.DataFrame:

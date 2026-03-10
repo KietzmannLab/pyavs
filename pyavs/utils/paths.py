@@ -223,12 +223,14 @@ def get_legacy_paths(data_path: str, subject_id: int, session: int,
     data_path = os.path.join(data_path, 'results')
     
     paths = {
-        'events': os.path.join(data_path, subject_session_dir, 'preprocessed', 
+        'events': os.path.join(data_path, subject_session_dir, 'preprocessed',
                               f"{prefix}_s{subject_id}_el_events.csv"),
-        'messages': os.path.join(data_path, subject_session_dir, 'preprocessed', 
+        'messages': os.path.join(data_path, subject_session_dir, 'preprocessed',
                                 f"{prefix}_s{subject_id}_el_msgs.csv"),
-        'experiment_log': os.path.join(data_path, subject_session_dir, 
-                                      f"{prefix}_exp_data_{subject_id}_{session}_3_0.csv")
+        'experiment_log': os.path.join(data_path, subject_session_dir,
+                                      f"{prefix}_exp_data_{subject_id}_{session}_3_0.csv"),
+        'cleaned_samples': os.path.join(data_path, subject_session_dir, 'preprocessed',
+                                        f"{prefix}_s{subject_id}_el_cleaned_samples.csv"),
     }
     
     return paths
