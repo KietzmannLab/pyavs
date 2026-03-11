@@ -140,15 +140,17 @@ def load_pupil_data(
         valid_mask = (pa_min >= lower_bound) & (pa_max <= upper_bound)
         events = events[valid_mask].reset_index(drop=True)
         epochs = epochs[valid_mask, :]
+        
+        # how many fixations are just nan after cutting by fixation duration and removing extreme values?
+        n_nan_fixations = np.isnan(epochs).all(axis=1).sum()
+        if n_nan_fixations > 0:
+            logger.info(f"  sub-{sub:02d} ses-{ses:02d}: {n_nan_fixations} fixations with all-NaN epochs after cutting by duration and removing extremes")
     
 
         # robust scale the pupil area 
-        from sklearn.preprocessing import RobustScaler
-        scaler = RobustScaler()
-        for subject in events['subject'].unique():
-            for session in events['session'].unique():
-                mask = (events['subject'] == subject) & (events['session'] == session)
-                epochs[mask, :] = scaler.fit_transform(epochs[mask, :])
+     
+        events = events.reset_index(drop=True)
+        
         
         epochs_list.append(epochs)
         events_list.append(events)
@@ -162,6 +164,14 @@ def load_pupil_data(
     events_all = pd.concat(events_list, ignore_index=True)
     
    
+    for (subject, session, block), idx in events_all.groupby(['subject', 'session', 'block']).groups.items():
+        pa_values = epochs_all[idx, :]
+        # robust scaling: subtract median and divide by IQR
+        median = np.nanmedian(pa_values)
+        q75, q25 = np.nanpercentile(pa_values, [75, 25])
+        iqr = q75 - q25 if q75 > q25 else 1.0  # prevent division by zero
+        epochs_all[idx, :] = (pa_values - median) / iqr
+        # reset index after all filtering
     
     n_subjects = events_all['subject'].nunique()
     
@@ -405,6 +415,20 @@ def main():
     # Bin by viewing time
     logger.info("Binning fixations by viewing time:")
     events = bin_by_viewing_time(events)
+    
+    # normalize by time bin to account for differences in pupil area across bins (e.g. due to fatigue or other slow drifts). This is done by robustly scaling the epochs within each time bin (subtract median and divide by IQR) to focus on relative changes over time rather than absolute differences between bins.
+    
+    # for label in events['time_bin'].cat.categories:
+    #     mask = events['time_bin'] == label
+    #     if mask.sum() > 0:
+    #         pa_values = epochs[mask.values, :]
+    #         median = np.nanmedian(pa_values)
+    #         q75, q25 = np.nanpercentile(pa_values, [75, 25])
+    #         iqr = q75 - q25 if q75 > q25 else 1.0
+    #         epochs[mask.values, :] = (pa_values - median) / iqr
+    #         logger.info(f"  Normalized time_bin '{label}': median={median:.2f}, IQR={iqr:.2f}, n={mask.sum()} fixations")
+    #     else:
+    #         logger.info(f"  No fixations in time_bin '{label}', skipping normalization")
 
     # Build subject-level means (avoids pseudoreplication)
     long_df = build_subject_means(epochs, events, times)
