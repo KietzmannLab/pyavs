@@ -541,14 +541,21 @@ def extract_pupil_epochs(events_df: pd.DataFrame,
 
     if n_fix == 0 or len(samples_df) == 0:
         return epochs, fix_events, times
-
+    print("Fixation events:")
+    print(fix_events.head())
+    print("Sample data:")
+    print(samples_df.head())
     # Pre-sort samples for searchsorted
     samples_sorted = samples_df.sort_values('smpl_time').reset_index(drop=True)
+    print("Samples sorted by smpl_time:")
+    print(samples_sorted.head())
     t_samples = samples_sorted['smpl_time'].values
     pa_values = samples_sorted['pa'].values
 
     epoch_duration_s = epoch_length_ms / 1000.0
     pre_onset_s = pre_onset_ms / 1000.0
+    print("fix_events start_time and end_time:")
+    print(fix_events[['start_time', 'end_time']].head())
 
     for i, row in fix_events.iterrows():
         t_window_start = row['start_time'] - pre_onset_s

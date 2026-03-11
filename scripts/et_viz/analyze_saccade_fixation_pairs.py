@@ -145,7 +145,7 @@ def plot_duration_heatmap(
 
     # Create figure
     sns.set_context("poster")
-    fig, ax = plt.subplots(figsize=(9, 9))
+    fig, ax = plt.subplots(figsize=(10, 8))
 
     # Create 2D histogram (sns kdeplot with fill)
     

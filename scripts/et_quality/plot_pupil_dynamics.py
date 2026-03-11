@@ -117,8 +117,42 @@ def load_pupil_data(
 
         events['subject'] = sub
         events['session'] = ses
+        
+        # exclude last fixation of each 
+        not_last_fix = events['fix_sequence_from_last'] != 0
+        events = events[not_last_fix].reset_index(drop=True)
+        epochs = epochs[not_last_fix.values, :]
+        
+        # enly include scene viewing recording="scene"
+        is_scene = events['recording'] == 'scene'
+        events = events[is_scene].reset_index(drop=True)
+        epochs = epochs[is_scene.values, :]
+        
+        # cut the epochs by fixation duration (only running fixations are included in the plot)
+        events, epochs = cut_by_fixation_duration(events, epochs, times)
+ 
+        # remove epochs with extreme pupil area values (e.g. blinks) by excluding epochs with any value outside 5-95 percentile range. This is based on the min and max valies per epoch
+        
+        pa_min = np.nanmin(epochs, axis=1)
+        pa_max = np.nanmax(epochs, axis=1)
+        lower_bound = np.nanpercentile(pa_min, 2)
+        upper_bound = np.nanpercentile(pa_max, 98)
+        valid_mask = (pa_min >= lower_bound) & (pa_max <= upper_bound)
+        events = events[valid_mask].reset_index(drop=True)
+        epochs = epochs[valid_mask, :]
+    
+
+        # robust scale the pupil area 
+        from sklearn.preprocessing import RobustScaler
+        scaler = RobustScaler()
+        for subject in events['subject'].unique():
+            for session in events['session'].unique():
+                mask = (events['subject'] == subject) & (events['session'] == session)
+                epochs[mask, :] = scaler.fit_transform(epochs[mask, :])
+        
         epochs_list.append(epochs)
         events_list.append(events)
+        
         logger.info(f"  sub-{sub:02d} ses-{ses:02d}: {epochs.shape[0]} fixations")
 
     if not epochs_list:
@@ -126,13 +160,20 @@ def load_pupil_data(
 
     epochs_all = np.concatenate(epochs_list, axis=0)
     events_all = pd.concat(events_list, ignore_index=True)
-
+    
+   
+    
     n_subjects = events_all['subject'].nunique()
+    
+    
+    
+    
     logger.info(
         f"Loaded {epochs_all.shape[0]} fixations across {n_subjects} subjects "
         f"({len(epoch_files)} sessions)"
     )
     return epochs_all, events_all, times
+
 
 
 def bin_by_viewing_time(events_df: pd.DataFrame) -> pd.DataFrame:
@@ -163,6 +204,9 @@ def bin_by_viewing_time(events_df: pd.DataFrame) -> pd.DataFrame:
         right=False,
         include_lowest=True,
     )
+    
+    
+    
 
     for label, lo, hi in zip(labels, bins[:-1], bins[1:]):
         count = (df['time_bin'] == label).sum()
@@ -173,6 +217,15 @@ def bin_by_viewing_time(events_df: pd.DataFrame) -> pd.DataFrame:
         logger.info(f"  Excluded (outside 0-4s): {n_excluded}")
 
     return df
+
+def cut_by_fixation_duration(events_df: pd.DataFrame, epochs: np.ndarray, times: np.ndarray) -> Tuple[pd.DataFrame, np.ndarray]:
+    """# nan the epochs by fixation duration (only running fixations are included in the plot)
+    """
+    # Vectorized approach: create a mask for each epoch based on fixation duration
+    fix_durations_ms = events_df['duration'].values * 1000  # convert to ms
+    time_mask = times[np.newaxis, :] > fix_durations_ms[:, np.newaxis]
+    epochs[time_mask] = np.nan
+    return events_df, epochs
 
 
 def build_subject_means(
@@ -201,7 +254,7 @@ def build_subject_means(
         events[valid_mask].groupby(['subject', 'time_bin'], observed=True)
     ):
         idx = grp.index.values
-        mean_trace = np.nanmean(epochs[idx, :], axis=0)  # (n_times,)
+        mean_trace = np.nanmedian(epochs[idx, :], axis=0)  # (n_times,)
         for t_ms, pa in zip(times, mean_trace):
             rows.append({
                 'subject': subject,
@@ -242,9 +295,12 @@ def plot_pupil_dynamics(
     logger.info("Creating figure: pupil area timecourse by viewing time")
 
     sns.set_context("poster")
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(10, 8))
 
     colors = sns.color_palette("magma", n_colors=4)
+    
+    # restrict time to 500 ms after fixation onset to focus on the most dynamic period
+    long_df = long_df[long_df['time_ms'] <= 500]
 
     sns.lineplot(
         data=long_df,
@@ -252,8 +308,10 @@ def plot_pupil_dynamics(
         y='pa',
         hue='time_bin',
         palette=colors,
-        errorbar=('ci', 99),
-    )
+        errorbar=('ci', 95), estimator='mean', n_boot=100)
+    # xlim to 500 ms after fixation onset to focus on the most dynamic period
+    
+
 
     plt.axvline(0, color='black', ls='--')
     plt.xlabel('time relative to fixation onset [ms]')
