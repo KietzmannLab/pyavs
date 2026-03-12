@@ -145,7 +145,7 @@ def plot_duration_heatmap(
 
     # Create figure
     sns.set_context("poster")
-    fig, ax = plt.subplots(figsize=(10, 8))
+    
 
     # Create 2D histogram (sns kdeplot with fill)
     
@@ -157,13 +157,16 @@ def plot_duration_heatmap(
     fill=True,
     cmap="viridis",
     bw_adjust=0.5,
-    levels=50,
+    levels=30,
     thresh=0.05
     )
 
     # Histograms for the marginals
     g.plot_marginals(sns.histplot, bins=30, kde=True, color="gray")
     #
+    
+    # set figure size
+    plt.gcf().set_size_inches(9, 7)
     # Labels and title
     g.ax_joint.set_xlabel('saccade duration [ms]')
     g.ax_joint.set_ylabel('fixation duration [ms]')

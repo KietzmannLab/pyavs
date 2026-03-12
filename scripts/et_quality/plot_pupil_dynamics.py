@@ -305,28 +305,36 @@ def plot_pupil_dynamics(
     logger.info("Creating figure: pupil area timecourse by viewing time")
 
     sns.set_context("poster")
-    plt.figure(figsize=(10, 8))
+    plt.figure(figsize=(9, 7))
 
     colors = sns.color_palette("magma", n_colors=4)
     
     # restrict time to 500 ms after fixation onset to focus on the most dynamic period
-    long_df = long_df[long_df['time_ms'] <= 500]
-
+    long_df = long_df[long_df['time_ms'] <= 400]
+    #
+    
+    # remove the first bin to avoid scene onset effects (e.g. pupil constriction to sudden light change) and focus on the dynamics during scene exploration. This also ensures that the plotted traces reflect pupil responses during active viewing rather than initial transient responses to scene onset.
+    
+    long_df = long_df[long_df['time_bin'] != "<1s"].copy()
+    # moving average with a 5-point window to smooth the traces (optional, can be commented out to show raw data)
+    long_df['pa'] = long_df.groupby(['subject', 'time_bin'])['pa'].transform(lambda x: x.rolling(window=5, min_periods=1, center=True).mean())
+   
     sns.lineplot(
         data=long_df,
         x='time_ms',
         y='pa',
-        hue='time_bin',
-        palette=colors,
-        errorbar=('ci', 95), estimator='mean', n_boot=100)
+        #hue='subject',
+        #palette=colors,
+        color='cornflowerblue',
+        errorbar=('ci', 95), estimator='mean', n_boot=1000)
     # xlim to 500 ms after fixation onset to focus on the most dynamic period
     
 
 
-    plt.axvline(0, color='black', ls='--')
-    plt.xlabel('time relative to fixation onset [ms]')
-    plt.ylabel('pupil area [a.u.]')
-    plt.legend(title='viewing time', frameon=False)
+    plt.axvline(0, color='darkgray', ls='--')
+    plt.xlabel('time [ms]')
+    plt.ylabel('pupil area\n[normalized a.u.]')
+    #plt.legend(title='viewing time', frameon=False)
     sns.despine()
     plt.tight_layout()
 

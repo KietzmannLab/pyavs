@@ -269,7 +269,7 @@ def plot_main_sequence_temporal(saccades_df: pd.DataFrame, output_dir: str,
         sns.kdeplot(data=subset, x='amplitude_clipped', ax=g.ax_marg_x, color=color, fill=True, alpha=0.3)
         sns.kdeplot(data=subset, y='peak_velocity_clipped', ax=g.ax_marg_y, color=color, fill=True, alpha=0.3)
         # set figure size
-    plt.gcf().set_size_inches(10, 8)
+    plt.gcf().set_size_inches(9, 7)
     # get the current axis
     #ax = plt.gca()
     # Labels (lowercase)
