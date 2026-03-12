@@ -46,14 +46,13 @@ except ImportError as e:
 # Project imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from pyavs.source.forward import load_forward_model
-from pyavs.io import load_meg_raw
+from pyavs.preprocessing.composer import AVSComposer
 from pyavs.utils.logging import get_logger
 
 # Imports from sibling scripts
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from meg_viz.compute_source_erp import morph_and_save_subject_stc, SUBJECT_FS_MAPPING
 from rsa_analysis.compute_rsa import (
-    load_fixation_epochs,
     load_embeddings,
     match_epochs_to_embeddings,
     group_by_objects,
@@ -126,6 +125,86 @@ def find_rsa_peak(
 # Category ERF loading
 # ============================================================================
 
+def _load_session_composer(
+    subject: int,
+    sess: int,
+    data_path: str,
+    model_name: str,
+    layer: str,
+    tmin: float,
+    tmax: float,
+) -> Optional[tuple]:
+    """
+    Load fixation epochs for one session via AVSComposer and align to embeddings.
+
+    Returns None on any failure.
+    """
+    import pandas as pd
+
+    try:
+        composer = AVSComposer(
+            subject=subject,
+            session_num=sess,
+            data_path=data_path,
+            output_path=data_path,
+            et_path=data_path,
+            preprocessed=True,
+            recompute_prepro=False,
+            use_precomputed_ica=True,
+            apply_ica=False,
+            l_freq=0.2,
+            h_freq=200,
+            causal_filter=False,
+            resample_freq=500.0,
+        )
+        composer.load_meg_data(compute_missing_prepro=False)
+        composer.filter_meg_data(ignore_existing_filter=True)
+        composer.apply_ica_to_blocks()
+        composer.concatenate_raws_per_session()
+        composer.find_events_in_raw()
+        composer.get_et_annotations(
+            event_type='fixation',
+            recording='scene',
+            preprocessed=True,
+        )
+        composer.make_et_event_epochs(
+            tmin=tmin,
+            tmax=tmax,
+            event_type='fixation',
+            recording='scene',
+            get_metadata=True,
+            baseline=None,
+        )
+    except Exception as e:
+        logger.warning(f"sub-{subject:02d} ses-{sess:02d}: AVSComposer failed: {e}")
+        return None
+
+    epochs = composer.et_epochs
+    if epochs is None or len(epochs) == 0:
+        logger.warning(f"sub-{subject:02d} ses-{sess:02d}: no epochs created")
+        return None
+
+    try:
+        embeddings, file_names = load_embeddings(
+            subject_id=subject, session=sess, data_path=data_path,
+            model_name=model_name, layer=layer,
+        )
+    except Exception as e:
+        logger.warning(f"sub-{subject:02d} ses-{sess:02d}: embedding load failed: {e}")
+        return None
+
+    epoch_indices, embedding_indices = match_epochs_to_embeddings(
+        epochs.metadata, file_names
+    )
+    return (
+        epochs.get_data()[epoch_indices],
+        embeddings[embedding_indices],
+        epochs.metadata.iloc[epoch_indices].reset_index(drop=True),
+        epochs.times,
+        epochs.info,
+    )
+
+
 def load_category_erfs(
     subject: int,
     sessions: List[int],
@@ -133,13 +212,14 @@ def load_category_erfs(
     model_name: str,
     layer: str,
     n_jobs: int = 1,
-) -> Tuple[np.ndarray, np.ndarray, List[str], np.ndarray]:
+    tmin: float = -0.1,
+    tmax: float = 0.5,
+) -> Tuple[np.ndarray, np.ndarray, List[str], np.ndarray, mne.Info]:
     """
-    Load pre-computed HDF5 epochs, align to embeddings, and group by category.
+    Recompute fixation epochs via AVSComposer, align to embeddings, group by category.
 
-    Uses the same fast HDF5 loading path as the sensor RSA (load_fixation_epochs),
-    avoiding the expensive AVSComposer/raw-MEG pipeline. Sessions are loaded in
-    parallel.
+    Sessions are processed in parallel. The mne.Info is taken from the first
+    successful session and returned alongside the grouped data.
 
     Parameters
     ----------
@@ -155,6 +235,8 @@ def load_category_erfs(
         Layer name.
     n_jobs : int
         Number of parallel jobs for session loading (default: 1).
+    tmin, tmax : float
+        Epoch time window in seconds (default: -0.1 to 0.5).
 
     Returns
     -------
@@ -166,52 +248,32 @@ def load_category_erfs(
         Category label for each of the 171 rows.
     times : np.ndarray
         Time vector in seconds.
+    info : mne.Info
+        MEG measurement info (from first successful session).
     """
     import pandas as pd
 
-    def _load_session(sess):
-        try:
-            epochs_data, metadata, sess_times = load_fixation_epochs(
-                subject_id=subject, session=sess, data_path=data_path
-            )
-        except Exception as e:
-            logger.warning(f"sub-{subject:02d} ses-{sess:02d}: epoch load failed: {e}")
-            return None
-
-        try:
-            embeddings, file_names = load_embeddings(
-                subject_id=subject, session=sess, data_path=data_path,
-                model_name=model_name, layer=layer,
-            )
-        except Exception as e:
-            logger.warning(f"sub-{subject:02d} ses-{sess:02d}: embedding load failed: {e}")
-            return None
-
-        epoch_indices, embedding_indices = match_epochs_to_embeddings(
-            metadata, file_names
-        )
-        return (
-            epochs_data[epoch_indices],
-            embeddings[embedding_indices],
-            metadata.iloc[epoch_indices].reset_index(drop=True),
-            sess_times,
-        )
-
     results = Parallel(n_jobs=n_jobs, prefer='threads')(
-        delayed(_load_session)(sess) for sess in sessions
+        delayed(_load_session_composer)(
+            subject, sess, data_path, model_name, layer, tmin, tmax
+        )
+        for sess in sessions
     )
 
     all_epochs_data, all_embeddings, all_metadata = [], [], []
     times = None
+    info = None
     for r in results:
         if r is None:
             continue
-        epochs_data, embeddings, metadata, sess_times = r
+        epochs_data, embeddings, metadata, sess_times, sess_info = r
         all_epochs_data.append(epochs_data)
         all_embeddings.append(embeddings)
         all_metadata.append(metadata)
         if times is None:
             times = sess_times
+        if info is None:
+            info = sess_info
 
     if not all_epochs_data:
         raise RuntimeError(f"No usable epoch data for sub-{subject:02d}")
@@ -231,7 +293,7 @@ def load_category_erfs(
         min_occurrences=10,
     )
 
-    return grouped_epochs, grouped_embeddings, object_labels, times
+    return grouped_epochs, grouped_embeddings, object_labels, times, info
 
 
 # ============================================================================
@@ -323,48 +385,6 @@ def _load_fsaverage_src(
 
 
 # ============================================================================
-# Raw MEG info loader
-# ============================================================================
-
-def _load_raw_info(
-    subject: int,
-    sessions: List[int],
-    data_path: str,
-) -> mne.Info:
-    """
-    Load MEG Info from the first available raw FIF file (run-01) for a subject.
-
-    Parameters
-    ----------
-    subject : int
-        Subject ID.
-    sessions : list of int
-        Session numbers to try, in order.
-    data_path : str
-        AVS data root.
-
-    Returns
-    -------
-    mne.Info
-        Full MEG measurement info.
-    """
-    for sess in sessions:
-        try:
-            raw = load_meg_raw(
-                subject_id=subject, session=sess, block=1,
-                data_path=data_path, preload=False,
-            )
-            logger.info(f"  Loaded raw info from sub-{subject:02d} ses-{sess:02d} run-01")
-            return raw.info
-        except Exception:
-            continue
-    raise RuntimeError(
-        f"Could not load raw MEG info for sub-{subject:02d} "
-        f"(tried sessions {sessions})"
-    )
-
-
-# ============================================================================
 # Per-subject orchestration
 # ============================================================================
 
@@ -427,13 +447,6 @@ def process_subject(
         logger.error(str(e))
         return
 
-    # Load MEG info from a raw FIF file — avoids incomplete info in old forward files
-    try:
-        raw_info = _load_raw_info(subject, sessions, data_path)
-    except RuntimeError as e:
-        logger.error(str(e))
-        return
-
     # Load fsaverage source space once per subject
     src_fsaverage = _load_fsaverage_src(subjects_dir, morph_to)
 
@@ -456,7 +469,7 @@ def process_subject(
 
         # --- 2. Load category ERFs ---
         try:
-            grouped_epochs, grouped_embeddings, object_labels, times = (
+            grouped_epochs, grouped_embeddings, object_labels, times, meg_info = (
                 load_category_erfs(
                     subject=subject,
                     sessions=sessions,
@@ -490,7 +503,7 @@ def process_subject(
                 valid_mask=valid_mask,
                 times=times,
                 fwd=fwd,
-                info=raw_info,
+                info=meg_info,
                 peak_tmin=peak_tmin,
                 peak_tmax=peak_tmax,
             )
