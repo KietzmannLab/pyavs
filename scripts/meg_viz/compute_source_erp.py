@@ -235,11 +235,7 @@ def compute_subject_source_erp(
     n_total = len(combined)
     logger.info(f"Total epochs: {n_total}")
 
-<<<<<<< HEAD
-    # --- 2. Compute evoked (mean) ---
-=======
     # --- 2. Compute evoked (median) ---
->>>>>>> fe71d68 (median soure erp)
     evoked = combined.average(method='median')
     evoked.nave = n_total
 
