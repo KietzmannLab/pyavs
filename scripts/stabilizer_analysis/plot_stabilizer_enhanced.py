@@ -273,7 +273,7 @@ def create_within_vs_between_pointplot(repositioning_df: pd.DataFrame, output_di
     sns.set_context("poster")
 
     # Create figure
-    fig, ax = plt.subplots(figsize=(3.5, 4))
+    fig, ax = plt.subplots(figsize=(7, 5))
 
     # Create pointplot with bootstrapped CI
     sns.pointplot(
