@@ -46,6 +46,7 @@ except ImportError as e:
 # Project imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from pyavs.source.forward import load_forward_model
+from pyavs.io import load_meg_raw
 from pyavs.utils.logging import get_logger
 
 # Imports from sibling scripts
@@ -242,6 +243,7 @@ def project_to_source(
     valid_mask: np.ndarray,
     times: np.ndarray,
     fwd: dict,
+    info: mne.Info,
     peak_tmin: float,
     peak_tmax: float,
 ) -> List[mne.SourceEstimate]:
@@ -250,7 +252,6 @@ def project_to_source(
 
     Builds a single inverse operator (ad-hoc cov + dSPM) and applies it to
     each valid category's ERF averaged over the peak time window.
-    Channel info is taken from fwd['info'] (same source as the forward model).
 
     Parameters
     ----------
@@ -262,6 +263,8 @@ def project_to_source(
         Time vector corresponding to epoch axis -1.
     fwd : dict
         MNE forward solution (loaded via load_forward_model).
+    info : mne.Info
+        Full MEG measurement info loaded from a raw FIF file.
     peak_tmin, peak_tmax : float
         Time window [s] to average over.
 
@@ -270,13 +273,6 @@ def project_to_source(
     list of mne.SourceEstimate
         One single-timepoint STC per valid category.
     """
-    # Channel info comes from the forward solution — same sensor layout used
-    # when the forward was computed, no need to re-run the composer.
-    info = fwd['info']
-    # Forward solutions saved with older MNE versions may lack the 'projs' key
-    if 'projs' not in info:
-        with info._unlock():
-            info['projs'] = []
 
     noise_cov = mne.make_ad_hoc_cov(info)
     inv = mne.minimum_norm.make_inverse_operator(
@@ -323,6 +319,48 @@ def _load_fsaverage_src(
     fs_dir = mne.datasets.fetch_fsaverage(verbose=False)
     return mne.read_source_spaces(
         str(Path(fs_dir) / 'bem' / 'fsaverage-ico-5-src.fif'), verbose=False
+    )
+
+
+# ============================================================================
+# Raw MEG info loader
+# ============================================================================
+
+def _load_raw_info(
+    subject: int,
+    sessions: List[int],
+    data_path: str,
+) -> mne.Info:
+    """
+    Load MEG Info from the first available raw FIF file (run-01) for a subject.
+
+    Parameters
+    ----------
+    subject : int
+        Subject ID.
+    sessions : list of int
+        Session numbers to try, in order.
+    data_path : str
+        AVS data root.
+
+    Returns
+    -------
+    mne.Info
+        Full MEG measurement info.
+    """
+    for sess in sessions:
+        try:
+            raw = load_meg_raw(
+                subject_id=subject, session=sess, block=1,
+                data_path=data_path, preload=False,
+            )
+            logger.info(f"  Loaded raw info from sub-{subject:02d} ses-{sess:02d} run-01")
+            return raw.info
+        except Exception:
+            continue
+    raise RuntimeError(
+        f"Could not load raw MEG info for sub-{subject:02d} "
+        f"(tried sessions {sessions})"
     )
 
 
@@ -389,6 +427,13 @@ def process_subject(
         logger.error(str(e))
         return
 
+    # Load MEG info from a raw FIF file — avoids incomplete info in old forward files
+    try:
+        raw_info = _load_raw_info(subject, sessions, data_path)
+    except RuntimeError as e:
+        logger.error(str(e))
+        return
+
     # Load fsaverage source space once per subject
     src_fsaverage = _load_fsaverage_src(subjects_dir, morph_to)
 
@@ -445,6 +490,7 @@ def process_subject(
                 valid_mask=valid_mask,
                 times=times,
                 fwd=fwd,
+                info=raw_info,
                 peak_tmin=peak_tmin,
                 peak_tmax=peak_tmax,
             )
