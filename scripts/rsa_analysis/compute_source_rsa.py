@@ -227,7 +227,7 @@ def load_category_erfs(
     grouped_epochs, grouped_embeddings, object_labels = group_by_objects(
         combined_epochs, combined_embeddings, combined_metadata,
         data_path=data_path,
-        min_occurrences=20,
+        min_occurrences=10,
     )
 
     return grouped_epochs, grouped_embeddings, object_labels, times
