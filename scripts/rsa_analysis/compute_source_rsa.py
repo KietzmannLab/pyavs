@@ -273,6 +273,10 @@ def project_to_source(
     # Channel info comes from the forward solution — same sensor layout used
     # when the forward was computed, no need to re-run the composer.
     info = fwd['info']
+    # Forward solutions saved with older MNE versions may lack the 'projs' key
+    if 'projs' not in info:
+        with info._unlock():
+            info['projs'] = []
 
     noise_cov = mne.make_ad_hoc_cov(info)
     inv = mne.minimum_norm.make_inverse_operator(
