@@ -131,12 +131,14 @@ def load_category_erfs(
     data_path: str,
     model_name: str,
     layer: str,
+    n_jobs: int = 1,
 ) -> Tuple[np.ndarray, np.ndarray, List[str], np.ndarray]:
     """
     Load pre-computed HDF5 epochs, align to embeddings, and group by category.
 
     Uses the same fast HDF5 loading path as the sensor RSA (load_fixation_epochs),
-    avoiding the expensive AVSComposer/raw-MEG pipeline.
+    avoiding the expensive AVSComposer/raw-MEG pipeline. Sessions are loaded in
+    parallel.
 
     Parameters
     ----------
@@ -150,6 +152,8 @@ def load_category_erfs(
         Neural network model name.
     layer : str
         Layer name.
+    n_jobs : int
+        Number of parallel jobs for session loading (default: 1).
 
     Returns
     -------
@@ -164,19 +168,14 @@ def load_category_erfs(
     """
     import pandas as pd
 
-    all_epochs_data = []
-    all_embeddings = []
-    all_metadata = []
-    times = None
-
-    for sess in sessions:
+    def _load_session(sess):
         try:
             epochs_data, metadata, sess_times = load_fixation_epochs(
                 subject_id=subject, session=sess, data_path=data_path
             )
         except Exception as e:
             logger.warning(f"sub-{subject:02d} ses-{sess:02d}: epoch load failed: {e}")
-            continue
+            return None
 
         try:
             embeddings, file_names = load_embeddings(
@@ -185,15 +184,31 @@ def load_category_erfs(
             )
         except Exception as e:
             logger.warning(f"sub-{subject:02d} ses-{sess:02d}: embedding load failed: {e}")
-            continue
+            return None
 
         epoch_indices, embedding_indices = match_epochs_to_embeddings(
             metadata, file_names
         )
-        all_epochs_data.append(epochs_data[epoch_indices])
-        all_embeddings.append(embeddings[embedding_indices])
-        all_metadata.append(metadata.iloc[epoch_indices].reset_index(drop=True))
+        return (
+            epochs_data[epoch_indices],
+            embeddings[embedding_indices],
+            metadata.iloc[epoch_indices].reset_index(drop=True),
+            sess_times,
+        )
 
+    results = Parallel(n_jobs=n_jobs, prefer='threads')(
+        delayed(_load_session)(sess) for sess in sessions
+    )
+
+    all_epochs_data, all_embeddings, all_metadata = [], [], []
+    times = None
+    for r in results:
+        if r is None:
+            continue
+        epochs_data, embeddings, metadata, sess_times = r
+        all_epochs_data.append(epochs_data)
+        all_embeddings.append(embeddings)
+        all_metadata.append(metadata)
         if times is None:
             times = sess_times
 
@@ -399,6 +414,7 @@ def process_subject(
                     data_path=data_path,
                     model_name=model_name,
                     layer=layer,
+                    n_jobs=n_jobs,
                 )
             )
         except Exception as e:
