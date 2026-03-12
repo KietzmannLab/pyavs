@@ -126,7 +126,8 @@ def match_epochs_to_embeddings(metadata: pd.DataFrame, file_names: List[str]) ->
 
 
 def group_by_objects(epochs_data: np.ndarray, embeddings: np.ndarray,
-                    metadata: pd.DataFrame, data_path: str, object_column: str = 'object_label', ) -> Tuple[np.ndarray, np.ndarray, List[str]]:
+                    metadata: pd.DataFrame, data_path: str, object_column: str = 'object_label',
+                    min_occurrences: int = 0) -> Tuple[np.ndarray, np.ndarray, List[str]]:
     """Group data by object labels using 171 COCO-Stuff classes (things + stuff), loading object labels if needed."""
 
     # Import COCO-Stuff classes (80 things + 91 stuff = 171 valid classes)
@@ -186,8 +187,8 @@ def group_by_objects(epochs_data: np.ndarray, embeddings: np.ndarray,
         obj_mask = metadata_filtered[object_column] == obj_label
         obj_indices = np.where(obj_mask)[0]
 
-        if len(obj_indices) == 0:
-            print(f"  {obj_label}: No data available (will be NaN)")
+        if len(obj_indices) < max(1, min_occurrences):
+            print(f"  {obj_label}: {len(obj_indices)} epochs (below min_occurrences={min_occurrences}, will be NaN)")
             continue
 
         grouped_epochs[i] = np.median(epochs_data_filtered[obj_indices], axis=0)

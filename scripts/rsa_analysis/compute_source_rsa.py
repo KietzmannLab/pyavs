@@ -4,7 +4,8 @@ Source-Space RSA with Spatial Searchlight.
 
 Projects category-averaged ERFs to source space using dSPM and runs a spatial
 searchlight RSA against a model RDM derived from neural network embeddings.
-Results are morphed to fsaverage and saved as .stc files.
+Category STCs are morphed to fsaverage before RSA so that the noise ceiling
+can be computed in a common vertex space across subjects.
 
 Usage:
     python compute_source_rsa.py \\
@@ -18,17 +19,26 @@ Usage:
 """
 
 import argparse
+import functools
 import os
 import sys
 from pathlib import Path
 from typing import List, Optional, Tuple
 
 import numpy as np
+from joblib import Parallel, delayed
+from scipy.spatial.distance import pdist
 
 try:
     import mne
     import mne_rsa
-    import rsatoolbox as rsa
+except ImportError as e:
+    print(f"Missing dependency: {e}")
+    sys.exit(1)
+
+try:
+    from rsatoolbox.rdm import RDMs
+    from rsatoolbox.inference.noise_ceiling import boot_noise_ceiling
 except ImportError as e:
     print(f"Missing dependency: {e}")
     sys.exit(1)
@@ -202,6 +212,7 @@ def load_category_erfs(
     grouped_epochs, grouped_embeddings, object_labels = group_by_objects(
         combined_epochs, combined_embeddings, combined_metadata,
         data_path=data_path,
+        min_occurrences=20,
     )
 
     return grouped_epochs, grouped_embeddings, object_labels, times
@@ -278,6 +289,25 @@ def project_to_source(
 
 
 # ============================================================================
+# fsaverage source space helper
+# ============================================================================
+
+def _load_fsaverage_src(
+    subjects_dir: str,
+    subject: str = 'fsaverage',
+) -> mne.SourceSpaces:
+    """Load fsaverage ico-5 source space, falling back to MNE built-in."""
+    src_path = Path(subjects_dir) / subject / 'bem' / f'{subject}-ico-5-src.fif'
+    if src_path.exists():
+        return mne.read_source_spaces(str(src_path), verbose=False)
+    # Fallback: fetch from MNE's built-in fsaverage
+    fs_dir = mne.datasets.fetch_fsaverage(verbose=False)
+    return mne.read_source_spaces(
+        str(Path(fs_dir) / 'bem' / 'fsaverage-ico-5-src.fif'), verbose=False
+    )
+
+
+# ============================================================================
 # Per-subject orchestration
 # ============================================================================
 
@@ -297,6 +327,10 @@ def process_subject(
 ) -> None:
     """
     Run source-space RSA for one subject across all model/layer combinations.
+
+    Category STCs are morphed to fsaverage before RSA so that the result lives
+    in a common vertex space suitable for computing the noise ceiling across
+    subjects.
 
     Parameters
     ----------
@@ -336,8 +370,12 @@ def process_subject(
         logger.error(str(e))
         return
 
-    # Compute geodesic distances between source vertices (once per subject)
-    dist = mne_rsa.compute_src_dist(fwd['src'], dist_lim=0.05)
+    # Load fsaverage source space once per subject
+    src_fsaverage = _load_fsaverage_src(subjects_dir, morph_to)
+
+    subject_from = SUBJECT_FS_MAPPING.get(subject, f'as{subject:02d}')
+    subject_out_dir = Path(output_dir) / f"sub-{subject:02d}"
+    subject_out_dir.mkdir(parents=True, exist_ok=True)
 
     for model_name, layer in model_specs:
         logger.info(f"  Model: {model_name}  Layer: {layer}")
@@ -379,12 +417,8 @@ def process_subject(
         # --- 4. Compute model RDM on valid-category subset ---
         valid_embeddings = grouped_embeddings[valid_mask]
         rdm_matrix = compute_embedding_rdm(valid_embeddings, 'correlation')
-        model_rdm = rsa.rdm.RDMs(
-            rdm_matrix[np.newaxis],
-            rdm_descriptors={'model': [f"{model_name}_{layer}"]},
-        )
 
-        # --- 5. Project categories to source space ---
+        # --- 5. Project categories to source space (individual space) ---
         try:
             stcs = project_to_source(
                 grouped_epochs=grouped_epochs,
@@ -398,43 +432,172 @@ def process_subject(
             logger.error(f"  project_to_source failed: {e}")
             continue
 
-        # --- 6. Spatial searchlight RSA ---
-        try:
-            rsa_stc = mne_rsa.stc_rsa(
-                stcs=stcs,
-                model_rdm=model_rdm,
-                dist=dist,
-                spatial_radius=0.04,
-                n_jobs=n_jobs,
-            )
-        except Exception as e:
-            logger.error(f"  stc_rsa failed: {e}")
-            continue
-
-        # --- 7. Morph and save ---
-        subject_from = SUBJECT_FS_MAPPING.get(subject, f'as{subject:02d}')
+        # --- 6. Morph all category STCs to fsaverage ---
         try:
             morph = mne.compute_source_morph(
-                rsa_stc,
+                stcs[0],
                 subject_from=subject_from,
                 subject_to=morph_to,
                 subjects_dir=subjects_dir,
                 smooth=5,
                 verbose=False,
             )
-            rsa_stc_morphed = morph.apply(rsa_stc)
+            stcs_morphed = [morph.apply(s) for s in stcs]
         except Exception as e:
             logger.error(f"  Morphing failed for sub-{subject:02d}: {e}")
             continue
 
-        subject_out_dir = Path(output_dir) / f"sub-{subject:02d}"
-        subject_out_dir.mkdir(parents=True, exist_ok=True)
+        # --- 7. Save intermediate morphed category STCs ---
+        morphed_data = np.stack([s.data[:, 0] for s in stcs_morphed], axis=0)
+        npz_fname = (
+            f"sub-{subject:02d}_model-{model_name}_layer-{layer}_category_stcs.npz"
+        )
+        np.savez_compressed(
+            subject_out_dir / npz_fname,
+            data=morphed_data,
+            vertices_lh=stcs_morphed[0].vertices[0],
+            vertices_rh=stcs_morphed[0].vertices[1],
+            valid_indices=np.where(valid_mask)[0],
+        )
+        logger.info(f"  Saved intermediate: {npz_fname}")
+
+        # --- 8. Spatial searchlight RSA in fsaverage space ---
+        try:
+            rsa_stc = mne_rsa.rsa_stcs(
+                stcs=stcs_morphed,
+                rdm_model=rdm_matrix,
+                src=src_fsaverage,
+                spatial_radius=0.04,
+                stc_rdm_metric='correlation',   # first-level: brain RDM
+                rsa_metric='pearson',           # second-level: model vs brain
+                n_jobs=n_jobs,
+            )
+        except Exception as e:
+            logger.error(f"  stc_rsa failed: {e}")
+            continue
+
+        # --- 9. Save RSA result (already in fsaverage space) ---
         fname_stem = (
             f"sub-{subject:02d}_model-{model_name}_layer-{layer}_source_rsa"
         )
         out_path = str(subject_out_dir / fname_stem)
-        rsa_stc_morphed.save(out_path, overwrite=True)
+        rsa_stc.save(out_path, overwrite=True)
         logger.info(f"  Saved: {fname_stem}-lh.stc / -rh.stc")
+
+
+# ============================================================================
+# Noise ceiling
+# ============================================================================
+
+def compute_noise_ceiling_stc(
+    subjects: List[int],
+    model_name: str,
+    layer: str,
+    output_dir: str,
+    subjects_dir: str,
+    morph_to: str = 'fsaverage',
+    spatial_radius: float = 0.04,
+    n_jobs: int = 1,
+) -> None:
+    """
+    Compute a source-space noise ceiling lower bound across subjects.
+
+    Loads per-subject morphed category STCs (saved by process_subject), finds
+    shared valid categories, and runs a searchlight noise ceiling using
+    boot_noise_ceiling (Pearson) at every vertex.
+
+    Parameters
+    ----------
+    subjects : list of int
+        Subject IDs.
+    model_name : str
+        Model name (used for filename lookup).
+    layer : str
+        Layer name (used for filename lookup).
+    output_dir : str
+        Root output directory (same as used in process_subject).
+    subjects_dir : str
+        FreeSurfer subjects directory.
+    morph_to : str
+        Common surface subject (default: 'fsaverage').
+    spatial_radius : float
+        Searchlight radius in metres (default: 0.04).
+    n_jobs : int
+        Parallel jobs for the searchlight loop.
+    """
+    logger.info(f"\nNoise ceiling: model={model_name}, layer={layer}")
+
+    # --- Load per-subject morphed category STCs ---
+    all_data, all_valid = [], []
+    vertices_lh = vertices_rh = None
+
+    for subject in subjects:
+        npz_path = (
+            Path(output_dir)
+            / f"sub-{subject:02d}"
+            / f"sub-{subject:02d}_model-{model_name}_layer-{layer}_category_stcs.npz"
+        )
+        if not npz_path.exists():
+            logger.warning(f"  Missing category STCs: {npz_path} — skipping subject")
+            continue
+
+        npz = np.load(npz_path)
+        all_data.append(npz['data'])           # (n_valid_s, n_vertices)
+        all_valid.append(npz['valid_indices'])
+        if vertices_lh is None:
+            vertices_lh = npz['vertices_lh']
+            vertices_rh = npz['vertices_rh']
+
+    if len(all_data) < 2:
+        logger.warning("  Need at least 2 subjects for noise ceiling — skipping")
+        return
+
+    # --- Find shared valid categories across subjects ---
+    shared = functools.reduce(np.intersect1d, all_valid)
+    logger.info(f"  Shared valid categories: {len(shared)}")
+
+    if len(shared) < 2:
+        logger.warning("  Too few shared categories for noise ceiling — skipping")
+        return
+
+    subj_data = [
+        d[np.isin(v, shared)] for d, v in zip(all_data, all_valid)
+    ]  # list of (n_shared, n_vertices)
+
+    # --- Load fsaverage src and compute geodesic distances ---
+    src = _load_fsaverage_src(subjects_dir, morph_to)
+    dist = mne_rsa.compute_src_dist(src, dist_lim=spatial_radius + 0.01)
+
+    n_vertices = sum(len(v) for v in [vertices_lh, vertices_rh])
+
+    # --- Searchlight noise ceiling ---
+    def _nc_at_vertex(v):
+        patch = np.where(dist[v].toarray().ravel() <= spatial_radius)[0]
+        if len(patch) == 0:
+            return 0.0
+        brain_rdms = np.stack(
+            [pdist(d[:, patch], metric='correlation') for d in subj_data],
+            axis=0,
+        )  # (n_subjects, n_pairs)
+        nc_l, _ = boot_noise_ceiling(RDMs(brain_rdms), method='pearson')
+        return float(nc_l)
+
+    logger.info(f"  Running searchlight noise ceiling over {n_vertices} vertices ...")
+    nc_values = Parallel(n_jobs=n_jobs)(
+        delayed(_nc_at_vertex)(v) for v in range(n_vertices)
+    )
+
+    # --- Assemble and save noise ceiling STC ---
+    nc_stc = mne.SourceEstimate(
+        data=np.array(nc_values)[:, np.newaxis],
+        vertices=[vertices_lh, vertices_rh],
+        tmin=0., tstep=1., subject=morph_to,
+    )
+    nc_fname = str(
+        Path(output_dir) / f"group_model-{model_name}_layer-{layer}_noise_ceiling_lower"
+    )
+    nc_stc.save(nc_fname, overwrite=True)
+    logger.info(f"  Saved: {Path(nc_fname).name}-lh.stc / -rh.stc")
 
 
 # ============================================================================
@@ -546,6 +709,19 @@ def main():
             morph_to=args.morph_to,
             n_jobs=args.n_jobs,
             all_subjects=args.subjects,
+        )
+
+    # Compute noise ceiling after all subjects have been processed
+    for model_name, layer in model_specs:
+        compute_noise_ceiling_stc(
+            subjects=args.subjects,
+            model_name=model_name,
+            layer=layer,
+            output_dir=args.output_dir,
+            subjects_dir=args.subjects_dir,
+            morph_to=args.morph_to,
+            spatial_radius=0.04,
+            n_jobs=args.n_jobs,
         )
 
     logger.info("Done.")
