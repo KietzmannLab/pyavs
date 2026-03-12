@@ -24,7 +24,6 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 import numpy as np
-from joblib import Parallel, delayed
 
 try:
     import mne
@@ -36,19 +35,14 @@ except ImportError as e:
 
 # Project imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
-from pyavs.io.read import load_metadata_csv
 from pyavs.source.forward import load_forward_model
 from pyavs.utils.logging import get_logger
 
 # Imports from sibling scripts
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from meg_viz.compute_source_erp import (
-    load_session_epochs,
-    _load_session_wrapper,
-    morph_and_save_subject_stc,
-    SUBJECT_FS_MAPPING,
-)
+from meg_viz.compute_source_erp import morph_and_save_subject_stc, SUBJECT_FS_MAPPING
 from rsa_analysis.compute_rsa import (
+    load_fixation_epochs,
     load_embeddings,
     match_epochs_to_embeddings,
     group_by_objects,
@@ -127,12 +121,12 @@ def load_category_erfs(
     data_path: str,
     model_name: str,
     layer: str,
-    n_jobs: int = -1,
-    tmin: float = -0.2,
-    tmax: float = 0.5,
-) -> Tuple[np.ndarray, np.ndarray, List[str], mne.Info, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray, List[str], np.ndarray]:
     """
-    Load MNE epochs, align to embeddings, and group by COCO-Stuff category.
+    Load pre-computed HDF5 epochs, align to embeddings, and group by category.
+
+    Uses the same fast HDF5 loading path as the sensor RSA (load_fixation_epochs),
+    avoiding the expensive AVSComposer/raw-MEG pipeline.
 
     Parameters
     ----------
@@ -146,10 +140,6 @@ def load_category_erfs(
         Neural network model name.
     layer : str
         Layer name.
-    n_jobs : int
-        Parallel jobs for session loading.
-    tmin, tmax : float
-        Epoch time window [s].
 
     Returns
     -------
@@ -159,72 +149,49 @@ def load_category_erfs(
         Median embedding per category (NaN for missing).
     object_labels : list of str
         Category label for each of the 171 rows.
-    mne_info : mne.Info
-        MNE Info from one of the loaded sessions.
     times : np.ndarray
         Time vector in seconds.
     """
-    pairs = [(subject, sess) for sess in sessions]
-    session_results = Parallel(n_jobs=n_jobs, verbose=0)(
-        delayed(_load_session_wrapper)(
-            subject=s, session=sess, event_type='fixation',
-            data_path=data_path, tmin=tmin, tmax=tmax,
-            use_offset=False, verbose=False,
-        )
-        for s, sess in pairs
-    )
+    import pandas as pd
 
     all_epochs_data = []
     all_embeddings = []
     all_metadata = []
-    mne_info = None
     times = None
 
-    for _, sess, epochs_mne in session_results:
-        if epochs_mne is None or len(epochs_mne) == 0:
-            logger.warning(f"No epochs for sub-{subject:02d} ses-{sess:02d}")
+    for sess in sessions:
+        try:
+            epochs_data, metadata, sess_times = load_fixation_epochs(
+                subject_id=subject, session=sess, data_path=data_path
+            )
+        except Exception as e:
+            logger.warning(f"sub-{subject:02d} ses-{sess:02d}: epoch load failed: {e}")
             continue
 
-        # Get numpy data from MNE epochs (all channels, all times)
-        epochs_data = epochs_mne.get_data()  # (n_epochs, n_channels, n_times)
+        try:
+            embeddings, file_names = load_embeddings(
+                subject_id=subject, session=sess, data_path=data_path,
+                model_name=model_name, layer=layer,
+            )
+        except Exception as e:
+            logger.warning(f"sub-{subject:02d} ses-{sess:02d}: embedding load failed: {e}")
+            continue
 
-        # Load metadata and embeddings for this session
-        metadata = load_metadata_csv(
-            subject_id=subject,
-            session=sess,
-            event_type='fixation',
-            data_path=data_path,
-        )
-        embeddings, file_names = load_embeddings(
-            subject_id=subject,
-            session=sess,
-            data_path=data_path,
-            model_name=model_name,
-            layer=layer,
-        )
-
-        # Align epoch and embedding indices
         epoch_indices, embedding_indices = match_epochs_to_embeddings(
             metadata, file_names
         )
-        matched_epochs = epochs_data[epoch_indices]
-        matched_meta = metadata.iloc[epoch_indices].reset_index(drop=True)
-        matched_embeddings = embeddings[embedding_indices]
+        all_epochs_data.append(epochs_data[epoch_indices])
+        all_embeddings.append(embeddings[embedding_indices])
+        all_metadata.append(metadata.iloc[epoch_indices].reset_index(drop=True))
 
-        all_epochs_data.append(matched_epochs)
-        all_embeddings.append(matched_embeddings)
-        all_metadata.append(matched_meta)
-
-        if mne_info is None:
-            mne_info = epochs_mne.info
-            times = epochs_mne.times
+        if times is None:
+            times = sess_times
 
     if not all_epochs_data:
         raise RuntimeError(f"No usable epoch data for sub-{subject:02d}")
 
     combined_epochs = np.concatenate(all_epochs_data, axis=0)
     combined_embeddings = np.concatenate(all_embeddings, axis=0)
-    import pandas as pd
     combined_metadata = pd.concat(all_metadata, axis=0, ignore_index=True)
 
     logger.info(
@@ -237,7 +204,7 @@ def load_category_erfs(
         data_path=data_path,
     )
 
-    return grouped_epochs, grouped_embeddings, object_labels, mne_info, times
+    return grouped_epochs, grouped_embeddings, object_labels, times
 
 
 # ============================================================================
@@ -247,7 +214,6 @@ def load_category_erfs(
 def project_to_source(
     grouped_epochs: np.ndarray,
     valid_mask: np.ndarray,
-    mne_info: mne.Info,
     times: np.ndarray,
     fwd: dict,
     peak_tmin: float,
@@ -258,6 +224,7 @@ def project_to_source(
 
     Builds a single inverse operator (ad-hoc cov + dSPM) and applies it to
     each valid category's ERF averaged over the peak time window.
+    Channel info is taken from fwd['info'] (same source as the forward model).
 
     Parameters
     ----------
@@ -265,8 +232,6 @@ def project_to_source(
         Median ERF per category (rows with all-NaN are skipped via valid_mask).
     valid_mask : np.ndarray of bool, shape (n_categories,)
         Which categories have non-NaN data.
-    mne_info : mne.Info
-        Sensor layout info.
     times : np.ndarray
         Time vector corresponding to epoch axis -1.
     fwd : dict
@@ -279,11 +244,13 @@ def project_to_source(
     list of mne.SourceEstimate
         One single-timepoint STC per valid category.
     """
-    # Build noise covariance and inverse operator once
-    # Use a temporary evoked to get the right info (ad-hoc cov from info only)
-    noise_cov = mne.make_ad_hoc_cov(mne_info)
+    # Channel info comes from the forward solution — same sensor layout used
+    # when the forward was computed, no need to re-run the composer.
+    info = fwd['info']
+
+    noise_cov = mne.make_ad_hoc_cov(info)
     inv = mne.minimum_norm.make_inverse_operator(
-        mne_info, fwd, noise_cov, loose=0.2, depth=0.8, verbose=False
+        info, fwd, noise_cov, loose=0.2, depth=0.8, verbose=False
     )
     lambda2 = 1.0 / 9.0  # SNR = 3
 
@@ -294,15 +261,13 @@ def project_to_source(
     for idx in valid_indices:
         erp = grouped_epochs[idx]  # (n_channels, n_times)
 
-        # Create EvokedArray for this category
-        evoked = mne.EvokedArray(erp, mne_info, tmin=tmin_epoch, nave=1)
+        evoked = mne.EvokedArray(erp, info, tmin=tmin_epoch, nave=1)
 
         # Crop to peak window and average over time → single-timepoint evoked
         evoked_cropped = evoked.copy().crop(tmin=peak_tmin, tmax=peak_tmax)
         peak_data = evoked_cropped.data.mean(axis=-1, keepdims=True)
-        evoked_peak = mne.EvokedArray(peak_data, mne_info, tmin=0.0, nave=1)
+        evoked_peak = mne.EvokedArray(peak_data, info, tmin=0.0, nave=1)
 
-        # Apply dSPM
         stc = mne.minimum_norm.apply_inverse(
             evoked_peak, inv, lambda2=lambda2, method='dSPM', verbose=False
         )
@@ -329,8 +294,6 @@ def process_subject(
     morph_to: str,
     n_jobs: int,
     all_subjects: List[int],
-    tmin: float = -0.2,
-    tmax: float = 0.5,
 ) -> None:
     """
     Run source-space RSA for one subject across all model/layer combinations.
@@ -361,8 +324,6 @@ def process_subject(
         Parallel jobs (used inside stc_rsa).
     all_subjects : list of int
         All subjects (used for group RSA peak finding).
-    tmin, tmax : float
-        Epoch time window [s].
     """
     logger.info(f"\n{'='*60}")
     logger.info(f"Source RSA: subject {subject}")
@@ -393,16 +354,13 @@ def process_subject(
 
         # --- 2. Load category ERFs ---
         try:
-            grouped_epochs, grouped_embeddings, object_labels, mne_info, times = (
+            grouped_epochs, grouped_embeddings, object_labels, times = (
                 load_category_erfs(
                     subject=subject,
                     sessions=sessions,
                     data_path=data_path,
                     model_name=model_name,
                     layer=layer,
-                    n_jobs=n_jobs,
-                    tmin=tmin,
-                    tmax=tmax,
                 )
             )
         except Exception as e:
@@ -431,7 +389,6 @@ def process_subject(
             stcs = project_to_source(
                 grouped_epochs=grouped_epochs,
                 valid_mask=valid_mask,
-                mne_info=mne_info,
                 times=times,
                 fwd=fwd,
                 peak_tmin=peak_tmin,
@@ -552,17 +509,6 @@ def main():
         type=int, default=-1,
         help='Parallel jobs (default: -1)',
     )
-    parser.add_argument(
-        '--tmin',
-        type=float, default=-0.2,
-        help='Epoch start time [s] (default: -0.2)',
-    )
-    parser.add_argument(
-        '--tmax',
-        type=float, default=0.5,
-        help='Epoch end time [s] (default: 0.5)',
-    )
-
     args = parser.parse_args()
 
     if len(args.models) != len(args.layers):
@@ -600,8 +546,6 @@ def main():
             morph_to=args.morph_to,
             n_jobs=args.n_jobs,
             all_subjects=args.subjects,
-            tmin=args.tmin,
-            tmax=args.tmax,
         )
 
     logger.info("Done.")
