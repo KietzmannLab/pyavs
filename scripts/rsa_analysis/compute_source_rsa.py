@@ -338,7 +338,7 @@ def project_to_source(
 
     noise_cov = mne.make_ad_hoc_cov(info)
     inv = mne.minimum_norm.make_inverse_operator(
-        info, fwd, noise_cov, loose=0.2, depth=0.8, verbose=False
+        info, fwd, noise_cov, loose=0.2, depth=0.8, rank='auto', verbose=False
     )
     lambda2 = 1.0 / 9.0  # SNR = 3
 
@@ -546,7 +546,7 @@ def process_subject(
                 stcs=stcs_morphed,
                 rdm_model=rdm_matrix,
                 src=src_fsaverage,
-                spatial_radius=0.04,
+                spatial_radius=0.02,
                 stc_rdm_metric='correlation',   # first-level: brain RDM
                 rsa_metric='pearson',           # second-level: model vs brain
                 n_jobs=n_jobs,
@@ -799,7 +799,7 @@ def main():
             output_dir=args.output_dir,
             subjects_dir=args.subjects_dir,
             morph_to=args.morph_to,
-            spatial_radius=0.04,
+            spatial_radius=0.02,
             n_jobs=args.n_jobs,
         )
 
