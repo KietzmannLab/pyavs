@@ -71,17 +71,12 @@ def get_noise_cov_path(subject_id: int, data_path: str) -> Path:
 # Per-session epoch loading
 # ============================================================================
 
-def _load_session_raw_and_events(
+def _load_session_epochs(
     subject: int,
     session: int,
     data_path: str,
-) -> Optional[tuple]:
-    """Run AVSComposer through ICA and event-finding for one session.
-
-    Returns
-    -------
-    tuple of (raw, events) or None on failure.
-    """
+) -> Optional[mne.Epochs]:
+    """Extract scene-onset epochs for one session via AVSComposer."""
     try:
         composer = AVSComposer(
             subject=subject,
@@ -103,50 +98,18 @@ def _load_session_raw_and_events(
         composer.apply_ica_to_blocks()
         composer.concatenate_raws_per_session()
         composer.find_events_in_raw()
-    except Exception as e:
-        logger.warning(f"sub-{subject:02d} ses-{session:02d}: AVSComposer failed: {e}")
-        return None
-
-    raw = composer.raw
-    events = composer.events
-    if raw is None or events is None:
-        logger.warning(f"sub-{subject:02d} ses-{session:02d}: raw or events is None")
-        return None
-
-    return raw, events
-
-
-def _load_session_epochs(
-    subject: int,
-    session: int,
-    data_path: str,
-) -> Optional[mne.Epochs]:
-    """Extract scene-onset epochs (trigger 100) for one session."""
-    result = _load_session_raw_and_events(subject, session, data_path)
-    if result is None:
-        return None
-
-    raw, events = result
-
-    # Check trigger 100 is present
-    if 100 not in events[:, 2]:
-        logger.warning(
-            f"sub-{subject:02d} ses-{session:02d}: trigger 100 not found, skipping"
+        epochs = composer.make_trigger_locked_epochs(
+            trigger_name='scene_on',
+            tmin=-0.4,
+            tmax=0.1,
+            baseline=None,
+            preload=True,
         )
+    except Exception as e:
+        logger.warning(f"sub-{subject:02d} ses-{session:02d}: failed: {e}")
         return None
 
-    epochs = mne.Epochs(
-        raw,
-        events,
-        event_id=100,
-        tmin=-0.4,
-        tmax=0.1,
-        baseline=None,
-        preload=True,
-        verbose=False,
-    )
-
-    if len(epochs) == 0:
+    if epochs is None or len(epochs) == 0:
         logger.warning(f"sub-{subject:02d} ses-{session:02d}: 0 epochs created")
         return None
 
