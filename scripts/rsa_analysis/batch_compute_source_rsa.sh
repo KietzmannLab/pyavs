@@ -1,12 +1,11 @@
 #!/bin/bash
-#SBATCH --time=24:00:00
+#SBATCH --time=5:00:00
 #SBATCH --nodes=1
 #SBATCH --mem=500G
 #SBATCH --cpus-per-task=50
 #SBATCH --array=1-5
-
 #SBATCH -p klab-cpu
-#SBATCH --job-name=source_rsa
+#SBATCH --job-name=src_rsa
 #SBATCH --error=error_source_rsa_%A_%a.err
 #SBATCH --output=output_source_rsa_%A_%a.out
 #SBATCH --requeue
@@ -24,7 +23,7 @@ script_path="/home/student/p/psulewski/pyAVS/scripts/rsa_analysis"
 data_path="/share/klab/datasets/avs/"
 rsa_results_dir="/share/klab/psulewski/psulewski/pyavs/rsa"
 output_dir="/share/klab/psulewski/psulewski/pyavs/source_rsa"
-
+layer="layer4"
 # One subject per array task
 subject=${SLURM_ARRAY_TASK_ID}
 
@@ -32,7 +31,7 @@ echo "==================================================="
 echo "Source-space RSA — array task ${SLURM_ARRAY_TASK_ID}"
 echo "Subject: ${subject}"
 echo "Model: resnet50_ecoset_crop"
-echo "Layer: layer3"
+echo "Layer: ${layer}"
 echo "Sessions: 1-10"
 echo "Noise ceiling: skipped (run separately)"
 echo "==================================================="
@@ -42,7 +41,7 @@ python ${script_path}/compute_source_rsa.py \
     --subjects ${subject} \
     --sessions 1 2 3 4 5 6 7 8 9 10 \
     --models resnet50_ecoset_crop \
-    --layers layer3 \
+    --layers ${layer} \
     --rsa-results-dir ${rsa_results_dir} \
     --output-dir ${output_dir} \
     --n-jobs 50 \
