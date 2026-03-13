@@ -53,7 +53,7 @@ if str(scripts_path) not in sys.path:
     sys.path.insert(0, str(scripts_path))
 
 try:
-    from scripts.compute_scene_onset_noise_cov import get_noise_cov_path
+    from scripts.source.compute_scene_onset_noise_cov import get_noise_cov_path
 except ImportError:
     print("Warning: Could not import get_noise_cov_path. Will use ad-hoc covariance.")
     get_noise_cov_path = None
