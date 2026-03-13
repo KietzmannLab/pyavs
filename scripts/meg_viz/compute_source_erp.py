@@ -26,6 +26,7 @@ Author: P. Sulewski (psulewski@uos.de)
 
 import argparse
 import os
+import sys
 from typing import List, Optional, Tuple
 
 import mne
@@ -36,6 +37,9 @@ import pyavs
 from pyavs.preprocessing.composer import AVSComposer
 from pyavs.source.forward import load_forward_model
 from pyavs.utils.logging import get_logger
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+from scripts.compute_scene_onset_noise_cov import get_noise_cov_path
 
 logger = get_logger('scripts.meg_viz.compute_source_erp')
 
@@ -169,6 +173,7 @@ def compute_subject_source_erp(
     use_offset: bool,
     verbose: bool,
     n_jobs: int,
+    noise_cov: Optional[mne.Covariance] = None,
 ) -> Optional[mne.SourceEstimate]:
     """
     Compute sensor-level ERP and project to source space for one subject.
@@ -251,8 +256,10 @@ def compute_subject_source_erp(
         logger.error(str(e))
         return None
 
-    # --- 5. Noise covariance: ad-hoc (no empty room needed) ---
-    noise_cov = mne.make_ad_hoc_cov(evoked.info)
+    # --- 5. Noise covariance ---
+    if noise_cov is None:
+        noise_cov = mne.make_ad_hoc_cov(evoked.info)
+        logger.warning(f"Subject {subject}: falling back to ad-hoc noise covariance")
 
     # --- 6. Build inverse operator and apply dSPM ---
     try:
@@ -392,6 +399,18 @@ def run(
 
     n_success = 0
     for subject in subjects:
+        # Load scene-onset noise covariance if available
+        cov_path = get_noise_cov_path(subject, data_path)
+        if cov_path.exists():
+            subject_noise_cov = mne.read_cov(str(cov_path))
+            logger.info(f"Subject {subject}: loaded scene-onset noise cov from {cov_path}")
+        else:
+            logger.warning(
+                f"Subject {subject}: scene-onset cov not found at {cov_path}, "
+                "falling back to ad-hoc"
+            )
+            subject_noise_cov = None
+
         stc = compute_subject_source_erp(
             subject=subject,
             sessions=sessions,
@@ -405,6 +424,7 @@ def run(
             use_offset=use_offset,
             verbose=verbose,
             n_jobs=n_jobs,
+            noise_cov=subject_noise_cov,
         )
 
         if stc is None:

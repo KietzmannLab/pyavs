@@ -48,6 +48,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from pyavs.source.forward import load_forward_model
 from pyavs.preprocessing.composer import AVSComposer
 from pyavs.utils.logging import get_logger
+from scripts.compute_scene_onset_noise_cov import get_noise_cov_path
 
 # Imports from sibling scripts
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -308,12 +309,13 @@ def project_to_source(
     info: mne.Info,
     peak_tmin: float,
     peak_tmax: float,
+    noise_cov: Optional[mne.Covariance] = None,
 ) -> List[mne.SourceEstimate]:
     """
     Project category-averaged ERFs to source space at the RSA peak window.
 
-    Builds a single inverse operator (ad-hoc cov + dSPM) and applies it to
-    each valid category's ERF averaged over the peak time window.
+    Builds a single inverse operator (dSPM) and applies it to each valid
+    category's ERF averaged over the peak time window.
 
     Parameters
     ----------
@@ -329,6 +331,8 @@ def project_to_source(
         Full MEG measurement info loaded from a raw FIF file.
     peak_tmin, peak_tmax : float
         Time window [s] to average over.
+    noise_cov : mne.Covariance or None
+        Pre-computed noise covariance. If None, falls back to ad-hoc diagonal.
 
     Returns
     -------
@@ -336,7 +340,9 @@ def project_to_source(
         One single-timepoint STC per valid category.
     """
 
-    noise_cov = mne.make_ad_hoc_cov(info)
+    if noise_cov is None:
+        noise_cov = mne.make_ad_hoc_cov(info)
+        logger.warning("project_to_source: falling back to ad-hoc noise covariance")
     inv = mne.minimum_norm.make_inverse_operator(
         info, fwd, noise_cov, loose=0.2, depth=0.8, verbose=False
     )
@@ -447,6 +453,17 @@ def process_subject(
         logger.error(str(e))
         return
 
+    # Load scene-onset noise covariance (shared across models)
+    cov_path = get_noise_cov_path(subject, data_path)
+    if cov_path.exists():
+        noise_cov = mne.read_cov(str(cov_path))
+        logger.info(f"Loaded scene-onset noise cov from {cov_path}")
+    else:
+        logger.warning(
+            f"Scene-onset cov not found at {cov_path}, falling back to ad-hoc"
+        )
+        noise_cov = None
+
     # Load fsaverage source space once per subject
     src_fsaverage = _load_fsaverage_src(subjects_dir, morph_to)
 
@@ -506,6 +523,7 @@ def process_subject(
                 info=meg_info,
                 peak_tmin=peak_tmin,
                 peak_tmax=peak_tmax,
+                noise_cov=noise_cov,
             )
         except Exception as e:
             logger.error(f"  project_to_source failed: {e}")

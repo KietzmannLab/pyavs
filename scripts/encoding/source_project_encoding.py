@@ -48,6 +48,16 @@ except ImportError:
     print("Warning: Could not import pyavs modules. Some functions may not work.")
     load_forward_model = None
 
+scripts_path = Path(__file__).parent.parent
+if str(scripts_path) not in sys.path:
+    sys.path.insert(0, str(scripts_path))
+
+try:
+    from scripts.compute_scene_onset_noise_cov import get_noise_cov_path
+except ImportError:
+    print("Warning: Could not import get_noise_cov_path. Will use ad-hoc covariance.")
+    get_noise_cov_path = None
+
 
 # ============================================================================
 # Configuration and Constants
@@ -890,9 +900,20 @@ def process_subject(
         )
         forward = mne.read_forward_solution(fwd_path, verbose=verbose)
 
-    # 4. Create noise covariance (diagonal)
-    print(f"\nCreating noise covariance matrix...")
-    noise_cov = mne.make_ad_hoc_cov(info_grad)
+    # 4. Load scene-onset noise covariance; fall back to ad-hoc if not found
+    print(f"\nLoading noise covariance matrix...")
+    if get_noise_cov_path is not None:
+        cov_path = get_noise_cov_path(subject_id, data_path)
+        if cov_path.exists():
+            # MNE auto-picks grad channels to match info_grad in make_inverse_operator
+            noise_cov = mne.read_cov(str(cov_path))
+            print(f"Loaded scene-onset noise cov from {cov_path}")
+        else:
+            noise_cov = mne.make_ad_hoc_cov(info_grad)
+            print(f"Scene-onset cov not found at {cov_path}, falling back to ad-hoc")
+    else:
+        noise_cov = mne.make_ad_hoc_cov(info_grad)
+        print("Falling back to ad-hoc noise covariance (get_noise_cov_path unavailable)")
 
     # 5. Compute inverse operator (once per subject)
     inverse_op = compute_inverse_operator(
