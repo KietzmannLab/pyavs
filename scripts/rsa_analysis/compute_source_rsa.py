@@ -48,7 +48,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from pyavs.source.forward import load_forward_model
 from pyavs.preprocessing.composer import AVSComposer
 from pyavs.utils.logging import get_logger
-from scripts.compute_scene_onset_noise_cov import get_noise_cov_path
+from scripts.source.compute_scene_onset_noise_cov import get_noise_cov_path
 
 # Imports from sibling scripts
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))

@@ -237,7 +237,7 @@ def main():
         help='Overwrite existing output files',
     )
     parser.add_argument(
-        '--n-jobs', type=int, default=1,
+        '--n-jobs', type=int, default=-1,
         help='Parallel workers for session loading within each subject',
     )
 
