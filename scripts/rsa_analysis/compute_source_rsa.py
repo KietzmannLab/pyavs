@@ -663,13 +663,21 @@ def compute_noise_ceiling_stc(
 
     # --- Load fsaverage src and compute geodesic distances ---
     src = _load_fsaverage_src(subjects_dir, morph_to)
-    dist = mne_rsa.compute_src_dist(src, dist_lim=spatial_radius + 0.01)
+    mne.add_source_space_distances(src, dist_limit=spatial_radius + 0.01)
+    dist_lh = src[0]['dist'].tocsr()
+    dist_rh = src[1]['dist'].tocsr()
 
+    n_lh = len(vertices_lh)
     n_vertices = sum(len(v) for v in [vertices_lh, vertices_rh])
 
     # --- Searchlight noise ceiling ---
     def _nc_at_vertex(v):
-        patch = np.where(dist[v].toarray().ravel() <= spatial_radius)[0]
+        if v < n_lh:
+            row = dist_lh[v].toarray().ravel()
+            patch = np.where(row <= spatial_radius)[0]
+        else:
+            row = dist_rh[v - n_lh].toarray().ravel()
+            patch = np.where(row <= spatial_radius)[0] + n_lh
         if len(patch) == 0:
             return 0.0
         brain_rdms = np.stack(
