@@ -673,11 +673,13 @@ def compute_noise_ceiling_stc(
     # --- Searchlight noise ceiling ---
     def _nc_at_vertex(v):
         if v < n_lh:
-            row = dist_lh[[v]].toarray().ravel()
-            patch = np.where(row <= spatial_radius)[0]
+            row_sp = dist_lh[[v]]
+            nearby = row_sp.indices[row_sp.data <= spatial_radius]
+            patch = np.union1d([v], nearby)
         else:
-            row = dist_rh[[v - n_lh]].toarray().ravel()
-            patch = np.where(row <= spatial_radius)[0] + n_lh
+            row_sp = dist_rh[[v - n_lh]]
+            nearby = row_sp.indices[row_sp.data <= spatial_radius]
+            patch = np.union1d([v], nearby + n_lh)
         if len(patch) == 0:
             return 0.0
         brain_rdms = np.stack(
