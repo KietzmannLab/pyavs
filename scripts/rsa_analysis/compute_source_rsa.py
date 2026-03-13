@@ -673,10 +673,10 @@ def compute_noise_ceiling_stc(
     # --- Searchlight noise ceiling ---
     def _nc_at_vertex(v):
         if v < n_lh:
-            row = dist_lh[v].toarray().ravel()
+            row = dist_lh[[v]].toarray().ravel()
             patch = np.where(row <= spatial_radius)[0]
         else:
-            row = dist_rh[v - n_lh].toarray().ravel()
+            row = dist_rh[[v - n_lh]].toarray().ravel()
             patch = np.where(row <= spatial_radius)[0] + n_lh
         if len(patch) == 0:
             return 0.0
