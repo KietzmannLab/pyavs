@@ -338,7 +338,7 @@ def project_to_source(
 
     noise_cov = mne.make_ad_hoc_cov(info)
     inv = mne.minimum_norm.make_inverse_operator(
-        info, fwd, noise_cov, loose=0.2, depth=0.8, rank='auto', verbose=False
+        info, fwd, noise_cov, loose=0.2, depth=0.8, verbose=False
     )
     lambda2 = 1.0 / 9.0  # SNR = 3
 
