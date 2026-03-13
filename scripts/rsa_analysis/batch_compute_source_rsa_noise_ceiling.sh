@@ -1,15 +1,17 @@
 #!/bin/bash
 #SBATCH --time=24:00:00
 #SBATCH --nodes=1
-#SBATCH --mem=500G
-#SBATCH --cpus-per-task=50
-#SBATCH --array=1-5
+#SBATCH --mem=800G
+#SBATCH --cpus-per-task=200
 
 #SBATCH -p klab-cpu
-#SBATCH --job-name=source_rsa
-#SBATCH --error=error_source_rsa_%A_%a.err
-#SBATCH --output=output_source_rsa_%A_%a.out
+#SBATCH --job-name=source_rsa_nc
+#SBATCH --error=error_source_rsa_nc_%j.err
+#SBATCH --output=output_source_rsa_nc_%j.out
 #SBATCH --requeue
+
+# Run after all per-subject array jobs have completed, e.g.:
+#   sbatch --dependency=afterok:<array_job_id> batch_compute_source_rsa_noise_ceiling.sh
 
 echo "Running in shell: $SHELL"
 export NCCL_SOCKET_IFNAME=lo
@@ -21,33 +23,22 @@ conda activate avs
 
 # Base paths
 script_path="/home/student/p/psulewski/pyAVS/scripts/rsa_analysis"
-data_path="/share/klab/datasets/avs/"
-rsa_results_dir="/share/klab/psulewski/psulewski/pyavs/rsa"
 output_dir="/share/klab/psulewski/psulewski/pyavs/source_rsa"
 
-# One subject per array task
-subject=${SLURM_ARRAY_TASK_ID}
-
 echo "==================================================="
-echo "Source-space RSA — array task ${SLURM_ARRAY_TASK_ID}"
-echo "Subject: ${subject}"
+echo "Source-space RSA — group noise ceiling"
+echo "Subjects: 1 2 3 4 5"
 echo "Model: resnet50_ecoset_crop"
 echo "Layer: layer3"
-echo "Sessions: 1-10"
-echo "Noise ceiling: skipped (run separately)"
 echo "==================================================="
 
-python ${script_path}/compute_source_rsa.py \
-    --data-path ${data_path} \
-    --subjects ${subject} \
-    --sessions 1 2 3 4 5 6 7 8 9 10 \
+python ${script_path}/compute_source_rsa_noise_ceiling.py \
+    --subjects 1 2 3 4 5 \
     --models resnet50_ecoset_crop \
     --layers layer3 \
-    --rsa-results-dir ${rsa_results_dir} \
     --output-dir ${output_dir} \
-    --n-jobs 50 \
-    --skip-noise-ceiling
+    --n-jobs 200
 
 echo "==================================================="
-echo "Subject ${subject} complete"
+echo "Noise ceiling complete"
 echo "==================================================="

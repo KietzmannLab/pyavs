@@ -751,6 +751,12 @@ def main():
         type=int, default=-1,
         help='Parallel jobs (default: -1)',
     )
+    parser.add_argument(
+        '--skip-noise-ceiling',
+        action='store_true',
+        default=False,
+        help='Skip group noise ceiling computation (e.g. when running per-subject jobs)',
+    )
     args = parser.parse_args()
 
     if len(args.models) != len(args.layers):
@@ -791,17 +797,18 @@ def main():
         )
 
     # Compute noise ceiling after all subjects have been processed
-    for model_name, layer in model_specs:
-        compute_noise_ceiling_stc(
-            subjects=args.subjects,
-            model_name=model_name,
-            layer=layer,
-            output_dir=args.output_dir,
-            subjects_dir=args.subjects_dir,
-            morph_to=args.morph_to,
-            spatial_radius=0.02,
-            n_jobs=args.n_jobs,
-        )
+    if not args.skip_noise_ceiling:
+        for model_name, layer in model_specs:
+            compute_noise_ceiling_stc(
+                subjects=args.subjects,
+                model_name=model_name,
+                layer=layer,
+                output_dir=args.output_dir,
+                subjects_dir=args.subjects_dir,
+                morph_to=args.morph_to,
+                spatial_radius=0.02,
+                n_jobs=args.n_jobs,
+            )
 
     logger.info("Done.")
 
