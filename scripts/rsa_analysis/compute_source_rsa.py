@@ -686,7 +686,7 @@ def compute_noise_ceiling_stc(
             [pdist(d[:, patch], metric='correlation') for d in subj_data],
             axis=0,
         )  # (n_subjects, n_pairs)
-        nc_l, _ = boot_noise_ceiling(RDMs(brain_rdms), method='pearson')
+        nc_l, _ = boot_noise_ceiling(RDMs(brain_rdms), method='spearman')
         return float(nc_l)
 
     logger.info(f"  Running searchlight noise ceiling over {n_vertices} vertices ...")
