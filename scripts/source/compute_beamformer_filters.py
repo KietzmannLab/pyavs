@@ -137,7 +137,7 @@ def compute_subject_lcmv_filter(
     # --- Forward model ---
     logger.info(f"  Loading forward model (ses-{fwd_session:02d}) ...")
     try:
-        fwd = load_forward_model(subject_id, fwd_session, data_path,
+        fwd = load_forward_model(subject_id, fwd_session, fwd_dir="/share/klab/datasets/avs/AVS-UTILS",
                                  verbose=verbose)
         logger.info(
             f"  Forward: {fwd['nsource']} sources, {fwd['nchan']} channels"

@@ -68,8 +68,8 @@ from pyavs.utils.logging import get_logger
 logger = get_logger('scripts.scene_clustering')
 
 # License filter constants
-DEFAULT_LICENSE_IDS = [1,5]
-DERIVATIVE_SAFE_LICENSE_IDS = [1,5]  
+DEFAULT_LICENSE_IDS = [5]
+DERIVATIVE_SAFE_LICENSE_IDS = [5]  
 
 
 def get_paper_safe_coco_ids(
@@ -689,7 +689,7 @@ def main():
     parser.add_argument(
         '--permissive-csv',
         type=str,
-        default=os.path.join(DEFAULT_AVS_UTILS_DIR, 'avs_scene_annotations', 'ms_coco_permissive_images.csv'),
+        default=os.path.join(DEFAULT_AVS_UTILS_DIR, 'avs_scene_annotations', 'avs_permissive_images_with_flickr.csv'),
         help='Path to CSV with COCO image license info'
     )
 
