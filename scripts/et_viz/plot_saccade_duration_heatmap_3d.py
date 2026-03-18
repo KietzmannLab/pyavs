@@ -28,6 +28,7 @@ import sys
 from pathlib import Path
 from typing import List, Tuple
 import numpy as np
+from scipy.ndimage import gaussian_filter1d
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
@@ -54,9 +55,11 @@ from pyavs.utils.logging import get_logger
 logger = get_logger('scripts.et_viz.saccade_duration_heatmap_3d')
 
 # View parameters
-ELEV = 25
-AZIM = -70
+ELEV = 28
+AZIM = -65
 SCALE = 1e13  # convert T/m → fT/cm
+SMOOTH_SIGMA = 6      # Gaussian smoothing in samples
+RIDGE_STEP_FRAC = 0.018  # per-ridge baseline step as fraction of GFP max
 
 
 def plot_joy_division_3d(
@@ -100,6 +103,11 @@ def plot_joy_division_3d(
     n_quantiles, n_times = gfp.shape
 
     # ------------------------------------------------------------------ #
+    # Smooth GFP to remove high-frequency noise
+    # ------------------------------------------------------------------ #
+    gfp = gaussian_filter1d(gfp, sigma=SMOOTH_SIGMA, axis=1)
+
+    # ------------------------------------------------------------------ #
     # Build Poly3DCollection — one filled polygon per quantile
     # ------------------------------------------------------------------ #
     # Quantile 0 = shortest fixation → drawn first (back)
@@ -108,16 +116,19 @@ def plot_joy_division_3d(
     cmap = matplotlib.colormaps['magma']
     norm = mcolors.Normalize(vmin=0, vmax=n_quantiles - 1)
 
+    ridge_step = gfp.max() * RIDGE_STEP_FRAC
+
     verts = []      # polygon vertices for each ridge
     colors = []     # face color (black) per ridge
     edge_colors = []  # edge color from magma
 
     for i in range(n_quantiles):
-        # Closed polygon: baseline → signal → baseline
+        # Closed polygon: baseline at z=0 for occlusion, signal elevated
         # Shape of each vertex: (x=time_ms, y=quantile_index, z=gfp)
+        z_base = i * ridge_step
         xs = np.concatenate([[t[0]], t, [t[-1]]])
         ys = np.full_like(xs, i, dtype=float)
-        zs = np.concatenate([[0.0], gfp[i], [0.0]])
+        zs = np.concatenate([[0.0], z_base + gfp[i], [0.0]])
 
         polygon = list(zip(xs, ys, zs))
         verts.append(polygon)
@@ -149,27 +160,12 @@ def plot_joy_division_3d(
     # ------------------------------------------------------------------ #
     ax.set_xlim(t[0], t[-1])
     ax.set_ylim(0, n_quantiles - 1)
-    ax.set_zlim(0, gfp.max() * 1.05)
+    ax.set_zlim(0, (n_quantiles - 1) * ridge_step + gfp.max() * 1.1)
 
     ax.view_init(elev=ELEV, azim=AZIM)
 
     # Remove all axis decorations for clean cover art look
     ax.set_axis_off()
-
-    # ------------------------------------------------------------------ #
-    # Optional: faint vertical plane at t=0 (saccade onset)
-    # ------------------------------------------------------------------ #
-    z_max = gfp.max() * 1.05
-    onset_verts = [
-        [(0, 0, 0), (0, n_quantiles - 1, 0),
-         (0, n_quantiles - 1, z_max), (0, 0, z_max)]
-    ]
-    onset_plane = Poly3DCollection(
-        onset_verts,
-        facecolors=[(1, 1, 1, 0.06)],
-        edgecolors=[(1, 1, 1, 0.25)],
-    )
-    ax.add_collection3d(onset_plane)
 
     plt.tight_layout(pad=0)
 

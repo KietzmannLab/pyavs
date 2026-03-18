@@ -26,6 +26,7 @@ Author: pyAVS development team
 import argparse
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Tuple, Optional, List
 import numpy as np
@@ -187,42 +188,50 @@ def load_and_concatenate_sessions(
         - metadata: concatenated DataFrame with session info
         - times: array of time points in seconds (same for all sessions)
     """
+    def _load_session(session: int):
+        return session, load_saccade_grad_data(
+            subject_id=subject_id,
+            session=session,
+            data_path=data_path,
+        )
+
+    results = {}
+    with ThreadPoolExecutor(max_workers=len(sessions)) as executor:
+        future_to_session = {
+            executor.submit(_load_session, s): s for s in sessions
+        }
+        for future in as_completed(future_to_session):
+            session = future_to_session[future]
+            try:
+                ses, (grad_data, metadata, session_times) = future.result()
+                results[ses] = (grad_data, metadata, session_times)
+                logger.info(f"Session {ses}: {grad_data.shape[0]} epochs")
+            except Exception as e:
+                logger.warning(f"Failed to load session {session}: {e}")
+
+    if len(results) == 0:
+        raise ValueError(f"No data loaded for subject {subject_id}")
+
+    # Reassemble in original session order
     all_grad_data = []
     all_metadata = []
     times = None
-
     for session in sessions:
-        try:
-            grad_data, metadata, session_times = load_saccade_grad_data(
-                subject_id=subject_id,
-                session=session,
-                data_path=data_path
-            )
-
-            all_grad_data.append(grad_data)
-            all_metadata.append(metadata)
-
-            if times is None:
-                times = session_times
-            else:
-                # Verify times are consistent across sessions
-                if not np.allclose(times, session_times):
-                    logger.warning(f"Session {session} has different time points, using first session's times")
-
-            logger.info(f"Session {session}: {grad_data.shape[0]} epochs")
-
-        except Exception as e:
-            logger.warning(f"Failed to load session {session}: {e}")
+        if session not in results:
             continue
-
-    if len(all_grad_data) == 0:
-        raise ValueError(f"No data loaded for subject {subject_id}")
+        grad_data, metadata, session_times = results[session]
+        all_grad_data.append(grad_data)
+        all_metadata.append(metadata)
+        if times is None:
+            times = session_times
+        elif not np.allclose(times, session_times):
+            logger.warning(f"Session {session} has different time points, using first session's times")
 
     # Concatenate
     concatenated_grad = np.concatenate(all_grad_data, axis=0)
     concatenated_metadata = pd.concat(all_metadata, ignore_index=True)
 
-    logger.info(f"Concatenated {len(sessions)} sessions: {concatenated_grad.shape[0]} total epochs")
+    logger.info(f"Concatenated {len(results)} sessions: {concatenated_grad.shape[0]} total epochs")
 
     return concatenated_grad, concatenated_metadata, times
 
