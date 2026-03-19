@@ -274,6 +274,24 @@ def aggregate_epochs(
     return evokeds_per_subject
 
 
+def save_evokeds(
+    evokeds_per_subject: Dict[int, mne.Evoked],
+    event_type: str,
+    timing: str,
+    output_dir: str,
+) -> None:
+    """Save per-subject median evoked responses to .fif files."""
+    evoked_dir = os.path.join(output_dir, 'evokeds')
+    os.makedirs(evoked_dir, exist_ok=True)
+    for subject, evoked in evokeds_per_subject.items():
+        fname = os.path.join(
+            evoked_dir,
+            f"sub-{subject:02d}_{event_type}_{timing}_median-ave.fif"
+        )
+        evoked.save(fname, overwrite=True)
+        logger.info(f"Saved evoked: {fname}")
+
+
 def compute_grand_average(
     evokeds_per_subject: Dict[int, mne.Evoked],
     ch_type: str = 'mag'
@@ -563,6 +581,14 @@ def generate_erp_figures(
                 if not evokeds_per_subject:
                     logger.warning(f"No data for {event_type} {timing_label}")
                     continue
+
+                # Save per-subject median evokeds
+                save_evokeds(
+                    evokeds_per_subject=evokeds_per_subject,
+                    event_type=event_type,
+                    timing=timing_label,
+                    output_dir=output_dir,
+                )
 
                 # Generate all-channels plot using MNE's plotting
                 plot_erp_all_channels(
