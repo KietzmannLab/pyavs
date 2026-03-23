@@ -138,7 +138,7 @@ def plot_encoding_joint(evoked: mne.EvokedArray, output_dir: Path, metadata: dic
         # pcick only grad channels
         evoked = evoked.copy().pick_types(meg='grad')
              #mask channels in the small topomap that never cross 0.075
-        mask_channels = np.abs(evoked.data).max(axis=1) > np.percentile(np.abs(evoked.data).max(axis=1), 50)
+        mask_channels = True
         picks = mne.pick_channels(evoked.info['ch_names'], include=np.array(evoked.info['ch_names'])[mask_channels].tolist())
 
         fig = evoked_smoothed.plot(scalings=1, show=False, xlim=(-100, 350), time_unit='ms',
@@ -249,7 +249,7 @@ def plot_grand_average(subjects_data: list, output_dir: Path, info_raw: mne.Info
     sig_mask = p_values < 0.001
     #print()
     # Additional mask: only channels that show significance at least at 10 timepoints
-    channels_ever_sig = np.sum(sig_mask, axis=1) >= 20
+    channels_ever_sig = True#np.sum(sig_mask, axis=1) >= 20
     n_sig_channels = np.sum(channels_ever_sig)
 
     print(f"Significant channels: {n_sig_channels} / {n_channels} ({n_sig_channels/n_channels*100:.1f}%)")

@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --time=8:00:00
 #SBATCH --nodes=1
-#SBATCH --mem=600G
+#SBATCH --mem=400G
 #SBATCH --cpus-per-task=50
 
 #SBATCH -p klab-cpu
