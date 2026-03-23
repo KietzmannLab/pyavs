@@ -12,7 +12,11 @@ correlation distance), and saves two figures per run:
   specified timepoint.  label = meg_t{X}ms
 
 --rdm-type embedding:
-  Network layer RDMs
+  Network layer RDMs (clustered independently)
+
+--rdm-type both:
+  Cluster based on MEG RDM; apply the same leaf order to the embedding RDM
+  heatmap. Produces MEG + embedding heatmaps and one dendrogram (MEG).
 
 Usage:
     python plot_dendrogram.py --rsa-dir /path/to/rsa --output-dir /path/to/plots
@@ -356,10 +360,11 @@ Examples:
                        type=float, default=None,
                        help='Timepoint in ms (default: auto-detect from peak RSA); '
                             'ignored when --rdm-type=embedding')
-    parser.add_argument('--rdm-type', dest='rdm_type', choices=['meg', 'embedding'],
+    parser.add_argument('--rdm-type', dest='rdm_type', choices=['meg', 'embedding', 'both'],
                        default='meg',
                        help='Which RDM to cluster: "meg" (grand-average MEG at peak/specified '
-                            'timepoint) or "embedding" (network layer RDM; no timepoint needed)')
+                            'timepoint), "embedding" (network layer RDM), or "both" (cluster '
+                            'based on MEG and apply same leaf order to embedding RDM)')
     parser.add_argument('--output-dir', type=str,
                        default="/share/klab/psulewski/psulewski/pyavs/rsa",
                        help='Output directory for plots')
@@ -428,10 +433,26 @@ Examples:
     logger.info(f"Loaded {len(rsa_data_list)} subjects")
 
     # ------------------------------------------------------------------
-    # Build the RDM to cluster
+    # Build MEG RDM (always needed: either to plot or to derive clustering)
     # ------------------------------------------------------------------
-    if args.rdm_type == 'embedding':
-        logger.info("Using network layer (embedding) RDM...")
+    if args.rdm_type in ('meg', 'both'):
+        if args.timepoint_ms is not None:
+            times = rsa_data_list[0]['times']
+            time_idx = int(np.argmin(np.abs(times - args.timepoint_ms / 1000.0)))
+            timepoint_ms = float(times[time_idx] * 1000)
+            logger.info(f"Using specified timepoint: {timepoint_ms:.1f} ms")
+        else:
+            timepoint_ms, time_idx = find_peak_timepoint(rsa_data_list)
+
+        logger.info("Computing grand-average MEG RDM...")
+        meg_rdm = compute_grand_average_rdm(rsa_data_list, time_idx)
+        meg_label = f"meg_t{timepoint_ms:.0f}ms"
+
+    # ------------------------------------------------------------------
+    # Build embedding RDM (when needed)
+    # ------------------------------------------------------------------
+    if args.rdm_type in ('embedding', 'both'):
+        logger.info("Loading network layer (embedding) RDMs...")
         emb_rdms = []
         for d in rsa_data_list:
             emb_rdm = d.get('embedding_rdm')
@@ -442,51 +463,53 @@ Examples:
         if not emb_rdms:
             logger.error("No embedding_rdm found in any RSA results file")
             return 1
-        # Grand-average across subjects (NaN-safe): the embedding RDM is
-        # subject-specific because it is the median over that subject's own
-        # fixation crops, so averaging is the correct approach.
-        grand_rdm = np.nanmean(emb_rdms, axis=0)
+        emb_rdm_grand = np.nanmean(emb_rdms, axis=0)
         logger.info(f"Grand-averaged embedding RDM across {len(emb_rdms)} subjects")
-        rdm_label = f"embedding_model-{rsa_data_list[0]['model_name']}_layer-{rsa_data_list[0]['layer']}"
-        timepoint_ms = None  # not applicable
-    else:
-        # Determine timepoint
-        if args.timepoint_ms is not None:
-            times = rsa_data_list[0]['times']
-            time_idx = int(np.argmin(np.abs(times - args.timepoint_ms / 1000.0)))
-            timepoint_ms = float(times[time_idx] * 1000)
-            logger.info(f"Using specified timepoint: {timepoint_ms:.1f} ms")
-        else:
-            timepoint_ms, time_idx = find_peak_timepoint(rsa_data_list)
+        emb_label = f"embedding_model-{rsa_data_list[0]['model_name']}_layer-{rsa_data_list[0]['layer']}"
 
-        # Grand-average MEG RDM
-        logger.info("Computing grand-average MEG RDM...")
-        grand_rdm = compute_grand_average_rdm(rsa_data_list, time_idx)
-        rdm_label = f"meg_t{timepoint_ms:.0f}ms"
-
+    # ------------------------------------------------------------------
     # Object labels
+    # ------------------------------------------------------------------
+    if args.rdm_type in ('meg', 'both'):
+        ref_rdm = meg_rdm
+    else:
+        ref_rdm = emb_rdm_grand
+
     object_labels = rsa_data_list[0].get('object_labels') or []
-    n_objects = grand_rdm.shape[0]
+    if not object_labels or len(object_labels) != ref_rdm.shape[0]:
+        object_labels = [str(i) for i in range(ref_rdm.shape[0])]
 
-    if not object_labels or len(object_labels) != n_objects:
-        object_labels = [str(i) for i in range(n_objects)]
+    # ------------------------------------------------------------------
+    # Hierarchical clustering — always based on MEG RDM
+    # ------------------------------------------------------------------
+    if args.rdm_type == 'embedding':
+        # Cluster the embedding RDM directly
+        logger.info("Computing hierarchical clustering on embedding RDM (correlation distance)...")
+        condensed = pdist(emb_rdm_grand, metric='correlation')
+    else:
+        logger.info("Computing hierarchical clustering on MEG RDM (correlation distance)...")
+        condensed = pdist(meg_rdm, metric='correlation')
 
-    # Rank-transform (used for heatmap only)
-    logger.info("Rank-transforming RDM upper triangle...")
-    rdm_ranked = rank_transform_rdm(grand_rdm)
-
-    # Hierarchical clustering using correlation distance on the RDM rows
-    logger.info("Computing hierarchical clustering (correlation distance)...")
-    condensed = pdist(grand_rdm, metric='correlation')
     Z = linkage(condensed, method=DENDRO_CONFIG['linkage_method'])
 
-    # Plot clustered RDM heatmap
-    logger.info("Plotting clustered RDM heatmap...")
-    plot_clustered_rdm(rdm_ranked, object_labels, Z, rdm_label, output_dir)
+    # ------------------------------------------------------------------
+    # Plot MEG RDM
+    # ------------------------------------------------------------------
+    if args.rdm_type in ('meg', 'both'):
+        logger.info("Plotting clustered MEG RDM heatmap...")
+        plot_clustered_rdm(rank_transform_rdm(meg_rdm), object_labels, Z, meg_label, output_dir)
+        logger.info("Plotting dendrogram tree...")
+        plot_dendrogram_figure(Z, object_labels, meg_label, output_dir)
 
-    # Plot dendrogram
-    logger.info("Plotting dendrogram tree...")
-    plot_dendrogram_figure(Z, object_labels, rdm_label, output_dir)
+    # ------------------------------------------------------------------
+    # Plot embedding RDM (reordered by MEG-derived clustering when --rdm-type=both)
+    # ------------------------------------------------------------------
+    if args.rdm_type in ('embedding', 'both'):
+        logger.info("Plotting clustered embedding RDM heatmap (MEG leaf order)...")
+        plot_clustered_rdm(rank_transform_rdm(emb_rdm_grand), object_labels, Z, emb_label, output_dir)
+        if args.rdm_type == 'embedding':
+            logger.info("Plotting dendrogram tree...")
+            plot_dendrogram_figure(Z, object_labels, emb_label, output_dir)
 
     logger.info("Dendrogram plotting completed successfully")
     return 0

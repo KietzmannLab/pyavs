@@ -300,3 +300,11 @@ docs/api/generated/
 #SLUMR STUFF
 *.out
 *.err
+
+# image files
+*.png
+*.jpg
+*.jpeg
+*.svg
+*.pdf
+*.gif
