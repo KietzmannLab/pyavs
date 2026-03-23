@@ -637,8 +637,8 @@ def main():
         '--subjects', '-s',
         nargs='+',
         type=int,
-        default=[5],
-        help='Subject IDs to process (default: 4)'
+        default=[1, 2, 3, 4, 5],
+        help='Subject IDs to process (default: 1-5)'
     )
 
     parser.add_argument(
@@ -653,7 +653,7 @@ def main():
         '--event-types', '-e',
         nargs='+',
         type=str,
-        default=['scene',], #'fixation', 'saccade', 'scene'],
+        default=[ 'fixation', 'saccade'], #'fixation', 'saccade', 'scene'],
         choices=['blink', 'fixation', 'saccade', 'scene'],
         help='Event types to process (default: scene)'
     )
@@ -661,7 +661,7 @@ def main():
     parser.add_argument(
         '--timing', '-t',
         choices=['onset', 'offset', 'both'],
-        default='onset',
+        default='both',
         help='Timing mode: onset, offset, or both (default: both)'
     )
 
@@ -689,7 +689,7 @@ def main():
     parser.add_argument(
         '--format', '-f',
         choices=['png', 'pdf', 'both'],
-        default='both',
+        default='png',
         help='Output format (default: both)'
     )
 
