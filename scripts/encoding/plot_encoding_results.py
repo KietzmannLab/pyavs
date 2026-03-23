@@ -134,15 +134,11 @@ def plot_encoding_joint(evoked: mne.EvokedArray, output_dir: Path, metadata: dic
         from scipy.ndimage import gaussian_filter1d
 
         evoked_smoothed.data = gaussian_filter1d(evoked.data, sigma=sigma_samples, axis=1)
-        # make pick from mask channels
-        # pcick only grad channels
+        # pick only grad channels
         evoked = evoked.copy().pick_types(meg='grad')
-             #mask channels in the small topomap that never cross 0.075
-        mask_channels = True
-        picks = mne.pick_channels(evoked.info['ch_names'], include=np.array(evoked.info['ch_names'])[mask_channels].tolist())
 
         fig = evoked_smoothed.plot(scalings=1, show=False, xlim=(-100, 350), time_unit='ms',
-                          units=dict(mag='encoding [r]',grad='encoding [r]'), picks=picks,
+                          units=dict(mag='encoding [r]',grad='encoding [r]'),
                           titles=dict(mag='magnetometers', grad='gradiometers'),spatial_colors=True)
                           
 
@@ -204,8 +200,6 @@ def plot_grand_average(subjects_data: list, output_dir: Path, info_raw: mne.Info
     sfreq : float
         Sampling frequency
     """
-    from scipy.stats import ttest_1samp
-
     print("Preparing data for grand average plot...")
 
     # Get times from first subject
@@ -231,28 +225,7 @@ def plot_grand_average(subjects_data: list, output_dir: Path, info_raw: mne.Info
     all_data = np.array([evoked.data for evoked in all_evoked_grad])
     n_subjects, n_channels, n_times = all_data.shape
 
-    print(f"Computing statistical mask across {n_subjects} subjects, {n_channels} channels, {n_times} timepoints")
-
-    # Perform t-test against zero for each channel-timepoint combination
-    t_stats = np.zeros((n_channels, n_times))
-    p_values = np.zeros((n_channels, n_times))
-
-    # Vectorized t-test across subjects for all channels and timepoints (1-sided)
-    t_stats, p_values = ttest_1samp(all_data, 0.0, axis=0, alternative='greater')
-    # p_values shape: (n_channels, n_times)
-
-    # Benjamini-Hochberg (FDR) correction across all channel-timepoints
-    # p_values_flat = p_values.ravel()
-    # reject, pvals_corrected, _, _ = multipletests(p_values_flat, alpha=0.05, method='fdr_bh')
-    # sig_mask = reject.reshape(n_channels, n_times)  # True where significant
-    # just filter by p value
-    sig_mask = p_values < 0.001
-    #print()
-    # Additional mask: only channels that show significance at least at 10 timepoints
-    channels_ever_sig = True#np.sum(sig_mask, axis=1) >= 20
-    n_sig_channels = np.sum(channels_ever_sig)
-
-    print(f"Significant channels: {n_sig_channels} / {n_channels} ({n_sig_channels/n_channels*100:.1f}%)")
+    print(f"Grand average across {n_subjects} subjects, {n_channels} channels, {n_times} timepoints")
 
     # Compute grand average
     grand_avg_data = np.mean(all_data, axis=0)
@@ -260,22 +233,23 @@ def plot_grand_average(subjects_data: list, output_dir: Path, info_raw: mne.Info
     # Create grand average evoked object
     grand_avg_evoked = create_mne_evoked(grand_avg_data, times, sfreq=sfreq, info=all_evoked_grad[0].info)
 
-    # Create picks from statistically significant channels
-    picks_ga = mne.pick_channels(grand_avg_evoked.info['ch_names'], include=np.array(grand_avg_evoked.info['ch_names'])[channels_ever_sig].tolist())
-    print(f"Plotting grand average with {len(picks_ga)} statistically significant channels")
-    
+    # Find peak encoding time (mean across channels)
+    mean_r_over_channels = np.mean(grand_avg_data, axis=0)
+    peak_t_idx = np.argmax(mean_r_over_channels)
+    peak_time_s = grand_avg_evoked.times[peak_t_idx]
+    peak_time_ms = peak_time_s * 1000
+    print(f"Peak encoding time: {peak_time_ms:.1f} ms")
+
     # Create plot matching individual subject style
-    #grand_avg_sig_only = grand_avg_evoked.copy().pick(picks_ga)
     sns.set_context("poster")
     fig = grand_avg_evoked.plot(scalings=1, show=False, xlim=(-100, 350), time_unit='ms',
-                                units=dict(grad='ANN encoding [r]'), picks=picks_ga,
+                                units=dict(grad='ANN encoding [r]'),
                                spatial_colors=True, selectable=False)
     # Reshape to long format for seaborn
-    evoked_picked = grand_avg_evoked.copy().pick(picks_ga)
-    df_ga = evoked_picked.data
-    times_ms = evoked_picked.times * 1000
+    df_ga = grand_avg_evoked.data
+    times_ms = grand_avg_evoked.times * 1000
 
-    df_long = pd.DataFrame(df_ga.T, columns=evoked_picked.ch_names)
+    df_long = pd.DataFrame(df_ga.T, columns=grand_avg_evoked.ch_names)
     df_long['time'] = times_ms
     df_long = df_long.melt(id_vars='time', var_name='channel', value_name='encoding [r]')
     # get ax
@@ -307,22 +281,32 @@ def plot_grand_average(subjects_data: list, output_dir: Path, info_raw: mne.Info
                 color='black', linewidth=5, errorbar=('ci',95), ax=ax, zorder=1000)
 
 
-    # Save figure
+    # Save timecourse figure
     output_file = output_dir / 'grand_average_encoding_joint.pdf'
     fig.figure.savefig(output_file, dpi=300, bbox_inches='tight')
     print(f"Saved grand average joint plot to {output_file}")
     plt.close()
 
-    # Print summary statistics
-    print("\nGrand Average Statistics:")
-    #sig_data = grand_avg_data[channels_ever_sig, :]
-    #peak_ch, peak_t = np.unravel_index(np.argmax(sig_data), sig_data.shape)
-   # peak_r = sig_data[peak_ch, peak_t]
-    #peak_time = times[peak_t] * 1000
-    # print(f"  - Peak encoding: r={peak_r:.4f} at t={peak_time:.1f} ms")
-    # print(f"  - Mean r-value (significant channels): {np.mean(sig_data):.4f}")
-    # print(f"  - Significant channels: {n_sig_channels} / {n_channels}")
-    # print(f"  - Number of subjects: {n_subjects}")
+    # Topoplot at peak encoding time
+    plt.figure(figsize=(3, 3))
+    ax = plt.gca()
+    im, _ = mne.viz.plot_topomap(
+        grand_avg_evoked.data[:, peak_t_idx],
+        grand_avg_evoked.info,
+        axes=ax,
+        show=False,
+    )
+    cbar = plt.colorbar(im, ax=ax, shrink=0.6, aspect=25)
+    cbar.set_label('encoding [r]')
+    cbar.ax.tick_params(size=0)
+    cbar.outline.set_visible(False)
+    plt.tight_layout()
+    topo_file = output_dir / 'grand_average_encoding_topomap.pdf'
+    plt.savefig(topo_file, dpi=300, bbox_inches='tight')
+    print(f"Saved topomap at {peak_time_ms:.1f} ms to {topo_file}")
+    plt.close()
+
+    print(f"\nPeak encoding time: {peak_time_ms:.1f} ms")
 
 
 def main():
