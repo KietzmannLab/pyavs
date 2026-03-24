@@ -428,7 +428,7 @@ def main():
     parser.add_argument("--subjects", type=int, nargs="+", default=[1, 2, 3, 4, 5])
     parser.add_argument("--single-subject", type=int, default=None)
     parser.add_argument("--model", "--model-name", dest="model_name", default="resnet50_ecoset_crop")
-    parser.add_argument("--layers", nargs="+", default=["layer1", "layer2", "layer3", "avgpool"])
+    parser.add_argument("--layers", nargs="+", default=["layer1", "layer2", "layer3", "layer4" "avgpool"])
     parser.add_argument("--layer", default=None)
     parser.add_argument("--verbose", "-v", action="store_true")
 

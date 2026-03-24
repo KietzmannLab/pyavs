@@ -139,7 +139,7 @@ def plot_encoding_joint(evoked: mne.EvokedArray, output_dir: Path, metadata: dic
 
         fig = evoked_smoothed.plot(scalings=1, show=False, xlim=(-100, 350), time_unit='ms',
                           units=dict(mag='encoding [r]',grad='encoding [r]'),
-                          titles=dict(mag='magnetometers', grad='gradiometers'),spatial_colors=True)
+                          titles=dict(mag='magnetometers', grad='gradiometers'),spatial_colors=False)
                           
 
         # make all lines gray and low alppha that never cross 0.075
@@ -244,7 +244,7 @@ def plot_grand_average(subjects_data: list, output_dir: Path, info_raw: mne.Info
     sns.set_context("poster")
     fig = grand_avg_evoked.plot(scalings=1, show=False, xlim=(-100, 350), time_unit='ms',
                                 units=dict(grad='ANN encoding [r]'),
-                               spatial_colors=True, selectable=False)
+                               spatial_colors=False, selectable=False)
     # Reshape to long format for seaborn
     df_ga = grand_avg_evoked.data
     times_ms = grand_avg_evoked.times * 1000
@@ -260,13 +260,20 @@ def plot_grand_average(subjects_data: list, output_dir: Path, info_raw: mne.Info
    
  
     # Apply same styling as individual plots
-    fig.set_size_inches(8, 8)
+    fig.set_size_inches(8, 6)
     sns.despine(fig=fig)
 
-    for ax in fig.axes[:-1]:
-        for line in ax.get_lines():
-            line.set_linewidth(3)
-            line.set_alpha(.4)
+    # Rank channels by their peak encoding value
+    peak_per_channel = np.max(grand_avg_data, axis=1)  # peak r per channel
+    ranks = np.argsort(np.argsort(peak_per_channel))   # rank (0 = lowest)
+    norm_ranks = ranks / (len(ranks) - 1)               # normalise to [0, 1]
+    cmap = plt.cm.magma 
+    
+    
+    for line, rank_val in zip(ax.get_lines(), norm_ranks):
+        line.set_linewidth(1)
+        line.set_alpha(0.4)
+        line.set_color(cmap(rank_val * 0.8)) # do not get too light
 
     # Add reference lines
     for ax in fig.axes:
@@ -275,10 +282,10 @@ def plot_grand_average(subjects_data: list, output_dir: Path, info_raw: mne.Info
             ax.set_title(None)
             ax.axvline(x=0, color='grey', linestyle='--')
             #ax.axhline(y=0, color='grey', linestyle='-')
-            ax.set_xlabel('time[ms]')
+            ax.set_xlabel('time [ms]')
             #ax.set_title(f'Grand Average (N={n_subjects})')
             sns.lineplot(data=df_long, x='time', y='encoding [r]', 
-                color='black', linewidth=5, errorbar=('ci',95), ax=ax, zorder=1000)
+                color='darkgrey', linewidth=5, errorbar=('ci',95), ax=ax, zorder=1000)
 
 
     # Save timecourse figure
@@ -288,15 +295,16 @@ def plot_grand_average(subjects_data: list, output_dir: Path, info_raw: mne.Info
     plt.close()
 
     # Topoplot at peak encoding time
-    plt.figure(figsize=(3, 3))
+    plt.figure(figsize=(4, 4))
     ax = plt.gca()
+    # set vmax to 0.1
     im, _ = mne.viz.plot_topomap(
         grand_avg_evoked.data[:, peak_t_idx],
         grand_avg_evoked.info,
-        axes=ax,
-        show=False,
-    )
-    cbar = plt.colorbar(im, ax=ax, shrink=0.6, aspect=25)
+        axes=ax, cmap="magma",
+        show=False, vlim=(None, 0.1))
+    
+    cbar = plt.colorbar(im, ax=ax, shrink=0.8, aspect=25)
     cbar.set_label('encoding [r]')
     cbar.ax.tick_params(size=0)
     cbar.outline.set_visible(False)
