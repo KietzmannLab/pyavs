@@ -170,9 +170,9 @@ def compute_intersubject_noise_ceiling(
 
 
 def plot_noise_ceiling_only(rsa_data_list: List[Dict[str, Any]], output_dir: Path,
+                            nc_lower: np.ndarray, nc_upper: np.ndarray,
                             save_fig: bool = True) -> plt.Figure:
     """Plot inter-subject noise ceiling as a standalone figure."""
-    nc_lower, nc_upper = compute_intersubject_noise_ceiling(rsa_data_list)
     times_ms = rsa_data_list[0]['times'] * 1000
 
     plt.figure(figsize=(8, 6))
@@ -213,7 +213,8 @@ def plot_noise_ceiling_only(rsa_data_list: List[Dict[str, Any]], output_dir: Pat
 
 
 def plot_multi_layer_comparison(data_by_layer: Dict[str, List[Dict[str, Any]]],
-                                output_dir: Path, save_fig: bool = True) -> plt.Figure:
+                                output_dir: Path, nc_lower: np.ndarray, nc_upper: np.ndarray,
+                                save_fig: bool = True) -> plt.Figure:
     """Plot grand average RSA timeseries comparing multiple layers."""
     if not data_by_layer or len(data_by_layer) < 2:
         logger.info("Need at least 2 layers for comparison plot")
@@ -244,13 +245,8 @@ def plot_multi_layer_comparison(data_by_layer: Dict[str, List[Dict[str, Any]]],
                      ax=ax, label='shuffle baseline', color="#62241d", linestyle=':')
         logger.info("Plotted group-level shuffled labels baseline")
 
-    # Inter-subject noise ceiling (MEG is the same across layers, use first)
-    nc_data = list(data_by_layer.values())[0]
-    if len(nc_data) > 1:
-        logger.info("Computing inter-subject noise ceiling...")
-        nc_lower, nc_upper = compute_intersubject_noise_ceiling(nc_data)
-        ax.fill_between(times_ms, nc_lower, nc_upper, alpha=0.2, color='gray',
-                        label='inter-subject noise ceiling')
+    ax.fill_between(times_ms, nc_lower, nc_upper, alpha=0.2, color='gray',
+                    label='inter-subject noise ceiling')
 
     for (layer_name, layer_data_list), color in zip(sorted(data_by_layer.items(), key=lambda x: _layer_sort_key(x[0])), colors):
         all_rsa = [d['rsa_timeseries'] for d in layer_data_list]
@@ -279,9 +275,10 @@ def plot_multi_layer_comparison(data_by_layer: Dict[str, List[Dict[str, Any]]],
 
 
 def plot_multi_layer_nc_focus(data_by_layer: Dict[str, List[Dict[str, Any]]],
-                              output_dir: Path, save_fig: bool = True) -> plt.Figure:
+                              output_dir: Path, nc_lower: np.ndarray, nc_upper: np.ndarray,
+                              save_fig: bool = True) -> plt.Figure:
     """
-    Plot grand average RSA timeseries with y-axis cropped to the peak NC lower bound,
+    Plot grand average RSA timeseries with y-axis cropped to the peak NC upper bound,
     making the noise ceiling the visual focus.
     """
     if not data_by_layer or len(data_by_layer) < 2:
@@ -294,10 +291,6 @@ def plot_multi_layer_nc_focus(data_by_layer: Dict[str, List[Dict[str, Any]]],
     times_ms = list(data_by_layer.values())[0][0]['times'] * 1000
     n_layers = len(data_by_layer)
     colors = plt.cm.magma(np.linspace(0.2, 0.8, n_layers))
-
-    nc_data = list(data_by_layer.values())[0]
-    logger.info("Computing inter-subject noise ceiling for NC-focus plot...")
-    nc_lower, nc_upper = compute_intersubject_noise_ceiling(nc_data)
 
     ax.fill_between(times_ms, nc_lower, nc_upper, alpha=0.2, color='gray',
                     label='inter-subject noise ceiling')
@@ -521,17 +514,25 @@ def main():
         logger.info(f"Processing layer: {layer} ({len(layer_data_list)} subjects)")
         logger.info(f"{'='*60}")
 
+    first_layer_data = list(data_by_layer.values())[0]
+    if len(first_layer_data) > 1:
+        logger.info("Computing inter-subject noise ceiling (once)...")
+        nc_lower, nc_upper = compute_intersubject_noise_ceiling(first_layer_data)
+    else:
+        times = rsa_data_list[0]["times"]
+        nc_lower = np.zeros(len(times))
+        nc_upper = np.ones(len(times))
+
     if len(data_by_layer) > 1:
         logger.info(f"\n{'='*60}")
         logger.info("Creating multi-layer comparison plot with magma palette...")
         logger.info(f"{'='*60}")
-        #plot_multi_layer_comparison(data_by_layer, output_dir)
-        #plot_multi_layer_nc_focus(data_by_layer, output_dir)
+        #plot_multi_layer_comparison(data_by_layer, output_dir, nc_lower, nc_upper)
+        #plot_multi_layer_nc_focus(data_by_layer, output_dir, nc_lower, nc_upper)
 
-    first_layer_data = list(data_by_layer.values())[0]
     if len(first_layer_data) > 1:
         logger.info("Creating standalone noise ceiling figure...")
-        #plot_noise_ceiling_only(first_layer_data, output_dir)
+        #plot_noise_ceiling_only(first_layer_data, output_dir, nc_lower, nc_upper)
 
     # Sorted-RDM plots (embedding RDM + MEG RDM at peak RSA time)
     first_subject_data = list(data_by_layer.values())[0][0]
