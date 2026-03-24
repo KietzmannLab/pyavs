@@ -39,6 +39,15 @@ PLOT_CONFIG = {
     "figure_dpi": 300,
 }
 
+LAYER_ORDER = ["layer1", "layer2", "layer3", "layer4", "avgpool"]
+
+
+def _layer_sort_key(layer_name: str) -> int:
+    try:
+        return LAYER_ORDER.index(layer_name)
+    except ValueError:
+        return len(LAYER_ORDER)
+
 sns.set_context("poster")
 
 
@@ -243,7 +252,7 @@ def plot_multi_layer_comparison(data_by_layer: Dict[str, List[Dict[str, Any]]],
         ax.fill_between(times_ms, nc_lower, nc_upper, alpha=0.2, color='gray',
                         label='inter-subject noise ceiling')
 
-    for (layer_name, layer_data_list), color in zip(sorted(data_by_layer.items()), colors):
+    for (layer_name, layer_data_list), color in zip(sorted(data_by_layer.items(), key=lambda x: _layer_sort_key(x[0])), colors):
         all_rsa = [d['rsa_timeseries'] for d in layer_data_list]
         df_layer = pd.DataFrame(all_rsa).T
         df_layer['time'] = times_ms
@@ -294,7 +303,7 @@ def plot_multi_layer_nc_focus(data_by_layer: Dict[str, List[Dict[str, Any]]],
                     label='inter-subject noise ceiling')
     #ax.plot(times_ms, nc_lower, color='cornflowerblue', label='NC lower bound')
 
-    for (layer_name, layer_data_list), color in zip(sorted(data_by_layer.items()), colors):
+    for (layer_name, layer_data_list), color in zip(sorted(data_by_layer.items(), key=lambda x: _layer_sort_key(x[0])), colors):
         all_rsa = [d['rsa_timeseries'] for d in layer_data_list]
         df_layer = pd.DataFrame(all_rsa).T
         df_layer['time'] = times_ms
