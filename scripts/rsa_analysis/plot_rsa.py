@@ -260,7 +260,7 @@ def plot_multi_layer_comparison(data_by_layer: Dict[str, List[Dict[str, Any]]],
     ax.set_xlabel('time [ms]')
     ax.set_ylabel("RDM similarity\n[spearman's rho]")
     ax.set_xlim(-200, 350)
-    ax.set_ylim(-0.1, .9)
+    ax.set_ylim(0, .9)
     ax.legend(frameon=False, loc='upper right')
     sns.despine()
     plt.tight_layout()
@@ -308,7 +308,7 @@ def plot_multi_layer_nc_focus(data_by_layer: Dict[str, List[Dict[str, Any]]],
     ax.set_xlabel('time [ms]')
     ax.set_ylabel("RDM similarity\n[spearman's rho]")
     ax.set_xlim(-200, 350)
-    ax.set_ylim(-0.1, float(np.max(nc_upper)))
+    ax.set_ylim(0, float(np.max(nc_upper)))
     ax.legend(frameon=False, loc='upper right')
     sns.despine()
     plt.tight_layout()
@@ -527,12 +527,12 @@ def main():
         logger.info(f"\n{'='*60}")
         logger.info("Creating multi-layer comparison plot with magma palette...")
         logger.info(f"{'='*60}")
-        #plot_multi_layer_comparison(data_by_layer, output_dir, nc_lower, nc_upper)
-        #plot_multi_layer_nc_focus(data_by_layer, output_dir, nc_lower, nc_upper)
+        #plot_multi_layer_comparison(data_by_layer, output_dir)
+        plot_multi_layer_nc_focus(data_by_layer, output_dir)
 
     if len(first_layer_data) > 1:
         logger.info("Creating standalone noise ceiling figure...")
-        #plot_noise_ceiling_only(first_layer_data, output_dir, nc_lower, nc_upper)
+        plot_noise_ceiling_only(first_layer_data, output_dir)
 
     # Sorted-RDM plots (embedding RDM + MEG RDM at peak RSA time)
     first_subject_data = list(data_by_layer.values())[0][0]
