@@ -167,11 +167,26 @@ def plot_noise_ceiling_only(rsa_data_list: List[Dict[str, Any]], output_dir: Pat
     times_ms = rsa_data_list[0]['times'] * 1000
 
     plt.figure(figsize=(8, 6))
-    plt.fill_between(times_ms, nc_lower, nc_upper, alpha=0.2, color='gray',
-                     label='inter-subject noise ceiling')
-    plt.plot(times_ms, nc_lower, color='cornflowerblue', label='NC lower bound')
-    plt.plot(times_ms, nc_upper, color='cornflowerblue', label='NC upper bound')
-    plt.axvline(x=0, color='k', linestyle='--', alpha=0.3, label='fixation onset')
+    ax = plt.gca()
+
+    # Shuffle baseline
+    all_baselines = [d['baseline_timeseries'] for d in rsa_data_list
+                     if d.get('baseline_timeseries') is not None]
+    if all_baselines:
+        baselines_combined = np.concatenate(all_baselines, axis=0)
+        df_baselines = pd.DataFrame(baselines_combined.T, index=times_ms)
+        df_baselines.index.name = 'time'
+        df_melted_baseline = df_baselines.reset_index().melt(
+            id_vars='time', var_name='permutation', value_name='baseline'
+        )
+        sns.lineplot(data=df_melted_baseline, x='time', y='baseline', errorbar=("ci", 95),
+                     ax=ax, label='shuffle baseline', color="#62241d", linestyle=':')
+
+    ax.fill_between(times_ms, nc_lower, nc_upper, alpha=0.2, color='gray',
+                    label='inter-subject noise ceiling')
+    ax.plot(times_ms, nc_lower, color='cornflowerblue', label='NC lower bound')
+    ax.plot(times_ms, nc_upper, color='cornflowerblue', label='NC upper bound')
+    ax.axvline(x=0, color='k', linestyle='--', alpha=0.3, label='fixation onset')
     plt.xlabel('time [ms]')
     plt.ylabel("RDM similarity\n[spearman's rho]")
     plt.xlim(-200, 500)
@@ -291,7 +306,7 @@ def plot_multi_layer_nc_focus(data_by_layer: Dict[str, List[Dict[str, Any]]],
     ax.set_xlabel('time [ms]')
     ax.set_ylabel("RDM similarity\n[spearman's rho]")
     ax.set_xlim(-200, 350)
-    ax.set_ylim(-0.1, float(np.max(nc_lower)))
+    ax.set_ylim(-0.1, float(np.max(nc_upper)))
     ax.legend(frameon=False, loc='upper right')
     sns.despine()
     plt.tight_layout()
@@ -428,7 +443,7 @@ def main():
     parser.add_argument("--subjects", type=int, nargs="+", default=[1, 2, 3, 4, 5])
     parser.add_argument("--single-subject", type=int, default=None)
     parser.add_argument("--model", "--model-name", dest="model_name", default="resnet50_ecoset_crop")
-    parser.add_argument("--layers", nargs="+", default=["layer1", "layer2", "layer3", "layer4" "avgpool"])
+    parser.add_argument("--layers", nargs="+", default=["layer1", "layer2", "layer3", "layer4", "avgpool"])
     parser.add_argument("--layer", default=None)
     parser.add_argument("--verbose", "-v", action="store_true")
 
