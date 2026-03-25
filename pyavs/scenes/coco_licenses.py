@@ -28,18 +28,22 @@ from pycocotools.coco import COCO
 from tqdm import tqdm
 
 
-# License IDs that allow use in academic publications
-# See README_coco_licenses.md for full documentation
+# License IDs selected for academic (non-commercial) use where derivatives are permitted.
+# ID-to-license mapping verified against the COCO dataset JSON
+# (coco.dataset['licenses'] from instances_train2017.json / instances_val2017.json).
+# Included:  1 (CC-BY-NC-SA), 2 (CC-BY-NC), 7 (no copyright), 8 (US Gov work).
+# Excluded:  3 (CC-BY-NC-ND) — derivatives not permitted.
+#            4 (CC-BY), 5 (CC-BY-SA), 6 (CC-BY-ND) — allow commercial use (not needed here).
 PERMISSIVE_LICENSE_IDS = [1, 2, 7, 8]
 
-# License ID mapping for reference
+# License ID mapping verified against actual COCO dataset annotations.
 LICENSE_INFO = {
-    1: {'name': 'Attribution License (CC-BY)', 'permissive': True},
-    2: {'name': 'Attribution-ShareAlike License (CC-BY-SA)', 'permissive': True},
-    3: {'name': 'Attribution-NonCommercial License (CC-BY-NC)', 'permissive': False},
-    4: {'name': 'Attribution-NonCommercial-ShareAlike License (CC-BY-NC-SA)', 'permissive': False},
-    5: {'name': 'Attribution-NoDerivs License (CC-BY-ND)', 'permissive': True},
-    6: {'name': 'Attribution-NonCommercial-NoDerivs License (CC-BY-NC-ND)', 'permissive': False},
+    1: {'name': 'Attribution-NonCommercial-ShareAlike License (CC-BY-NC-SA)', 'permissive': True},
+    2: {'name': 'Attribution-NonCommercial License (CC-BY-NC)', 'permissive': True},
+    3: {'name': 'Attribution-NonCommercial-NoDerivs License (CC-BY-NC-ND)', 'permissive': False},
+    4: {'name': 'Attribution License (CC-BY)', 'permissive': False},
+    5: {'name': 'Attribution-ShareAlike License (CC-BY-SA)', 'permissive': False},
+    6: {'name': 'Attribution-NoDerivs License (CC-BY-ND)', 'permissive': False},
     7: {'name': 'No Known Copyright Restrictions', 'permissive': True},
     8: {'name': 'United States Government Work', 'permissive': True},
 }
@@ -465,12 +469,12 @@ Examples:
       --output avs_permissive_images.csv \\
       --flickr-api-key YOUR_API_KEY
 
-Permissive licenses included (IDs 1, 2, 5, 7, 8):
-  1: Attribution License (CC-BY)
-  2: Attribution-ShareAlike License (CC-BY-SA)
-  5: Attribution-NoDerivs License (CC-BY-ND)
+Licenses included (non-commercial, derivatives permitted — IDs 1, 2, 7, 8):
+  1: Attribution-NonCommercial-ShareAlike License (CC-BY-NC-SA)
+  2: Attribution-NonCommercial License (CC-BY-NC)
   7: No Known Copyright Restrictions
   8: United States Government Work
+  (ID 3 CC-BY-NC-ND excluded: derivatives not permitted)
 
 Flickr metadata enrichment:
   When --flickr-api-key is provided (or FLICKR_API_KEY env var is set),
