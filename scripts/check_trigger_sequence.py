@@ -97,15 +97,16 @@ def segment_into_trials(events: np.ndarray, blocks: np.ndarray) -> list[dict]:
                 start_idx = blk_idx - back
                 break
 
-        # Trial ends just before the next block_trigger (or end of array).
+        # Trial ends just before the next trial's fixcross_on (or end of array).
+        # The next trial's preamble is: fixcross_on(90) -> fixcross_off(91) -> scene_on(100)
+        # -> block_trigger. Walk backward from the next block_trigger to skip those three.
+        next_trial_preamble = {td['fixcross_on'], td['fixcross_off'], td['scene_on']}
         if k + 1 < len(anchors):
             next_blk_idx = anchors[k + 1][0]
-            # Include caption events after scene_off but before next block_trigger
             end_idx = next_blk_idx - 1
-            # Walk back over fixcross_on/off of the NEXT trial to exclude them
-            for fwd in range(next_blk_idx - 1, trl_idx, -1):
-                if codes[fwd] in (td['fixcross_on'], td['fixcross_off']):
-                    end_idx = fwd - 1
+            for back in range(1, min(next_blk_idx - trl_idx, 5)):
+                if codes[next_blk_idx - back] in next_trial_preamble:
+                    end_idx = next_blk_idx - back - 1
                 else:
                     break
         else:
