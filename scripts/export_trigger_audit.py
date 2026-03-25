@@ -46,7 +46,7 @@ logger = logging.getLogger('trigger_audit')
 SESSION_LETTERS = {i: chr(ord('a') + i - 1) for i in range(1, 11)}
 
 # Subjects to process (skip pilot/special subjects 50, 60, 99)
-MAIN_SUBJECTS = list(range(1, 6))  # as01 – as05; extend as needed
+MAIN_SUBJECTS = [1]  # default: subject 1 only
 
 # Total sessions per subject
 N_SESSIONS = 10
@@ -188,8 +188,10 @@ def audit_session(
 
 def main():
     parser = argparse.ArgumentParser(description="Export MEG trigger audit for all subjects/sessions")
-    parser.add_argument('--rawdir', required=True, help='Path to rawdir (e.g. /share/klab/datasets/avs/rawdir)')
-    parser.add_argument('--outdir', required=True, help='Output directory for audit files')
+    parser.add_argument('--rawdir', default='/share/klab/datasets/avs/rawdir',
+                        help='Path to rawdir (default: /share/klab/datasets/avs/rawdir)')
+    parser.add_argument('--outdir', default='/share/klab/psulewski/psulewski/pyavs',
+                        help='Output directory for audit files (default: /share/klab/psulewski/psulewski/pyavs)')
     parser.add_argument('--subjects', nargs='+', type=int, default=MAIN_SUBJECTS,
                         help=f'Subject numbers to process (default: {MAIN_SUBJECTS})')
     parser.add_argument('--sessions', nargs='+', type=int, default=list(range(1, N_SESSIONS + 1)),
@@ -240,6 +242,10 @@ def main():
     logger.info(f"Summary written to {summary_path}")
 
     # Print collision table
+    if summary_df.empty or 'collision' not in summary_df.columns:
+        logger.warning("Summary is empty — no sessions could be processed.")
+        return
+
     collision_df = summary_df[summary_df['collision']].copy()
     if not collision_df.empty:
         logger.info("\n=== COLLISION SUMMARY ===")
