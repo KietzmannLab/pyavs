@@ -55,7 +55,7 @@ def load_and_repair(rawdir: Path, subject: int, session: int) -> np.ndarray:
     if not fif_files:
         raise FileNotFoundError(f"No .fif files for sub-{subject:02d} ses-{session}")
     raws = [mne.io.read_raw_fif(str(f), preload=False) for f in fif_files]
-    raw = mne.concatenate_raws(raws)
+    raw = mne.concatenate_raws(raws, on_mismatch = "warn")
     events = mne.find_events(
         raw, stim_channel='STI101', consecutive=True,
         min_duration=0.008, output='onset', uint_cast=True,
