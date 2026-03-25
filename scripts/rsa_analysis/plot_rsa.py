@@ -528,11 +528,11 @@ def main():
         logger.info("Creating multi-layer comparison plot with magma palette...")
         logger.info(f"{'='*60}")
         #plot_multi_layer_comparison(data_by_layer, output_dir)
-        plot_multi_layer_nc_focus(data_by_layer, output_dir)
+        plot_multi_layer_nc_focus(data_by_layer, output_dir, nc_lower = nc_lower, nc_upper = nc_upper)
 
     if len(first_layer_data) > 1:
         logger.info("Creating standalone noise ceiling figure...")
-        plot_noise_ceiling_only(first_layer_data, output_dir)
+        plot_noise_ceiling_only(first_layer_data, output_dir, nc_lower = nc_lower, nc_upper = nc_upper)
 
     # Sorted-RDM plots (embedding RDM + MEG RDM at peak RSA time)
     first_subject_data = list(data_by_layer.values())[0][0]
