@@ -128,24 +128,19 @@ def audit_session(
     rep_events_dir: Path,
 ) -> list[dict]:
     """Run the full audit for one session. Returns list of summary rows."""
+    letter = SESSION_LETTERS[session]
+    expected_folder = rawdir / f"as{subject:02d}{letter}"
+    logger.info(f"sub-{subject:02d} ses-{session}: looking in {expected_folder}")
+
     fif_files = find_fif_files(rawdir, subject, session)
     if not fif_files:
-        logger.warning(f"sub-{subject:02d} ses-{session}: no .fif files found, skipping")
+        logger.warning(f"sub-{subject:02d} ses-{session}: no .fif files found in {expected_folder}")
         return []
 
     logger.info(f"sub-{subject:02d} ses-{session}: loading {len(fif_files)} files")
 
-    try:
-        events_raw = load_events(fif_files)
-    except Exception as e:
-        logger.error(f"sub-{subject:02d} ses-{session}: failed to load — {e}")
-        return []
-
-    try:
-        events_rep = repair_meg_trigger_events(events_raw, session=session, verbose=False)
-    except Exception as e:
-        logger.error(f"sub-{subject:02d} ses-{session}: repair failed — {e}")
-        events_rep = events_raw.copy()
+    events_raw = load_events(fif_files)
+    events_rep = repair_meg_trigger_events(events_raw, session=session, verbose=False)
 
     # Save full events arrays
     tag = f"sub{subject:02d}_ses{session:02d}"
