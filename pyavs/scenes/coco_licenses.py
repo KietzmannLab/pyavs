@@ -30,7 +30,7 @@ from tqdm import tqdm
 
 # License IDs that allow use in academic publications
 # See README_coco_licenses.md for full documentation
-PERMISSIVE_LICENSE_IDS = [1, 2, 5, 7, 8]
+PERMISSIVE_LICENSE_IDS = [1, 2, 7, 8]
 
 # License ID mapping for reference
 LICENSE_INFO = {
