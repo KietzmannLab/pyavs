@@ -165,15 +165,14 @@ def repair_meg_trigger_events(events: np.ndarray, session: int,
             # Get the indices of the scene onset triggers
             scene_onset_indices = np.where(events_with_block_trigger[:, 1] == meg_trigger_dict['scene_on'])[0]
 
-            # Count corrupt triggers for this block
-            corrupt_count_this_block = len(scene_onset_indices) - 1 if len(scene_onset_indices) > 1 else 0
+            # All events with this code that are preceded by scene_on are corrupt block
+            # triggers. Legitimate trial-number events with the same code are always
+            # preceded by the block trigger (not scene_on), so they are never in
+            # scene_onset_indices and are unaffected.
+            corrupt_count_this_block = len(scene_onset_indices)
             corrupt_trigger_count += corrupt_count_this_block
 
-            # We need to exclude one trigger from the deletion list. This is the one that was 
-            # correctly sent for the current block and trial
             corrupt_timestamps_this_block = list(events_with_block_trigger[scene_onset_indices, 0])
-            if len(corrupt_timestamps_this_block) > 1:
-                corrupt_timestamps_this_block.pop(block_trigger - 1)
 
             # Get timestamps of trigger events not preceded by a scene onset trigger
             corrupt_timestamps.append(corrupt_timestamps_this_block)
