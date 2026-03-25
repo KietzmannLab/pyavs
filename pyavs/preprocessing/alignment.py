@@ -19,7 +19,7 @@ from ..dataloader.eye import load_and_enrich_eye_events
 from ..utils.validation import validate_subject_id, validate_session
 from ..utils.paths import get_max_blocks
 from ..utils.logging import get_logger
-from .trigger_tools import get_meg_trigger_dict, get_avs_blocks, repair_meg_trigger_events as repair_meg_trigger_events_legacy
+from .trigger.tools import get_meg_trigger_dict, get_avs_blocks, repair_meg_trigger_events as repair_meg_trigger_events_legacy
 from .composer import AVSComposer
 
 # For backward compatibility, alias AVSComposer as MEGETComposer

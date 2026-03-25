@@ -10,8 +10,8 @@ For each session this script:
   - Exports a summary CSV flagging collision codes and repair outcomes
 
 Usage:
-    python export_trigger_audit.py --rawdir /share/klab/datasets/avs/rawdir --outdir /path/to/output
-    python export_trigger_audit.py --rawdir /data/p_02644/act_vis_sem/rawdir --outdir /path/to/output
+    python export_audit.py --rawdir /share/klab/datasets/avs/rawdir --outdir /path/to/output
+    python export_audit.py --rawdir /data/p_02644/act_vis_sem/rawdir --outdir /path/to/output
 
 Output files (all written to --outdir):
     trigger_audit_summary.csv   -- one row per (subject, session, trigger_code)
@@ -29,10 +29,9 @@ import numpy as np
 import pandas as pd
 import mne
 
-# Allow running from the scripts directory
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 
-from pyavs.preprocessing.trigger_tools import (
+from pyavs.preprocessing.trigger.tools import (
     get_meg_trigger_dict,
     get_avs_blocks,
     repair_meg_trigger_events,
@@ -73,7 +72,7 @@ def load_events(fif_files: list[Path]) -> np.ndarray:
         consecutive=True,
         min_duration=0.008,
         output='onset',
-        uint_cast=True, 
+        uint_cast=True,
     )
     return events
 

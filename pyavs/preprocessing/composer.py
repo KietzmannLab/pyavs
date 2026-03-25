@@ -24,7 +24,7 @@ from ..utils.config import get_data_path
 from ..utils.paths import get_subject_session_id, get_max_blocks
 from ..utils.validation import validate_subject_id, validate_session
 from ..utils.logging import get_logger
-from .trigger_tools import get_meg_trigger_dict, repair_meg_trigger_events, add_fix_event_trigger, get_avs_blocks, get_trigger_epochs_metadata
+from .trigger.tools import get_meg_trigger_dict, repair_meg_trigger_events, add_fix_event_trigger, get_avs_blocks, get_trigger_epochs_metadata
 from .meg import preprocess_meg_block
 from ..io.write import save_annotated_raw
 

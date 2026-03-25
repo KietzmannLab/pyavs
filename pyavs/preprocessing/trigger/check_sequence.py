@@ -12,10 +12,10 @@ Expected per-trial sequences (verified against psychtoolbox experiment code):
     mic_on(112) -> mic_off(113) -> caption_on(110) -> caption_off(111)
 
 Usage:
-    python check_trigger_sequence.py                          # subject 1, all sessions
-    python check_trigger_sequence.py --subjects 1 2 3
-    python check_trigger_sequence.py --subjects 1 --sessions 4 5
-    python check_trigger_sequence.py --rawdir /share/klab/datasets/avs/rawdir --outdir /share/klab/psulewski/psulewski/pyavs
+    python check_sequence.py                          # subject 1, all sessions
+    python check_sequence.py --subjects 1 2 3
+    python check_sequence.py --subjects 1 --sessions 4 5
+    python check_sequence.py --rawdir /share/klab/datasets/avs/rawdir --outdir /share/klab/psulewski/psulewski/pyavs
 """
 
 import argparse
@@ -27,8 +27,9 @@ import numpy as np
 import pandas as pd
 import mne
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from pyavs.preprocessing.trigger_tools import (
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+
+from pyavs.preprocessing.trigger.tools import (
     get_meg_trigger_dict,
     get_avs_blocks,
     repair_meg_trigger_events,
@@ -55,7 +56,7 @@ def load_and_repair(rawdir: Path, subject: int, session: int) -> np.ndarray:
     if not fif_files:
         raise FileNotFoundError(f"No .fif files for sub-{subject:02d} ses-{session}")
     raws = [mne.io.read_raw_fif(str(f), preload=False) for f in fif_files]
-    raw = mne.concatenate_raws(raws, on_mismatch = "warn")
+    raw = mne.concatenate_raws(raws, on_mismatch="warn")
     events = mne.find_events(
         raw, stim_channel='STI101', consecutive=True,
         min_duration=0.008, output='onset', uint_cast=True,
@@ -67,8 +68,13 @@ def segment_into_trials(events: np.ndarray, blocks: np.ndarray) -> list[dict]:
     """
     Walk the repaired events array and group events into trials.
     A trial is anchored by a block_trigger (>=1000) followed immediately by
-    a trial_number (1-30). Everything from the preceding fixcross_on up to
-    (but not including) the next block_trigger is considered part of that trial.
+    a trial_number (1-30).  The trial's event window runs from the preceding
+    fixcross_on up to — but not including — the next fixcross_on or ≥1000
+    block-trigger code.
+
+    Ghost trials (where the block trigger code equals the trial number, causing
+    the STI channel to not transition and the trial-number event to be absent)
+    have no anchor and are skipped silently.
 
     Returns a list of dicts with keys:
         block, trial_num, start_idx, end_idx, sequence (list of int codes)
@@ -97,20 +103,21 @@ def segment_into_trials(events: np.ndarray, blocks: np.ndarray) -> list[dict]:
                 start_idx = blk_idx - back
                 break
 
-        # Trial ends just before the next trial's fixcross_on (or end of array).
-        # The next trial's preamble is: fixcross_on(90) -> fixcross_off(91) -> scene_on(100)
-        # -> block_trigger. Walk backward from the next block_trigger to skip those three.
-        next_trial_preamble = {td['fixcross_on'], td['fixcross_off'], td['scene_on']}
-        if k + 1 < len(anchors):
-            next_blk_idx = anchors[k + 1][0]
-            end_idx = next_blk_idx - 1
-            for back in range(1, min(next_blk_idx - trl_idx, 5)):
-                if codes[next_blk_idx - back] in next_trial_preamble:
-                    end_idx = next_blk_idx - back - 1
-                else:
-                    break
-        else:
-            end_idx = n - 1
+        # Trial ends at the last event before the next trial's preamble begins.
+        # Scan forward from the trial number event and stop before the first
+        # fixcross_on(90) or any ≥1000 block trigger code.  This correctly
+        # handles "ghost trials" — trials whose block trigger aliased to the same
+        # code as their trial number, causing the STI channel to not transition
+        # and the trial-number event to be absent from the raw data.  Such ghost
+        # trials are not anchored and sit as orphaned events between valid anchors;
+        # without this forward scan the backward walk-back from the next anchor
+        # would include the entire ghost trial in the preceding valid trial's window.
+        end_idx = trl_idx  # fallback: at minimum include the trial-number event
+        for fwd in range(trl_idx + 1, n):
+            c = codes[fwd]
+            if c == td['fixcross_on'] or c >= 1000:
+                break  # start of the next trial's preamble or orphan block trigger
+            end_idx = fwd
 
         seq = list(codes[start_idx:end_idx + 1])
         trials.append({

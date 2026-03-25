@@ -17,12 +17,12 @@ from .alignment import (
     repair_meg_trigger_events
 )
 
-from .trigger_tools import (
+from .trigger import (
     get_meg_trigger_dict,
     get_avs_blocks,
     repair_meg_trigger_events as repair_meg_trigger_events_legacy,
     get_meg_timestamp,
-    add_fix_event_trigger
+    add_fix_event_trigger,
 )
 
 from .composer import (
