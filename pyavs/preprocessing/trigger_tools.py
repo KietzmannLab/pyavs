@@ -31,9 +31,16 @@ def get_meg_trigger_dict() -> Dict[str, int]:
     dict
         Dictionary mapping trigger names to codes
     """
+    # Codes verified against display_exp_active_visual_semantics.m and
+    # display_voice_response_task.m (psychtoolbox experiment code).
+    # Within a caption-task trial the sequence is:
+    #   scene_on(100) -> block_trigger -> trial_number ->
+    #   scene_off(101) -> mic_on(112) -> mic_off(113) -> caption_on(110) -> caption_off(111)
+    # mic_on/mic_off mark the preparatory microphone-stimulus phase (mic icon shown, ~1 s).
+    # caption_on/caption_off mark the actual verbal response window (~8 s).
     meg_trigger_dict = {
         'scene_on': 100, 'scene_off': 101, 'fixcross_on': 90, 'fixcross_off': 91,
-        'mic_on': 110, 'mic_off': 111, 'caption_on': 112, 'caption_off': 113,
+        'mic_on': 112, 'mic_off': 113, 'caption_on': 110, 'caption_off': 111,
         'calibration_start': 120, 'calibration_end': 121, 'start_exp': 98, 'end_exp': 99
     }
     return meg_trigger_dict
@@ -173,18 +180,26 @@ def repair_meg_trigger_events(events: np.ndarray, session: int,
             continue
 
         if block_trigger in meg_trigger_dict.values():
-            # In this case we have an overlap between corrupted block trigger and MEG another trigger (e.g. scene onset)
-            if block_trigger == meg_trigger_dict['mic_on']:
-                # In this case we have an overlap between corrupted block trigger and the microphone onset trigger
-                # We need to get the indices of all block triggers that were preceded by a scene onset
-                # Get the indices of the scene onset triggers
-                corrupt_timestamp_indices = np.where(events_with_block_trigger[:, 1] == 100)[0]
+            # The block trigger code collides with a real event trigger code.
+            # We identify corrupt instances using prev_code.
+            # Corrupt block triggers always fire immediately after scene_on (prev_code=100),
+            # because the experiment sends: scene_on -> block_trigger -> trial_number.
+            # Real event triggers fire from the STI baseline of 0 (prev_code=0), EXCEPT
+            # caption_on (110) which fires immediately after mic_off (113), so its real
+            # instances also have prev_code != 0. For caption_on we therefore use the more
+            # specific prev_code == scene_on heuristic to avoid deleting real caption events.
+            if block_trigger == meg_trigger_dict['caption_on']:
+                # Real caption_on events follow mic_off (prev_code=113), not scene_on.
+                # Corrupt block triggers aliased to caption_on fire right after scene_on
+                # (prev_code=100), so prev_code == scene_on cleanly isolates them.
+                corrupt_timestamp_indices = np.where(events_with_block_trigger[:, 1] == meg_trigger_dict['scene_on'])[0]
                 corrupt_timestamps.append(list(events_with_block_trigger[corrupt_timestamp_indices, 0]))
                 continue
             else:
-                # In this case we have an overlap between corrupted block trigger and some other trigger (e.g. fixcross onset)
-                # We need to get the indices of all block triggers that were not preceded by any trigger (0)
-                # Get the indices of the scene onset triggers
+                # All other event triggers (scene_off, fixcross_on/off, mic_on/off,
+                # caption_off, calibration) fire from the STI baseline (prev_code=0).
+                # Corrupt block triggers always have prev_code != 0 (they follow scene_on),
+                # so this heuristic correctly isolates them.
                 corrupt_timestamp_indices = np.where(events_with_block_trigger[:, 1] != 0)[0]
                 corrupt_timestamps.append(list(events_with_block_trigger[corrupt_timestamp_indices, 0]))
                 continue
