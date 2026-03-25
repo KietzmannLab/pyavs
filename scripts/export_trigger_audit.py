@@ -66,14 +66,14 @@ def find_fif_files(rawdir: Path, subject: int, session: int) -> list[Path]:
 def load_events(fif_files: list[Path]) -> np.ndarray:
     """Concatenate raws and return find_events result."""
     raws = [mne.io.read_raw_fif(str(f), preload=False) for f in fif_files]
-    raw = mne.concatenate_raws(raws)
+    raw = mne.concatenate_raws(raws, on_mismatch="warn")
     events = mne.find_events(
         raw,
         stim_channel='STI101',
         consecutive=True,
         min_duration=0.008,
         output='onset',
-        uint_cast=True,
+        uint_cast=True, 
     )
     return events
 
