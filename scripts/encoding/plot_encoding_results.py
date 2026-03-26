@@ -190,13 +190,14 @@ def report_encoding_stats(
     times_evoked: np.ndarray,
     peak_t_idx: int,
     output_dir: Path,
+    processing_params: dict,
     n_bootstrap: int = 10_000,
 ) -> dict:
     """
     Compute and print encoding stats across subjects (biological replicates).
 
     Bootstrapped 95% CI (BCa method) for mean channel-averaged encoding at
-    peak time and at t=0. Saves a one-row CSV to output_dir.
+    peak time and at t=0. Saves a one-row CSV to output_dir/source_data/.
 
     Parameters
     ----------
@@ -206,11 +207,14 @@ def report_encoding_stats(
     peak_t_idx : int
         Index of peak encoding time
     output_dir : Path
+    processing_params : dict
+        Processing parameters to record (e.g. filter settings, channel type)
     n_bootstrap : int
         Number of bootstrap resamples (default 10,000)
     """
     subject_means = all_data.mean(axis=1)   # (n_subjects, n_times)
     n_subjects = subject_means.shape[0]
+    n_channels = all_data.shape[1]
     peak_time_ms = times_evoked[peak_t_idx] * 1000
 
     def _ci(values):
@@ -237,6 +241,7 @@ def report_encoding_stats(
 
     stats = {
         'n_subjects': n_subjects,
+        'n_channels': n_channels,
         'peak_time_ms': peak_time_ms,
         'mean_at_peak': mean_peak,
         'ci_low_at_peak': ci_low_peak,
@@ -244,6 +249,10 @@ def report_encoding_stats(
         'mean_at_t0': mean_t0,
         'ci_low_at_t0': ci_low_t0,
         'ci_high_at_t0': ci_high_t0,
+        'ci_method': 'bootstrap_BCa',
+        'n_bootstrap': n_bootstrap,
+        'ci_level': 0.95,
+        **processing_params,
     }
     source_data_dir = output_dir / 'source_data'
     source_data_dir.mkdir(exist_ok=True)
@@ -315,6 +324,14 @@ def plot_grand_average(subjects_data: list, output_dir: Path, info_raw: mne.Info
         times_evoked=grand_avg_evoked.times,
         peak_t_idx=peak_t_idx,
         output_dir=output_dir,
+        processing_params={
+            'channel_type': 'gradiometer',
+            'lowpass_hz': 40.0,
+            'fir_design': 'firwin',
+            'sfreq_hz': sfreq,
+            'time_window_ms': '-100 to 350',
+            'ci_unit': 'subjects (biological replicates)',
+        },
     )
 
     # Build long-format DataFrames with subject as the unit of variation
@@ -352,55 +369,35 @@ def plot_grand_average(subjects_data: list, output_dir: Path, info_raw: mne.Info
     df_source.to_csv(source_file, index=False)
     print(f"Saved plot source data to {source_file}")
 
-    # Create plot matching individual subject style
-    sns.set_context("poster")
-    fig = grand_avg_evoked.plot(scalings=1, show=False, xlim=(-100, 350), time_unit='ms',
-                                units=dict(grad='ANN encoding [r]'),
-                               spatial_colors=False, selectable=False)
-    
-   
- 
-    # Apply same styling as individual plots
-    fig.set_size_inches(8, 6)
-    sns.despine(fig=fig)
-
     # Rank channels by their peak encoding value
     peak_per_channel = np.max(grand_avg_data, axis=1)  # peak r per channel
     ranks = np.argsort(np.argsort(peak_per_channel))   # rank (0 = lowest)
     norm_ranks = ranks / (len(ranks) - 1)               # normalise to [0, 1]
     cmap = plt.cm.magma
 
+    # Plot directly with seaborn — one line + CI band per channel
+    sns.set_context("poster")
+    plt.figure(figsize=(8, 6))
     ax = plt.gca()
-    for line, rank_val in zip(ax.get_lines(), norm_ranks):
-        line.set_linewidth(1)
-        line.set_alpha(0.4)
-        line.set_color(cmap(rank_val * 0.8))  # do not get too light
 
-    # Per-channel bootstrapped 95% CI across subjects (percentile, n=1000)
-    rng = np.random.default_rng(42)
-    for c_idx, rank_val in enumerate(norm_ranks):
-        ch_data = all_data[:, c_idx, :]   # (n_subjects, n_times)
-        boot_samples = rng.choice(ch_data, size=(1000, n_subj), replace=True).mean(axis=1)
-        ci_low  = np.percentile(boot_samples, 2.5, axis=0)
-        ci_high = np.percentile(boot_samples, 97.5, axis=0)
-        ax.fill_between(times_ms, ci_low, ci_high,
-                        color=cmap(rank_val * 0.8), alpha=0.08, zorder=0)
+    channel_palette = {ch: cmap(r * 0.8) for ch, r in zip(ch_names, norm_ranks)}
+    sns.lineplot(data=df_channels, x='time', y='encoding [r]', hue='channel',
+                 palette=channel_palette, errorbar=('ci', 95), alpha=0.4,
+                 legend=False, ax=ax, zorder=1)
 
-    # Add reference lines and global mean ± 95% CI across subjects
-    for ax in fig.axes:
-        print(ax)
-        if 'Time (ms)' in ax.get_xlabel():
-            ax.set_title(None)
-            ax.axvline(x=0, color='grey', linestyle='--')
-            ax.set_xlabel('time [ms]')
-            # Global mean ± bootstrapped 95% CI across subjects (biological replicates)
-            sns.lineplot(data=df_global, x='time', y='encoding [r]',
-                color='darkgrey', errorbar=('ci', 95), ax=ax, zorder=1000)
+    # Global mean ± bootstrapped 95% CI across subjects (biological replicates)
+    sns.lineplot(data=df_global, x='time', y='encoding [r]',
+        color='darkgrey', errorbar=('ci', 95), ax=ax, zorder=1000)
 
+    ax.axvline(x=0, color='grey', linestyle='--')
+    ax.set_xlim(-100, 350)
+    ax.set_xlabel('time [ms]')
+    ax.set_ylabel('encoding [r]')
+    sns.despine()
 
     # Save timecourse figure
     output_file = output_dir / 'grand_average_encoding_joint.pdf'
-    fig.figure.savefig(output_file, dpi=300, bbox_inches='tight')
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
     print(f"Saved grand average joint plot to {output_file}")
     plt.close()
 
