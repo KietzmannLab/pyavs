@@ -31,6 +31,8 @@ from rsatoolbox.rdm import RDMs
 from rsatoolbox.inference.noise_ceiling import boot_noise_ceiling
 
 from scipy.signal import medfilt
+from scipy.stats import bootstrap as scipy_bootstrap
+import statsmodels.formula.api as smf
 
 logger = get_logger("scripts.rsa_analysis.plot_rsa")
 
@@ -212,68 +214,6 @@ def plot_noise_ceiling_only(rsa_data_list: List[Dict[str, Any]], output_dir: Pat
     return fig
 
 
-def plot_multi_layer_comparison(data_by_layer: Dict[str, List[Dict[str, Any]]],
-                                output_dir: Path, nc_lower: np.ndarray, nc_upper: np.ndarray,
-                                save_fig: bool = True) -> plt.Figure:
-    """Plot grand average RSA timeseries comparing multiple layers."""
-    if not data_by_layer or len(data_by_layer) < 2:
-        logger.info("Need at least 2 layers for comparison plot")
-        return None
-
-    plt.figure(figsize=(8, 6))
-    ax = plt.gca()
-
-    times_ms = list(data_by_layer.values())[0][0]['times'] * 1000
-    n_layers = len(data_by_layer)
-    colors = plt.cm.magma(np.linspace(0.2, 0.8, n_layers))
-
-    # Group-level shuffled-labels baseline
-    all_baselines = [
-        rsa_data['baseline_timeseries']
-        for layer_data_list in data_by_layer.values()
-        for rsa_data in layer_data_list
-        if rsa_data.get('baseline_timeseries') is not None
-    ]
-    if all_baselines:
-        baselines_combined = np.concatenate(all_baselines, axis=0)
-        df_baselines = pd.DataFrame(baselines_combined.T, index=times_ms)
-        df_baselines.index.name = 'time'
-        df_melted_baseline = df_baselines.reset_index().melt(
-            id_vars='time', var_name='permutation', value_name='baseline'
-        )
-        sns.lineplot(data=df_melted_baseline, x='time', y='baseline', errorbar=("ci", 95),
-                     ax=ax, label='shuffle baseline', color="#62241d", linestyle=':')
-        logger.info("Plotted group-level shuffled labels baseline")
-
-    ax.fill_between(times_ms, nc_lower, nc_upper, alpha=0.2, color='gray',
-                    label='inter-subject noise ceiling')
-
-    for (layer_name, layer_data_list), color in zip(sorted(data_by_layer.items(), key=lambda x: _layer_sort_key(x[0])), colors):
-        all_rsa = [d['rsa_timeseries'] for d in layer_data_list]
-        df_layer = pd.DataFrame(all_rsa).T
-        df_layer['time'] = times_ms
-        df_melted = df_layer.melt(id_vars='time', var_name='subject', value_name='rsa')
-        sns.lineplot(data=df_melted, x='time', y='rsa', errorbar=("ci", 95), ax=ax,
-                     label=f'{layer_name} (n={len(layer_data_list)})', color=color, alpha=0.8)
-
-    ax.axvline(x=0, color='k', linestyle='--', alpha=0.3, label='fixation onset')
-    ax.set_xlabel('time [ms]')
-    ax.set_ylabel("RDM similarity\n[spearman's rho]")
-    ax.set_xlim(-200, 350)
-    ax.set_ylim(0, .9)
-    ax.legend(frameon=False, loc='upper right')
-    sns.despine()
-    plt.tight_layout()
-
-    if save_fig:
-        model_name = list(data_by_layer.values())[0][0]['model_name']
-        filename = f"grand_average_model-{model_name}_all_layers_comparison.pdf"
-        plt.savefig(output_dir / filename, dpi=PLOT_CONFIG['figure_dpi'])
-        logger.info(f"Saved multi-layer comparison plot: {filename}")
-
-    return plt.gcf()
-
-
 def plot_multi_layer_nc_focus(data_by_layer: Dict[str, List[Dict[str, Any]]],
                               output_dir: Path, nc_lower: np.ndarray, nc_upper: np.ndarray,
                               save_fig: bool = True) -> plt.Figure:
@@ -436,6 +376,183 @@ def plot_rdm_sorted_by_supercategory(
     return fig
 
 
+def _run_layer_mixedlm(data_by_layer: Dict[str, List[Dict[str, Any]]], t_idx: int) -> str:
+    """
+    Run a mixed LM testing layer differences at a given time index.
+
+    Model: RSA ~ C(layer, Treatment('layer1')), random intercepts per subject.
+    Returns a formatted string of the fixed-effects table.
+    """
+    records = []
+    for layer_name, layer_data_list in data_by_layer.items():
+        for d in layer_data_list:
+            records.append({
+                'subject_id': str(d['subject_id']),
+                'layer': layer_name,
+                'rsa': float(d['rsa_timeseries'][t_idx]),
+            })
+    df = pd.DataFrame(records)
+    df['layer'] = pd.Categorical(df['layer'], categories=LAYER_ORDER, ordered=False)
+
+    model = smf.mixedlm(
+        "rsa ~ C(layer, Treatment('layer1'))",
+        data=df,
+        groups=df['subject_id'],
+    )
+    result = model.fit(reml=True, method='lbfgs')
+
+    fe = result.fe_params
+    ci = result.conf_int()
+    pvals = result.pvalues
+
+    out_lines = [f"  {'Parameter':<45} {'Coef':>8} {'CI_low':>8} {'CI_high':>8} {'p':>8}"]
+    out_lines.append("  " + "-" * 79)
+    for param in fe.index:
+        out_lines.append(
+            f"  {param:<45} {fe[param]:>8.4f} {ci.loc[param, 0]:>8.4f}"
+            f" {ci.loc[param, 1]:>8.4f} {pvals[param]:>8.4f}"
+        )
+    return '\n'.join(out_lines)
+
+
+def report_rsa_stats(
+    data_by_layer: Dict[str, List[Dict[str, Any]]],
+    times_ms: np.ndarray,
+    nc_lower: np.ndarray,
+    nc_upper: np.ndarray,
+    output_dir: Path,
+    processing_params: dict,
+    n_bootstrap: int = 10_000,
+) -> None:
+    """
+    Compute and save RSA stats to output_dir/source_data/rsa_stats.txt.
+
+    Reports:
+    - Processing parameters
+    - NC lower/upper at peak NC time
+    - Per-layer: N, peak time, mean RSA ± bootstrapped 95% CI (BCa) at peak and t=0
+    - Mixed LM (layer1 as reference, random intercepts per subject) at peak neural time
+      and peak NC time
+    """
+    times_s = times_ms / 1000.0
+
+    def _ci(values):
+        res = scipy_bootstrap(
+            (values,), np.mean, n_resamples=n_bootstrap,
+            confidence_level=0.95, method='BCa',
+        )
+        return res.confidence_interval.low, res.confidence_interval.high
+
+    # --- Header & methods ---
+    lines = [
+        "RSA Stats — CIs bootstrapped (BCa, n=10,000) across subjects (biological replicates)",
+        "=" * 70,
+        "Methods:",
+    ]
+    for key, val in processing_params.items():
+        lines.append(f"  {key}: {val}")
+    lines += ["  ci_method: bootstrap BCa", f"  n_bootstrap: {n_bootstrap}", ""]
+
+    # --- Noise ceiling at peak NC time ---
+    peak_nc_idx = int(np.argmax(nc_upper))
+    peak_nc_ms = times_ms[peak_nc_idx]
+    lines += [
+        "Noise Ceiling",
+        "-" * 40,
+        f"  Peak NC time:            {peak_nc_ms:.1f} ms",
+        f"  NC lower bound at peak:  {nc_lower[peak_nc_idx]:.4f}",
+        f"  NC upper bound at peak:  {nc_upper[peak_nc_idx]:.4f}",
+        "",
+    ]
+
+    # --- Per-layer descriptives ---
+    lines += ["Per-Layer Descriptives", "-" * 40]
+    all_rsa_by_layer = {}
+    for layer_name in sorted(data_by_layer, key=_layer_sort_key):
+        layer_data_list = data_by_layer[layer_name]
+        all_rsa = np.array([d['rsa_timeseries'] for d in layer_data_list])  # (n_subj, n_times)
+        all_rsa_by_layer[layer_name] = all_rsa
+        n_subj = all_rsa.shape[0]
+
+        grand_mean = all_rsa.mean(axis=0)
+        peak_t_idx = int(np.argmax(grand_mean))
+        peak_time_ms = times_ms[peak_t_idx]
+
+        vals_peak = all_rsa[:, peak_t_idx]
+        mean_peak = vals_peak.mean()
+        ci_low_peak, ci_high_peak = _ci(vals_peak)
+
+        t0_idx = int(np.argmin(np.abs(times_s)))
+        vals_t0 = all_rsa[:, t0_idx]
+        mean_t0 = vals_t0.mean()
+        ci_low_t0, ci_high_t0 = _ci(vals_t0)
+
+        lines += [
+            f"Layer: {layer_name}  (N={n_subj} subjects)",
+            f"  Peak time:               {peak_time_ms:.1f} ms",
+            f"  Mean RSA at peak:        {mean_peak:.4f}  [95% CI: {ci_low_peak:.4f}, {ci_high_peak:.4f}]",
+            f"  Mean RSA at t=0:         {mean_t0:.4f}  [95% CI: {ci_low_t0:.4f}, {ci_high_t0:.4f}]",
+            "",
+        ]
+
+    # --- Mixed LM: layer differences at peak neural time ---
+    # Grand average RSA across all layers and subjects to find peak neural time
+    all_rsa_concat = np.array([
+        d['rsa_timeseries']
+        for layer_data_list in data_by_layer.values()
+        for d in layer_data_list
+    ])
+    grand_peak_idx = int(np.argmax(all_rsa_concat.mean(axis=0)))
+    grand_peak_ms = times_ms[grand_peak_idx]
+
+    lines += [
+        "Mixed LM — Layer differences (reference: layer1, random intercepts per subject)",
+        "-" * 70,
+        "Model: rsa ~ C(layer, Treatment('layer1')), groups=subject_id (REML)",
+        "",
+        f"At peak neural time ({grand_peak_ms:.1f} ms):",
+    ]
+    lines.append(_run_layer_mixedlm(data_by_layer, grand_peak_idx))
+    lines.append("")
+
+    lines.append(f"At peak NC time ({peak_nc_ms:.1f} ms):")
+    lines.append(_run_layer_mixedlm(data_by_layer, peak_nc_idx))
+    lines.append("")
+
+    source_data_dir = output_dir / 'source_data'
+    source_data_dir.mkdir(exist_ok=True)
+    stats_file = source_data_dir / 'rsa_stats.txt'
+    stats_file.write_text('\n'.join(lines))
+    logger.info(f"Saved RSA stats to {stats_file}")
+
+
+def export_rsa_source_data(
+    data_by_layer: Dict[str, List[Dict[str, Any]]],
+    times_ms: np.ndarray,
+    output_dir: Path,
+) -> None:
+    """
+    Export per-subject RSA timeseries for all layers to a long-format CSV.
+    Saved to output_dir/source_data/rsa_source_data.csv.
+    """
+    records = []
+    for layer_name, layer_data_list in data_by_layer.items():
+        for d in layer_data_list:
+            for t_idx, t in enumerate(times_ms):
+                records.append({
+                    'subject_id': d['subject_id'],
+                    'layer': layer_name,
+                    'time_ms': t,
+                    'rsa': d['rsa_timeseries'][t_idx],
+                })
+
+    source_data_dir = output_dir / 'source_data'
+    source_data_dir.mkdir(exist_ok=True)
+    source_file = source_data_dir / 'rsa_source_data.csv'
+    pd.DataFrame(records).to_csv(source_file, index=False)
+    logger.info(f"Saved RSA source data to {source_file}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Plot RSA analysis results: multi-layer timeseries with noise ceiling"
@@ -523,12 +640,35 @@ def main():
         nc_lower = np.zeros(len(times))
         nc_upper = np.ones(len(times))
 
+    times_ms = rsa_data_list[0]["times"] * 1000
+
+    report_rsa_stats(
+        data_by_layer=data_by_layer,
+        times_ms=times_ms,
+        nc_lower=nc_lower,
+        nc_upper=nc_upper,
+        output_dir=output_dir,
+        processing_params={
+            'model': args.model_name,
+            'layers': ', '.join(sorted(data_by_layer, key=_layer_sort_key)),
+            'distance_metric': rsa_data_list[0].get('distance_metric', 'unknown'),
+            'median_filter_kernel': kernel,
+            'median_filter_cutoff_hz': '~40',
+            'noise_ceiling_method': 'boot_noise_ceiling (rsatoolbox), spearman',
+            'noise_ceiling_n_bootstrap': 1000,
+            'lm_reference_layer': 'layer1',
+            'lm_random_effects': 'random intercepts per subject',
+            'lm_estimation': 'REML',
+            'ci_unit': 'subjects (biological replicates)',
+        },
+    )
+    export_rsa_source_data(data_by_layer=data_by_layer, times_ms=times_ms, output_dir=output_dir)
+
     if len(data_by_layer) > 1:
         logger.info(f"\n{'='*60}")
         logger.info("Creating multi-layer comparison plot with magma palette...")
         logger.info(f"{'='*60}")
-        #plot_multi_layer_comparison(data_by_layer, output_dir)
-        plot_multi_layer_nc_focus(data_by_layer, output_dir, nc_lower = nc_lower, nc_upper = nc_upper)
+        plot_multi_layer_nc_focus(data_by_layer, output_dir, nc_lower=nc_lower, nc_upper=nc_upper)
 
     if len(first_layer_data) > 1:
         logger.info("Creating standalone noise ceiling figure...")
