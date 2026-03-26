@@ -566,7 +566,7 @@ def process_subject(
                 src=src_fsaverage,
                 spatial_radius=0.02,
                 stc_rdm_metric='correlation',   # first-level: brain RDM
-                rsa_metric='pearson',           # second-level: model vs brain
+                rsa_metric='spearman',          # second-level: model vs brain
                 n_jobs=n_jobs,
             )
         except Exception as e:
