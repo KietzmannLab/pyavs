@@ -382,14 +382,14 @@ def plot_grand_average(subjects_data: list, output_dir: Path, info_raw: mne.Info
 
     channel_palette = {ch: cmap(r * 0.8) for ch, r in zip(ch_names, norm_ranks)}
     sns.lineplot(data=df_channels, x='time', y='encoding [r]', hue='channel',
-                 palette=channel_palette, errorbar=('ci', 95), alpha=0.4,
-                 legend=False, ax=ax, zorder=1)
+                 palette=channel_palette, errorbar=('ci', 95), alpha=0.2,
+                 legend=False, ax=ax, zorder=1, n_boot=500)
 
     # Global mean ± bootstrapped 95% CI across subjects (biological replicates)
     sns.lineplot(data=df_global, x='time', y='encoding [r]',
         color='darkgrey', errorbar=('ci', 95), ax=ax, zorder=1000)
 
-    ax.axvline(x=0, color='grey', linestyle='--')
+    ax.axvline(x=0, color='grey', linestyle='--', zorder=0)
     ax.set_xlim(-100, 350)
     ax.set_xlabel('time [ms]')
     ax.set_ylabel('encoding [r]')
