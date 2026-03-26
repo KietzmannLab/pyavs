@@ -34,7 +34,7 @@ from tqdm import tqdm
 # Included:  1 (CC-BY-NC-SA), 2 (CC-BY-NC), 7 (no copyright), 8 (US Gov work).
 # Excluded:  3 (CC-BY-NC-ND) — derivatives not permitted.
 #            4 (CC-BY), 5 (CC-BY-SA), 6 (CC-BY-ND) — allow commercial use (not needed here).
-PERMISSIVE_LICENSE_IDS = [1, 2, 7, 8]
+PERMISSIVE_LICENSE_IDS = [4, 5, 7, 8]
 
 # License ID mapping verified against actual COCO dataset annotations.
 LICENSE_INFO = {
