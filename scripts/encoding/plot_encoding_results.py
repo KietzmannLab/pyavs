@@ -19,6 +19,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from statsmodels.stats.multitest import multipletests
+from scipy.stats import bootstrap as scipy_bootstrap
 try:
     import mne
 except ImportError as e:
@@ -184,6 +185,74 @@ def plot_encoding_joint(evoked: mne.EvokedArray, output_dir: Path, metadata: dic
         print(f"Could not create joint plot: {e}")
 
 
+def report_encoding_stats(
+    all_data: np.ndarray,
+    times_evoked: np.ndarray,
+    peak_t_idx: int,
+    output_dir: Path,
+    n_bootstrap: int = 10_000,
+) -> dict:
+    """
+    Compute and print encoding stats across subjects (biological replicates).
+
+    Bootstrapped 95% CI (BCa method) for mean channel-averaged encoding at
+    peak time and at t=0. Saves a one-row CSV to output_dir.
+
+    Parameters
+    ----------
+    all_data : np.ndarray, shape (n_subjects, n_channels, n_times)
+    times_evoked : np.ndarray
+        Times in seconds from grand_avg_evoked.times
+    peak_t_idx : int
+        Index of peak encoding time
+    output_dir : Path
+    n_bootstrap : int
+        Number of bootstrap resamples (default 10,000)
+    """
+    subject_means = all_data.mean(axis=1)   # (n_subjects, n_times)
+    n_subjects = subject_means.shape[0]
+    peak_time_ms = times_evoked[peak_t_idx] * 1000
+
+    def _ci(values):
+        res = scipy_bootstrap(
+            (values,), np.mean, n_resamples=n_bootstrap,
+            confidence_level=0.95, method='BCa',
+        )
+        return res.confidence_interval.low, res.confidence_interval.high
+
+    vals_peak = subject_means[:, peak_t_idx]
+    mean_peak = vals_peak.mean()
+    ci_low_peak, ci_high_peak = _ci(vals_peak)
+
+    t0_idx = int(np.argmin(np.abs(times_evoked)))
+    vals_t0 = subject_means[:, t0_idx]
+    mean_t0 = vals_t0.mean()
+    ci_low_t0, ci_high_t0 = _ci(vals_t0)
+
+    print(f"\n--- Encoding Stats (N={n_subjects} subjects) ---")
+    print(f"Peak time: {peak_time_ms:.1f} ms")
+    print(f"Mean encoding at peak: {mean_peak:.4f} [95% CI: {ci_low_peak:.4f}, {ci_high_peak:.4f}]")
+    print(f"Mean encoding at t=0:  {mean_t0:.4f} [95% CI: {ci_low_t0:.4f}, {ci_high_t0:.4f}]")
+    print("CIs are bootstrapped (BCa, n=10,000) across subjects (biological replicates).\n")
+
+    stats = {
+        'n_subjects': n_subjects,
+        'peak_time_ms': peak_time_ms,
+        'mean_at_peak': mean_peak,
+        'ci_low_at_peak': ci_low_peak,
+        'ci_high_at_peak': ci_high_peak,
+        'mean_at_t0': mean_t0,
+        'ci_low_at_t0': ci_low_t0,
+        'ci_high_at_t0': ci_high_t0,
+    }
+    source_data_dir = output_dir / 'source_data'
+    source_data_dir.mkdir(exist_ok=True)
+    stats_file = source_data_dir / 'grand_average_encoding_stats.csv'
+    pd.DataFrame([stats]).to_csv(stats_file, index=False)
+    print(f"Saved stats to {stats_file}")
+    return stats
+
+
 def plot_grand_average(subjects_data: list, output_dir: Path, info_raw: mne.Info, sfreq: float):
     """
     Create grand average plot across subjects matching individual plot style.
@@ -240,22 +309,54 @@ def plot_grand_average(subjects_data: list, output_dir: Path, info_raw: mne.Info
     peak_time_ms = peak_time_s * 1000
     print(f"Peak encoding time: {peak_time_ms:.1f} ms")
 
+    # Report stats (CI over subjects = biological replicates)
+    report_encoding_stats(
+        all_data=all_data,
+        times_evoked=grand_avg_evoked.times,
+        peak_t_idx=peak_t_idx,
+        output_dir=output_dir,
+    )
+
+    # Build long-format DataFrames with subject as the unit of variation
+    times_ms = grand_avg_evoked.times * 1000
+    ch_names = grand_avg_evoked.ch_names
+
+    # Vectorised construction: one row per (subject, channel, time)
+    n_subj, n_ch, n_t = all_data.shape
+    subj_idx_arr = np.repeat(np.arange(n_subj), n_ch * n_t)
+    ch_idx_arr   = np.tile(np.repeat(np.arange(n_ch), n_t), n_subj)
+    t_idx_arr    = np.tile(np.arange(n_t), n_subj * n_ch)
+
+    df_channels = pd.DataFrame({
+        'time':         times_ms[t_idx_arr],
+        'channel':      [ch_names[i] for i in ch_idx_arr],
+        'subject':      subj_idx_arr,
+        'encoding [r]': all_data[subj_idx_arr, ch_idx_arr, t_idx_arr],
+    })
+
+    # Global CI: mean across channels per subject → CI across subjects
+    subject_means = all_data.mean(axis=1)    # (n_subjects, n_times)
+    df_global = pd.DataFrame(subject_means.T)
+    df_global['time'] = times_ms
+    df_global = df_global.melt(id_vars='time', var_name='subject', value_name='encoding [r]')
+
+    # Export plot source data (required by editorial review)
+    source_data_dir = output_dir / 'source_data'
+    source_data_dir.mkdir(exist_ok=True)
+    subject_ids = [sd['subject_id'] for sd in subjects_data]
+    df_source = df_channels.copy()
+    df_source['subject_id'] = [subject_ids[s] for s in df_source['subject']]
+    df_source = df_source.rename(columns={'encoding [r]': 'encoding_r', 'time': 'time_ms'})
+    df_source = df_source[['subject_id', 'channel', 'time_ms', 'encoding_r']]
+    source_file = source_data_dir / 'grand_average_encoding_source_data.csv'
+    df_source.to_csv(source_file, index=False)
+    print(f"Saved plot source data to {source_file}")
+
     # Create plot matching individual subject style
     sns.set_context("poster")
     fig = grand_avg_evoked.plot(scalings=1, show=False, xlim=(-100, 350), time_unit='ms',
                                 units=dict(grad='ANN encoding [r]'),
                                spatial_colors=False, selectable=False)
-    # Reshape to long format for seaborn
-    df_ga = grand_avg_evoked.data
-    times_ms = grand_avg_evoked.times * 1000
-
-    df_long = pd.DataFrame(df_ga.T, columns=grand_avg_evoked.ch_names)
-    df_long['time'] = times_ms
-    df_long = df_long.melt(id_vars='time', var_name='channel', value_name='encoding [r]')
-    # get ax
-    ax=plt.gca()
- 
-    # limit the times
     
    
  
@@ -267,25 +368,34 @@ def plot_grand_average(subjects_data: list, output_dir: Path, info_raw: mne.Info
     peak_per_channel = np.max(grand_avg_data, axis=1)  # peak r per channel
     ranks = np.argsort(np.argsort(peak_per_channel))   # rank (0 = lowest)
     norm_ranks = ranks / (len(ranks) - 1)               # normalise to [0, 1]
-    cmap = plt.cm.magma 
-    
-    
+    cmap = plt.cm.magma
+
+    ax = plt.gca()
     for line, rank_val in zip(ax.get_lines(), norm_ranks):
         line.set_linewidth(1)
         line.set_alpha(0.4)
-        line.set_color(cmap(rank_val * 0.8)) # do not get too light
+        line.set_color(cmap(rank_val * 0.8))  # do not get too light
 
-    # Add reference lines
+    # Per-channel bootstrapped 95% CI across subjects (percentile, n=1000)
+    rng = np.random.default_rng(42)
+    for c_idx, rank_val in enumerate(norm_ranks):
+        ch_data = all_data[:, c_idx, :]   # (n_subjects, n_times)
+        boot_samples = rng.choice(ch_data, size=(1000, n_subj), replace=True).mean(axis=1)
+        ci_low  = np.percentile(boot_samples, 2.5, axis=0)
+        ci_high = np.percentile(boot_samples, 97.5, axis=0)
+        ax.fill_between(times_ms, ci_low, ci_high,
+                        color=cmap(rank_val * 0.8), alpha=0.08, zorder=0)
+
+    # Add reference lines and global mean ± 95% CI across subjects
     for ax in fig.axes:
         print(ax)
         if 'Time (ms)' in ax.get_xlabel():
             ax.set_title(None)
             ax.axvline(x=0, color='grey', linestyle='--')
-            #ax.axhline(y=0, color='grey', linestyle='-')
             ax.set_xlabel('time [ms]')
-            #ax.set_title(f'Grand Average (N={n_subjects})')
-            sns.lineplot(data=df_long, x='time', y='encoding [r]', 
-                color='darkgrey', linewidth=5, errorbar=('ci',95), ax=ax, zorder=1000)
+            # Global mean ± bootstrapped 95% CI across subjects (biological replicates)
+            sns.lineplot(data=df_global, x='time', y='encoding [r]',
+                color='darkgrey', errorbar=('ci', 95), ax=ax, zorder=1000)
 
 
     # Save timecourse figure
