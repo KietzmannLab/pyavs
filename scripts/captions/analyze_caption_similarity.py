@@ -17,10 +17,13 @@ import os
 import sys
 import numpy as np
 import pandas as pd
+from pathlib import Path
 from typing import List, Tuple
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics.pairwise import cosine_similarity
+from scipy.stats import bootstrap as scipy_bootstrap
+import statsmodels.formula.api as smf
 
 # Add pyavs to path for development
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -231,13 +234,29 @@ def analyze_caption_similarities(subjects: List[int], sessions: List[int],
         
         os.makedirs(output_dir, exist_ok=True)
         
-        # Save results
+        # Save full results
         results_file = os.path.join(output_dir, 'caption_similarity_results.csv')
         results.to_csv(results_file, index=False)
         logger.info(f"Results saved to: {results_file}")
-        
+
+        # Save plot source data
+        source_data_dir = os.path.join(output_dir, 'source_data')
+        os.makedirs(source_data_dir, exist_ok=True)
+        plot_cols = ['subject', 'session']
+        for scene_col in ('sceneID', 'scene_id', 'image_id'):
+            if scene_col in results.columns:
+                plot_cols.append(scene_col)
+        plot_cols += ['mean_similarity_to_mscoco', 'mscoco_self_similarity_mean']
+        results[plot_cols].to_csv(
+            os.path.join(source_data_dir, 'caption_similarity_source_data.csv'), index=False
+        )
+        logger.info(f"Plot source data saved to: {source_data_dir}/caption_similarity_source_data.csv")
+
         # Create plots
         create_similarity_plots(results, output_dir)
+
+        # Save stats report
+        report_caption_similarity_stats(results, output_dir)
     
     return results
 
@@ -275,6 +294,92 @@ def print_summary_statistics(results: pd.DataFrame):
             print("→ MSCOCO captions are more similar to each other than to German transcriptions")
         else:
             print("→ German transcriptions are as similar to MSCOCO as MSCOCO captions are to each other")
+
+
+def report_caption_similarity_stats(results: pd.DataFrame, output_dir: str) -> None:
+    """
+    Compute and save caption similarity stats to source_data/caption_similarity_stats.txt.
+
+    Reports:
+    - Config (subjects, sessions, embedding model, metric)
+    - Per-type descriptives: mean ± bootstrapped BCa 95% CI across subjects
+    - Mixed LM: mean_similarity_to_mscoco ~ mscoco_self_similarity_mean, groups=subject
+      Tests whether COCO self-similarity predicts German-to-COCO similarity.
+    """
+    N_BOOTSTRAP = 10_000
+
+    def _bca_ci(values):
+        res = scipy_bootstrap(
+            (np.asarray(values),), np.mean,
+            n_resamples=N_BOOTSTRAP, confidence_level=0.95, method='BCa',
+        )
+        return res.confidence_interval.low, res.confidence_interval.high
+
+    subjects = sorted(results['subject'].unique())
+    sessions = sorted(results['session'].unique())
+
+    # Per-subject means (CI unit = subjects)
+    subj_german = results.groupby('subject')['mean_similarity_to_mscoco'].mean()
+    subj_coco   = results.groupby('subject')['mscoco_self_similarity_mean'].mean()
+
+    ci_german = _bca_ci(subj_german.values)
+    ci_coco   = _bca_ci(subj_coco.values)
+
+    # Mixed LM: german-to-coco ~ coco-self-similarity (random intercepts per subject)
+    df_lm = results.dropna(subset=['mean_similarity_to_mscoco', 'mscoco_self_similarity_mean']).copy()
+    lm = smf.mixedlm(
+        'mean_similarity_to_mscoco ~ mscoco_self_similarity_mean',
+        data=df_lm,
+        groups=df_lm['subject'],
+    ).fit(reml=True, method='lbfgs')
+
+    fe    = lm.fe_params
+    ci_lm = lm.conf_int()
+    pvals = lm.pvalues
+
+    # Build txt
+    lines = [
+        'Caption Similarity Stats — CIs bootstrapped (BCa, n=10,000) across subjects (biological replicates)',
+        '=' * 70,
+        'Configuration:',
+        f'  subjects:              {subjects}',
+        f'  n_subjects:            {len(subjects)}',
+        f'  sessions:              {sessions}',
+        f'  n_scenes_total:        {len(results)}',
+        f'  embedding_model:       distiluse-base-multilingual-cased',
+        f'  similarity_metric:     cosine similarity',
+        f'  ci_method:             bootstrap BCa',
+        f'  n_bootstrap:           {N_BOOTSTRAP}',
+        f'  lm_estimation:         REML',
+        f'  lm_random_effects:     random intercepts per subject',
+        '',
+        'Descriptives (CI over subjects)',
+        '-' * 70,
+        f"  {'Measure':<35} {'N_subj':>7} {'Mean':>8} {'CI_low':>8} {'CI_high':>8}",
+        '  ' + '-' * 62,
+        f"  {'German-to-COCO similarity':<35} {len(subj_german):>7} "
+        f"{subj_german.mean():>8.4f} {ci_german[0]:>8.4f} {ci_german[1]:>8.4f}",
+        f"  {'COCO self-similarity':<35} {len(subj_coco):>7} "
+        f"{subj_coco.mean():>8.4f} {ci_coco[0]:>8.4f} {ci_coco[1]:>8.4f}",
+        '',
+        'Mixed LM: german_to_coco ~ coco_self_similarity  (random intercepts per subject, REML)',
+        '-' * 70,
+        f"  {'Parameter':<35} {'Coef':>8} {'CI_low':>8} {'CI_high':>8} {'p':>8}",
+        '  ' + '-' * 62,
+    ]
+    for param in fe.index:
+        lines.append(
+            f"  {param:<35} {fe[param]:>8.4f} "
+            f"{ci_lm.loc[param, 0]:>8.4f} {ci_lm.loc[param, 1]:>8.4f} "
+            f"{pvals[param]:>8.4f}"
+        )
+
+    source_data_dir = os.path.join(output_dir, 'source_data')
+    os.makedirs(source_data_dir, exist_ok=True)
+    stats_path = os.path.join(source_data_dir, 'caption_similarity_stats.txt')
+    with open(stats_path, 'w') as f:
+        f.write('\n'.join(lines))
+    logger.info(f"Saved caption similarity stats to {stats_path}")
 
 
 def create_similarity_plots(results: pd.DataFrame, output_dir: str):

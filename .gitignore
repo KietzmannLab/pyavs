@@ -308,3 +308,6 @@ docs/api/generated/
 *.svg
 *.pdf
 *.gif
+
+*source_data.csv
+*stats.txt
