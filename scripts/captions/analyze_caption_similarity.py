@@ -24,7 +24,6 @@ import seaborn as sns
 from sklearn.metrics.pairwise import cosine_similarity
 from scipy.stats import bootstrap as scipy_bootstrap
 import statsmodels.formula.api as smf
-
 # Add pyavs to path for development
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -326,17 +325,18 @@ def report_caption_similarity_stats(results: pd.DataFrame, output_dir: str) -> N
     ci_german = _bca_ci(subj_german.values)
     ci_coco   = _bca_ci(subj_coco.values)
 
-    # Mixed LM: german-to-coco ~ coco-self-similarity (random intercepts per subject)
+    # OLS with standard errors clustered by subject
+    # (mixed LM collapses to OLS here because between-subject intercept variance ≈ 0;
+    #  clustering SEs by subject still accounts for within-subject correlation)
     df_lm = results.dropna(subset=['mean_similarity_to_mscoco', 'mscoco_self_similarity_mean']).copy()
-    lm = smf.mixedlm(
+    ols_fit = smf.ols(
         'mean_similarity_to_mscoco ~ mscoco_self_similarity_mean',
         data=df_lm,
-        groups=df_lm['subject'],
-    ).fit(reml=True, method='lbfgs')
+    ).fit(cov_type='cluster', cov_kwds={'groups': df_lm['subject']})
 
-    fe    = lm.fe_params
-    ci_lm = lm.conf_int()
-    pvals = lm.pvalues
+    fe    = ols_fit.params
+    ci_lm = ols_fit.conf_int()
+    pvals = ols_fit.pvalues
 
     # Build txt
     lines = [
@@ -351,8 +351,8 @@ def report_caption_similarity_stats(results: pd.DataFrame, output_dir: str) -> N
         f'  similarity_metric:     cosine similarity',
         f'  ci_method:             bootstrap BCa',
         f'  n_bootstrap:           {N_BOOTSTRAP}',
-        f'  lm_estimation:         REML',
-        f'  lm_random_effects:     random intercepts per subject',
+        f'  regression_model:      OLS with subject-clustered SEs',
+        f'  note:                  mixed LM not used — between-subject intercept variance ≈ 0',
         '',
         'Descriptives (CI over subjects)',
         '-' * 70,
@@ -363,7 +363,7 @@ def report_caption_similarity_stats(results: pd.DataFrame, output_dir: str) -> N
         f"  {'COCO self-similarity':<35} {len(subj_coco):>7} "
         f"{subj_coco.mean():>8.4f} {ci_coco[0]:>8.4f} {ci_coco[1]:>8.4f}",
         '',
-        'Mixed LM: german_to_coco ~ coco_self_similarity  (random intercepts per subject, REML)',
+        'OLS: german_to_coco ~ coco_self_similarity  (SEs clustered by subject)',
         '-' * 70,
         f"  {'Parameter':<35} {'Coef':>8} {'CI_low':>8} {'CI_high':>8} {'p':>8}",
         '  ' + '-' * 62,
