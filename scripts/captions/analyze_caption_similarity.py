@@ -128,10 +128,13 @@ def analyze_caption_similarities(subjects: List[int], sessions: List[int],
     
     # Debug: show example of MSCOCO captions (already parsed by load_captions)
     if len(captions_df) > 0:
-        example_idx = 0
-        example_captions = captions_df['mscoco_captions'].iloc[example_idx]
-        logger.info(f"Example MSCOCO captions: {example_captions}")
+        example_idxs = [0, 1, 2]
+        for idx in example_idxs:
+            if idx < len(captions_df):
+                logger.info(f"Scene {idx} MSCOCO captions: {captions_df['mscoco_captions'].iloc[idx]}")
     
+    # import and use debugger
+    import pdb; pdb.set_trace()
     # Filter for entries with both transcribed and MSCOCO captions
     valid_entries = captions_df[
         (captions_df['transcribed_caption'].notna()) & 
@@ -454,20 +457,20 @@ Examples:
     group.add_argument('--subjects', type=int, nargs='+', help='List of subject IDs to analyze')
     
     parser.add_argument('--session', type=int, help='Single session number (required if --subject used)')
-    parser.add_argument('--sessions', type=int, nargs='+', default=[1], 
+    parser.add_argument('--sessions', type=int, nargs='+', default=np.arange(1, 11), 
                        help='List of session numbers to analyze (default: [1])')
     
     # Data path
-    parser.add_argument('--data-path', type=str, required=True,
-                       help='Path to AVS data directory')
+    parser.add_argument('--data-path', type=str,
+                       help='Path to AVS data directory', default='/share/klab/datasets/avs/')
     
     # COCO annotations
-    parser.add_argument('--coco-annotations', type=str, default=None,
+    parser.add_argument('--coco-annotations', type=str, default='/share/klab/datasets/AVS_UTILS/coco_annotations/',
                        help='Path to COCO annotations file (optional, will auto-search if not provided)')
     
     # Output options
-    parser.add_argument('--output-dir', type=str, default=None,
-                       help='Directory to save results and plots (optional)')
+    parser.add_argument('--output-dir', type=str,
+                       help='Directory to save results and plots (optional)', default='/share/klab/psulewski/psulewski/pyavs/captions/')
     
     # Processing options
     parser.add_argument('--verbose', '-v', action='store_true',
