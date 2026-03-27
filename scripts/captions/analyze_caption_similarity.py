@@ -133,8 +133,6 @@ def analyze_caption_similarities(subjects: List[int], sessions: List[int],
             if idx < len(captions_df):
                 logger.info(f"Scene {idx} MSCOCO captions: {captions_df['mscoco_captions'].iloc[idx]}")
     
-    # import and use debugger
-    import pdb; pdb.set_trace()
     # Filter for entries with both transcribed and MSCOCO captions
     valid_entries = captions_df[
         (captions_df['transcribed_caption'].notna()) & 
@@ -465,7 +463,7 @@ Examples:
                        help='Path to AVS data directory', default='/share/klab/datasets/avs/')
     
     # COCO annotations
-    parser.add_argument('--coco-annotations', type=str, default='/share/klab/datasets/AVS_UTILS/coco_annotations/',
+    parser.add_argument('--coco-annotations', type=str, default='/share/klab/datasets/AVS_UTILS/avs_scene_annotations/coco_objects/',
                        help='Path to COCO annotations file (optional, will auto-search if not provided)')
     
     # Output options

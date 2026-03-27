@@ -343,7 +343,20 @@ def load_captions(subjects: Union[int, List[int]],
         if coco_annotations_path is None:
             coco_annotations_path = find_coco_annotations(data_path)
         elif isinstance(coco_annotations_path, str):
-            coco_annotations_path = [coco_annotations_path]
+            # If a directory was passed, search within it for annotation JSON files
+            if os.path.isdir(coco_annotations_path):
+                coco_annotations_path = find_coco_annotations(coco_annotations_path)
+            else:
+                coco_annotations_path = [coco_annotations_path]
+        elif isinstance(coco_annotations_path, list):
+            # Expand any directories in the list
+            expanded = []
+            for p in coco_annotations_path:
+                if os.path.isdir(p):
+                    expanded.extend(find_coco_annotations(p))
+                else:
+                    expanded.append(p)
+            coco_annotations_path = expanded
         
         if coco_annotations_path and HAS_PYCOCOTOOLS:
             try:
