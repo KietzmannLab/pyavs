@@ -463,7 +463,7 @@ Examples:
                        help='Path to AVS data directory', default='/share/klab/datasets/avs/')
     
     # COCO annotations
-    parser.add_argument('--coco-annotations', type=str, default='/share/klab/datasets/AVS_UTILS/avs_scene_annotations/coco_objects/',
+    parser.add_argument('--coco-annotations', type=str, default='/share/klab/datasets/avs/input/annotations/',
                        help='Path to COCO annotations file (optional, will auto-search if not provided)')
     
     # Output options
