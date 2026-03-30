@@ -166,8 +166,8 @@ def plot_duration_heatmap(
     g.plot_marginals(sns.histplot, bins=30, kde=True, color="gray")
     #
     
-    # set figure size
-    plt.gcf().set_size_inches(9, 7)
+    # set figure size (9, 7)
+    g.fig.set_size_inches(9, 7)
     # Labels and title
     g.ax_joint.set_xlabel('saccade duration [ms]')
     g.ax_joint.set_ylabel('fixation duration [ms]')
