@@ -251,6 +251,139 @@ def get_condition_fractions(fix2cap_df: pd.DataFrame) -> dict:
     return fractions
 
 
+def report_fix2cap_stats(
+    data_path: str,
+    datasets: Optional[List[str]] = None,
+    output_dir: str = ".",
+) -> None:
+    """
+    Report fix2cap rating counts and percentages per rater, with mean ± SD across raters.
+
+    Saves:
+      source_data/fix2cap_rating_source_data.csv  — per-rater counts & percents
+      source_data/fix2cap_rating_stats.txt        — summary table
+
+    Parameters
+    ----------
+    data_path : str
+        Base AVS data path
+    datasets : Optional[List[str]]
+        Which rater datasets to include (default: ["ld", "og"])
+    output_dir : str
+        Directory where source_data/ subdirectory will be created
+    """
+    if datasets is None:
+        datasets = ["ld", "og"]
+
+    fix2cap = load_fix2cap_data(
+        data_path=data_path,
+        datasets=datasets,
+        filter_done=True,
+        subject_id=None,
+        process_ratings=True,
+        verbose=True,
+    )
+
+    categories = ['self', 'other', 'false']
+
+    # Per-rater counts and percents
+    rows = []
+    for rater in datasets:
+        df_r = fix2cap[fix2cap['rater_id'] == rater]
+        total = len(df_r)
+        n_subjects = df_r['subject'].nunique() if 'subject' in df_r.columns else None
+        n_scenes   = df_r['sceneID'].nunique() if 'sceneID' in df_r.columns else None
+        for cat in categories:
+            count = (df_r['none_style'].astype(str).str.lower() == cat).sum()
+            pct   = 100.0 * count / total if total > 0 else 0.0
+            rows.append({
+                'rater_id':   rater,
+                'category':   cat,
+                'n_total':    total,
+                'count':      count,
+                'percent':    pct,
+                'n_subjects': n_subjects,
+                'n_scenes':   n_scenes,
+            })
+
+    source_df = pd.DataFrame(rows)
+
+    # Mean ± SD across raters per category
+    summary = (
+        source_df.groupby('category')
+        .agg(
+            mean_count=('count',   'mean'),
+            sd_count=  ('count',   'std'),
+            mean_pct=  ('percent', 'mean'),
+            sd_pct=    ('percent', 'std'),
+        )
+        .reindex(categories)
+        .reset_index()
+    )
+
+    # Save source data CSV
+    source_data_dir = os.path.join(output_dir, 'source_data')
+    os.makedirs(source_data_dir, exist_ok=True)
+    csv_path = os.path.join(source_data_dir, 'fix2cap_rating_source_data.csv')
+    source_df.to_csv(csv_path, index=False)
+    logger.info(f"Source data saved to: {csv_path}")
+
+    # Build stats txt
+    n_raters = len(datasets)
+    rater_totals = source_df.drop_duplicates('rater_id').set_index('rater_id')
+
+    lines = [
+        'Fix2Cap Rating Stats',
+        '=' * 60,
+        'Configuration:',
+        f'  raters:            {datasets}',
+        f'  n_raters:          {n_raters}',
+        f'  rating_categories: self, other, none (false)',
+        f'  ci_unit:           raters (N={n_raters})',
+        '',
+        'Per-rater totals:',
+    ]
+    for rater in datasets:
+        row = rater_totals.loc[rater]
+        lines.append(
+            f'  {rater}: {int(row["n_total"])} fixations  '
+            f'({int(row["n_subjects"] or 0)} subjects, '
+            f'{int(row["n_scenes"] or 0)} scenes)'
+        )
+
+    lines += [
+        '',
+        'Per-rater counts and percentages:',
+        '-' * 60,
+        f"  {'rater':<8} {'category':<10} {'count':>8} {'percent':>10}",
+        '  ' + '-' * 40,
+    ]
+    for _, r in source_df.iterrows():
+        lines.append(
+            f"  {r['rater_id']:<8} {r['category']:<10} "
+            f"{int(r['count']):>8} {r['percent']:>9.2f}%"
+        )
+
+    lines += [
+        '',
+        f'Mean ± SD across raters (N={n_raters}):',
+        '-' * 60,
+        f"  {'category':<10} {'mean_count':>12} {'sd_count':>10} "
+        f"{'mean_%':>10} {'sd_%':>8}",
+        '  ' + '-' * 54,
+    ]
+    for _, r in summary.iterrows():
+        lines.append(
+            f"  {r['category']:<10} {r['mean_count']:>12.1f} {r['sd_count']:>10.1f} "
+            f"{r['mean_pct']:>9.2f}% {r['sd_pct']:>7.2f}%"
+        )
+
+    txt_path = os.path.join(source_data_dir, 'fix2cap_rating_stats.txt')
+    with open(txt_path, 'w') as f:
+        f.write('\n'.join(lines) + '\n')
+    logger.info(f"Stats saved to: {txt_path}")
+
+
 def plot_condition_summary(
     fix2cap_df: pd.DataFrame,
     output_dir: str = "plots",
@@ -629,12 +762,22 @@ def main(subject_id: Optional[int] = None):
     )
     logger.info(f"Selected {len(selected_scenes)} scenes for visualization")
 
-    # Step 4: Create overall condition summary
+    # Step 4: Create overall condition summary and export stats
     logger.info(f"\nStep 4: Creating overall condition summary")
     try:
         plot_condition_summary(fix2cap_df, output_dir=plots_dir)
     except Exception as e:
         logger.error(f"Error creating summary plot: {e}")
+
+    logger.info(f"\nStep 4b: Exporting rating stats")
+    try:
+        report_fix2cap_stats(
+            data_path=config.data_path,
+            datasets=["ld", "og"],
+            output_dir=plots_dir,
+        )
+    except Exception as e:
+        logger.error(f"Error exporting rating stats: {e}")
 
     # Step 5: Create scene visualizations
     logger.info(f"\nStep 5: Creating scene visualizations")
