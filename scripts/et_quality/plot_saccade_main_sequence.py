@@ -217,12 +217,16 @@ def preprocess_saccades(saccades_df: pd.DataFrame,
 def plot_main_sequence_temporal(saccades_df: pd.DataFrame, output_dir: str,
                                 dpi: int = 300, fmt: str = 'both'):
     """
-    Create overlaid KDE contours for temporal bins.
+    Plot saccade main sequence with bootstrapped 95% CI over subjects per time bin.
+
+    For each subject × time bin, amplitude is divided into 20 equal-width bins
+    and the mean velocity per bin is computed. sns.lineplot then bootstraps the
+    CI across subjects at each amplitude bin centre.
 
     Parameters
     ----------
     saccades_df : pd.DataFrame
-        Preprocessed saccades with time_bin and clipped metrics
+        Preprocessed saccades with time_bin and clipped metrics (pixels)
     output_dir : str
         Output directory for saving figure
     dpi : int, default=300
@@ -232,69 +236,91 @@ def plot_main_sequence_temporal(saccades_df: pd.DataFrame, output_dir: str,
     """
     logger.info("Creating figure: Saccade main sequence temporal analysis")
 
-    # Setup styling
-    sns.set_context("poster")
+    TIME_BIN_ORDER = ['<1s', '1-2s', '2-3s', '3-4s']
+    N_AMP_BINS     = 20
+    pix_deg        = 31
 
-    
-    # Color palette
-    #bin_labels = ['early', 'mid-early', 'mid-late', 'late']
-    colors = sns.color_palette("magma", n_colors=4)
-    # convert pixels to degrees (assuming 33 px/deg as in AVS)
-    pix_deg = 31
-    #saccades_df['amplitude_clipped'] = saccades_df['amplitude_clipped'] / pix_deg
+    # Convert to degrees in-place
+    saccades_df['amplitude_clipped']     = saccades_df['amplitude_clipped']     / pix_deg
     saccades_df['peak_velocity_clipped'] = saccades_df['peak_velocity_clipped'] / pix_deg
-    saccades_df['amplitude_clipped'] = saccades_df['amplitude_clipped'] / pix_deg
-    # Plot KDE for each temporal bin
+
+    # Common amplitude bin edges (1st–99th percentile of pooled data)
+    amp_min  = saccades_df['amplitude_clipped'].quantile(0.01)
+    amp_max  = saccades_df['amplitude_clipped'].quantile(0.99)
+    amp_bins = np.linspace(amp_min, amp_max, N_AMP_BINS + 1)
+    amp_centres = 0.5 * (amp_bins[:-1] + amp_bins[1:])
+
+    # Per-subject × per-bin mean velocity at each amplitude bin centre
+    binned_rows = []
+    for subj in sorted(saccades_df['subject'].unique()):
+        for tbin in TIME_BIN_ORDER:
+            subset = saccades_df[
+                (saccades_df['subject'] == subj) &
+                (saccades_df['time_bin'] == tbin)
+            ]
+            if len(subset) < 10:
+                continue
+            bin_idx = np.digitize(subset['amplitude_clipped'].values, amp_bins) - 1
+            bin_idx = bin_idx.clip(0, N_AMP_BINS - 1)
+            vel_vals = subset['peak_velocity_clipped'].values
+            for b in range(N_AMP_BINS):
+                mask = bin_idx == b
+                if mask.sum() < 3:
+                    continue
+                binned_rows.append({
+                    'subject':       int(subj),
+                    'time_bin':      tbin,
+                    'amplitude_deg': float(amp_centres[b]),
+                    'velocity_deg':  float(vel_vals[mask].mean()),
+                })
+    binned_df = pd.DataFrame(binned_rows)
+    binned_df['time_bin'] = pd.Categorical(
+        binned_df['time_bin'], categories=TIME_BIN_ORDER, ordered=True
+    )
+
+    sns.set_context("poster")
+    colors  = sns.color_palette("magma", n_colors=4)
+    palette = dict(zip(TIME_BIN_ORDER, colors))
+
     g = sns.JointGrid(data=saccades_df, x='amplitude_clipped', y='peak_velocity_clipped')
 
-    # Plot your binned scatter with hue on the joint axes
-    for time_bin, color in zip(saccades_df['time_bin'].unique(), colors):
-        subset = saccades_df[saccades_df['time_bin'] == time_bin]
-        sns.regplot(
-            data=subset,
-            x='amplitude_clipped',
-            y='peak_velocity_clipped',
-            x_bins=20,
-            fit_reg=True,
-            lowess=True,
-            scatter=False,
-            #scatter_kws={'alpha': 0.3},
-            ax=g.ax_joint,
-            color=color,
-            label=time_bin
-        )
-        # add legend
+    # Joint: mean line + 95% CI over subjects
+    sns.lineplot(
+        data=binned_df,
+        x='amplitude_deg',
+        y='velocity_deg',
+        hue='time_bin',
+        hue_order=TIME_BIN_ORDER,
+        palette=palette,
+        errorbar=('ci', 95),
+        legend=True,
+        ax=g.ax_joint,
+    )
     g.ax_joint.legend(title='viewing time', frameon=False)
 
     # Marginal KDEs
-    for time_bin, color in zip(saccades_df['time_bin'].unique(), colors):
-        subset = saccades_df[saccades_df['time_bin'] == time_bin]
-        sns.kdeplot(data=subset, x='amplitude_clipped', ax=g.ax_marg_x, color=color, fill=True, alpha=0.3)
-        sns.kdeplot(data=subset, y='peak_velocity_clipped', ax=g.ax_marg_y, color=color, fill=True, alpha=0.3)
-        # set figure size
+    for tbin, color in zip(TIME_BIN_ORDER, colors):
+        subset = saccades_df[saccades_df['time_bin'] == tbin]
+        sns.kdeplot(data=subset, x='amplitude_clipped', ax=g.ax_marg_x,
+                    color=color, fill=True, alpha=0.3)
+        sns.kdeplot(data=subset, y='peak_velocity_clipped', ax=g.ax_marg_y,
+                    color=color, fill=True, alpha=0.3)
+
     plt.gcf().set_size_inches(9, 7)
-    # get the current axis
-    #ax = plt.gca()
-    # Labels (lowercase)
     g.ax_joint.set_xlabel('saccade amplitude [°]')
     g.ax_joint.set_ylabel('peak velocity [°/s]')
-
-    # Legend and styling
-    
     sns.despine()
     plt.tight_layout()
 
-    # Save figure
+    os.makedirs(output_dir, exist_ok=True)
     if fmt in ['png', 'both']:
         png_file = os.path.join(output_dir, 'saccade_main_sequence_temporal.png')
         plt.savefig(png_file, dpi=dpi, bbox_inches='tight')
         logger.info(f"Saved: {png_file}")
-
     if fmt in ['pdf', 'both']:
         pdf_file = os.path.join(output_dir, 'saccade_main_sequence_temporal.pdf')
         plt.savefig(pdf_file, format='pdf', bbox_inches='tight')
         logger.info(f"Saved: {pdf_file}")
-
     plt.close()
 
 
