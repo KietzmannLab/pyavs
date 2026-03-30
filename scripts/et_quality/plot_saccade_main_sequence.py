@@ -301,42 +301,42 @@ def plot_main_sequence_temporal(saccades_df: pd.DataFrame, output_dir: str,
 def report_main_sequence_stats(
     saccades_df: pd.DataFrame,
     output_dir: str,
-    pix_deg: float = 33.0,
+    pix_deg: float = 31.0,
     outlier_percentile: float = 99.0,
 ) -> None:
     """
     Test stability of the saccadic main sequence across 4 temporal viewing bins.
 
-    Uses amplitude_clipped / peak_velocity_clipped (still in pixels at call time —
-    must be called BEFORE plot_main_sequence_temporal which converts in-place).
+    Must be called BEFORE plot_main_sequence_temporal, which converts
+    amplitude_clipped / peak_velocity_clipped in-place from pixels to degrees.
 
     Approach
     --------
-    1. Per-subject × per-bin Pearson r between log(amplitude) and log(peak_velocity).
+    1. Per-subject × per-bin OLS: log_velocity ~ log_amplitude.
+       Extracts slope (main-sequence exponent) and Pearson r per cell.
        BCa CI across subjects per bin.
-    2. Mixed LM:
-         log_velocity ~ log_amplitude * C(time_bin, Treatment('<1s'))
+
+    2. Simplified mixed LM on the 20 slope values (5 subjects × 4 bins):
+         slope ~ C(time_bin, Treatment('<1s'))
          random intercepts per subject (REML)
-       Interaction terms test whether the main-sequence slope shifts from the
-       earliest bin. Non-significant interactions = slope is stable.
+       Tests whether the main-sequence slope shifts across bins without the
+       statistical overpower of a saccade-level model.
 
     Saves
     -----
-    source_data/main_sequence_source_data.csv        — per-saccade log values
-    source_data/main_sequence_per_subject_bin_r.csv  — per-subject × bin r values
+    source_data/main_sequence_source_data.csv        — per-saccade degree values
+    source_data/main_sequence_per_subject_bin.csv    — per-subject × bin slope & r
     source_data/main_sequence_stability_stats.txt    — full stats report
     """
-    N_BOOTSTRAP   = 10_000
+    N_BOOTSTRAP    = 10_000
     TIME_BIN_ORDER = ['<1s', '1-2s', '2-3s', '3-4s']
 
-    # Convert to degrees (pixels still at this point)
+    # Convert to degrees
     df = saccades_df.dropna(
         subset=['amplitude_clipped', 'peak_velocity_clipped', 'time_bin', 'subject']
     ).copy()
     df['amplitude_deg'] = df['amplitude_clipped'] / pix_deg
     df['velocity_deg']  = df['peak_velocity_clipped'] / pix_deg
-
-    # Log-transform (filter non-positive values first)
     df = df[(df['amplitude_deg'] > 0) & (df['velocity_deg'] > 0)].copy()
     df['log_amplitude'] = np.log(df['amplitude_deg'])
     df['log_velocity']  = np.log(df['velocity_deg'])
@@ -346,23 +346,28 @@ def report_main_sequence_stats(
     n_subjects = len(subjects)
 
     # ------------------------------------------------------------------
-    # 1. Per-subject × per-bin Pearson r
+    # 1. Per-subject × per-bin OLS slope and Pearson r
     # ------------------------------------------------------------------
-    corr_rows = []
+    slope_rows = []
     for subj in subjects:
         for tbin in TIME_BIN_ORDER:
             subset = df[(df['subject'] == subj) & (df['time_bin'] == tbin)]
             if len(subset) < 10:
                 continue
-            r, p = pearsonr(subset['log_amplitude'], subset['log_velocity'])
-            corr_rows.append({
+            x = subset['log_amplitude'].values
+            y = subset['log_velocity'].values
+            # OLS slope via np.polyfit (degree 1)
+            slope, intercept = np.polyfit(x, y, 1)
+            r, _ = pearsonr(x, y)
+            slope_rows.append({
                 'subject':    int(subj),
                 'time_bin':   tbin,
                 'n_saccades': len(subset),
+                'slope':      float(slope),
+                'intercept':  float(intercept),
                 'pearson_r':  float(r),
-                'p_value':    float(p),
             })
-    corr_df = pd.DataFrame(corr_rows)
+    slope_df = pd.DataFrame(slope_rows)
 
     def _bca(vals):
         res = scipy_bootstrap(
@@ -373,27 +378,33 @@ def report_main_sequence_stats(
 
     bin_summary = []
     for tbin in TIME_BIN_ORDER:
-        subj_r = corr_df[corr_df['time_bin'] == tbin]['pearson_r'].values
-        if len(subj_r) < 2:
+        rows = slope_df[slope_df['time_bin'] == tbin]
+        if len(rows) < 2:
             continue
-        ci = _bca(subj_r)
+        ci_s = _bca(rows['slope'].values)
+        ci_r = _bca(rows['pearson_r'].values)
         bin_summary.append({
-            'time_bin': tbin,
-            'n_subjects': len(subj_r),
-            'mean_r':   float(np.mean(subj_r)),
-            'sd_r':     float(np.std(subj_r)),
-            'ci_low':   float(ci[0]),
-            'ci_high':  float(ci[1]),
+            'time_bin':   tbin,
+            'n_subjects': len(rows),
+            'n_saccades': int(rows['n_saccades'].sum()),
+            'mean_slope': float(rows['slope'].mean()),
+            'sd_slope':   float(rows['slope'].std()),
+            'ci_slope_low':  float(ci_s[0]),
+            'ci_slope_high': float(ci_s[1]),
+            'mean_r':     float(rows['pearson_r'].mean()),
+            'sd_r':       float(rows['pearson_r'].std()),
+            'ci_r_low':   float(ci_r[0]),
+            'ci_r_high':  float(ci_r[1]),
         })
     bin_summary_df = pd.DataFrame(bin_summary)
 
     # ------------------------------------------------------------------
-    # 2. Mixed LM: slope × bin interaction
+    # 2. Mixed LM on per-subject × per-bin slopes (N=20)
     # ------------------------------------------------------------------
     lm = smf.mixedlm(
-        "log_velocity ~ log_amplitude * C(time_bin, Treatment('<1s'))",
-        data=df,
-        groups=df['subject'],
+        "slope ~ C(time_bin, Treatment('<1s'))",
+        data=slope_df,
+        groups=slope_df['subject'],
     ).fit(reml=True, method='lbfgs')
 
     fe    = lm.fe_params
@@ -406,13 +417,12 @@ def report_main_sequence_stats(
     source_data_dir = os.path.join(output_dir, 'source_data')
     os.makedirs(source_data_dir, exist_ok=True)
 
-    plot_cols = ['subject', 'time_bin', 'amplitude_deg', 'velocity_deg',
-                 'log_amplitude', 'log_velocity']
-    df[plot_cols].to_csv(
+    df[['subject', 'time_bin', 'amplitude_deg', 'velocity_deg',
+        'log_amplitude', 'log_velocity']].to_csv(
         os.path.join(source_data_dir, 'main_sequence_source_data.csv'), index=False
     )
-    corr_df.to_csv(
-        os.path.join(source_data_dir, 'main_sequence_per_subject_bin_r.csv'), index=False
+    slope_df.to_csv(
+        os.path.join(source_data_dir, 'main_sequence_per_subject_bin.csv'), index=False
     )
 
     # ------------------------------------------------------------------
@@ -430,47 +440,39 @@ def report_main_sequence_stats(
         f'  amplitude_unit:      degrees of visual angle [°]',
         f'  velocity_unit:       degrees per second [°/s]',
         f'  ci_method:           bootstrap BCa (n={N_BOOTSTRAP}) across subjects',
-        f'  lm_formula:          log_velocity ~ log_amplitude * C(time_bin, ref="<1s")',
-        f'  lm_random_effects:   random intercepts per subject (REML)',
+        f'  slope_estimation:    per-subject OLS (log_velocity ~ log_amplitude)',
+        f'  lm_formula:          slope ~ C(time_bin, ref="<1s"), groups=subject (REML)',
+        f'  lm_n_observations:   {len(slope_df)} (N_subjects × N_bins)',
         '',
-        'Per-bin Pearson r [log(amplitude [°]) vs log(peak_velocity [°/s])]:',
+        'Per-bin main-sequence slope and Pearson r (mean ± BCa 95% CI across subjects):',
         '-' * 70,
-        f"  {'time_bin':<10} {'n_subj':>7} {'n_sacc':>8} {'mean_r':>8} "
-        f"{'SD_r':>8} {'CI_low':>8} {'CI_high':>8}",
-        '  ' + '-' * 62,
+        f"  {'bin':<8} {'n_subj':>6} {'n_sacc':>8} "
+        f"{'mean_slope':>11} {'SD':>6} {'CI_low':>8} {'CI_high':>8} "
+        f"{'mean_r':>8} {'CI_low':>8} {'CI_high':>8}",
+        '  ' + '-' * 78,
     ]
     for _, row in bin_summary_df.iterrows():
-        n_sacc = int(corr_df[corr_df['time_bin'] == row['time_bin']]['n_saccades'].sum())
         lines.append(
-            f"  {row['time_bin']:<10} {int(row['n_subjects']):>7} {n_sacc:>8} "
-            f"{row['mean_r']:>8.4f} {row['sd_r']:>8.4f} "
-            f"{row['ci_low']:>8.4f} {row['ci_high']:>8.4f}"
+            f"  {row['time_bin']:<8} {int(row['n_subjects']):>6} {int(row['n_saccades']):>8} "
+            f"{row['mean_slope']:>11.4f} {row['sd_slope']:>6.4f} "
+            f"{row['ci_slope_low']:>8.4f} {row['ci_slope_high']:>8.4f} "
+            f"{row['mean_r']:>8.4f} {row['ci_r_low']:>8.4f} {row['ci_r_high']:>8.4f}"
         )
 
     lines += [
         '',
-        'Mixed LM fixed effects (slope stability test):',
+        'Mixed LM on per-subject slopes: slope ~ C(time_bin, ref="<1s") + random intercepts:',
         '-' * 70,
-        f"  {'Parameter':<50} {'Coef':>8} {'CI_low':>8} {'CI_high':>8} {'p':>8}",
-        '  ' + '-' * 77,
+        f"  {'Parameter':<45} {'Coef':>8} {'CI_low':>8} {'CI_high':>8} {'p':>8}",
+        '  ' + '-' * 72,
     ]
     for param in fe.index:
         lines.append(
-            f"  {param:<50} {fe[param]:>8.4f} "
+            f"  {param:<45} {fe[param]:>8.4f} "
             f"{ci_lm.loc[param, 0]:>8.4f} {ci_lm.loc[param, 1]:>8.4f} "
             f"{pvals[param]:>8.4f}"
         )
 
-    lines += [
-        '',
-        'Interpretation:',
-        '  log_amplitude coef = main-sequence slope in the <1s reference bin.',
-        '  Interaction terms (log_amplitude:C(time_bin)[T.*]) = slope deviation',
-        '  from the <1s bin. Non-significant interactions confirm that the',
-        '  main-sequence slope is stable across the 4-second viewing period.',
-        '  Note: with large N, even trivial differences may reach significance;',
-        '  inspect effect sizes (interaction coefs) alongside p-values.',
-    ]
 
     txt_path = os.path.join(source_data_dir, 'main_sequence_stability_stats.txt')
     with open(txt_path, 'w') as f:
