@@ -196,7 +196,7 @@ def plot_object_fixation_frequency(
     sns.set_context("poster")
 
     long_df, top_categories = compute_per_subject_category_counts(
-        fixations_df, top_n=top_n
+        fixations_df, top_n=top_n, exclude=['unknown'],
     )
 
     plt.figure(figsize=(12, 7))
@@ -205,6 +205,8 @@ def plot_object_fixation_frequency(
         data=long_df,
         x='object_label',
         y='count',
+        hue='object_label',
+        palette='husl',
         order=top_categories,
         color='cornflowerblue',
         errorbar=('ci', 95),
@@ -216,7 +218,7 @@ def plot_object_fixation_frequency(
         rotation=45,
         ha='right'
     )
-    plt.ylabel('fixation count')
+    plt.ylabel('fixation frequency [log(count)]')
     plt.xlabel(None)
     plt.yscale('log')
     sns.despine()
@@ -359,7 +361,7 @@ def main():
 
     # Define subjects and sessions to process
     # Adjust these lists based on available data
-    SUBJECTS = list(range(1, 6))  # Subjects 1-5
+    SUBJECTS = list(range(1,6))  # Subjects 1-5
     SESSIONS = list(range(1, 11))  # Sessions 1-10
 
     # Check paths
