@@ -26,6 +26,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import logging
+from scipy.stats import pearsonr
+from scipy.stats import bootstrap as scipy_bootstrap
+import statsmodels.formula.api as smf
 
 from pyavs.dataloader.eye import load_and_enrich_eye_events
 from pyavs.utils.logging import get_logger
@@ -237,7 +240,7 @@ def plot_main_sequence_temporal(saccades_df: pd.DataFrame, output_dir: str,
     #bin_labels = ['early', 'mid-early', 'mid-late', 'late']
     colors = sns.color_palette("magma", n_colors=4)
     # convert pixels to degrees (assuming 33 px/deg as in AVS)
-    pix_deg = 33
+    pix_deg = 31
     #saccades_df['amplitude_clipped'] = saccades_df['amplitude_clipped'] / pix_deg
     saccades_df['peak_velocity_clipped'] = saccades_df['peak_velocity_clipped'] / pix_deg
     saccades_df['amplitude_clipped'] = saccades_df['amplitude_clipped'] / pix_deg
@@ -293,6 +296,186 @@ def plot_main_sequence_temporal(saccades_df: pd.DataFrame, output_dir: str,
         logger.info(f"Saved: {pdf_file}")
 
     plt.close()
+
+
+def report_main_sequence_stats(
+    saccades_df: pd.DataFrame,
+    output_dir: str,
+    pix_deg: float = 33.0,
+    outlier_percentile: float = 99.0,
+) -> None:
+    """
+    Test stability of the saccadic main sequence across 4 temporal viewing bins.
+
+    Uses amplitude_clipped / peak_velocity_clipped (still in pixels at call time —
+    must be called BEFORE plot_main_sequence_temporal which converts in-place).
+
+    Approach
+    --------
+    1. Per-subject × per-bin Pearson r between log(amplitude) and log(peak_velocity).
+       BCa CI across subjects per bin.
+    2. Mixed LM:
+         log_velocity ~ log_amplitude * C(time_bin, Treatment('<1s'))
+         random intercepts per subject (REML)
+       Interaction terms test whether the main-sequence slope shifts from the
+       earliest bin. Non-significant interactions = slope is stable.
+
+    Saves
+    -----
+    source_data/main_sequence_source_data.csv        — per-saccade log values
+    source_data/main_sequence_per_subject_bin_r.csv  — per-subject × bin r values
+    source_data/main_sequence_stability_stats.txt    — full stats report
+    """
+    N_BOOTSTRAP   = 10_000
+    TIME_BIN_ORDER = ['<1s', '1-2s', '2-3s', '3-4s']
+
+    # Convert to degrees (pixels still at this point)
+    df = saccades_df.dropna(
+        subset=['amplitude_clipped', 'peak_velocity_clipped', 'time_bin', 'subject']
+    ).copy()
+    df['amplitude_deg'] = df['amplitude_clipped'] / pix_deg
+    df['velocity_deg']  = df['peak_velocity_clipped'] / pix_deg
+
+    # Log-transform (filter non-positive values first)
+    df = df[(df['amplitude_deg'] > 0) & (df['velocity_deg'] > 0)].copy()
+    df['log_amplitude'] = np.log(df['amplitude_deg'])
+    df['log_velocity']  = np.log(df['velocity_deg'])
+    df['time_bin']      = df['time_bin'].astype(str)
+
+    subjects   = sorted(df['subject'].unique())
+    n_subjects = len(subjects)
+
+    # ------------------------------------------------------------------
+    # 1. Per-subject × per-bin Pearson r
+    # ------------------------------------------------------------------
+    corr_rows = []
+    for subj in subjects:
+        for tbin in TIME_BIN_ORDER:
+            subset = df[(df['subject'] == subj) & (df['time_bin'] == tbin)]
+            if len(subset) < 10:
+                continue
+            r, p = pearsonr(subset['log_amplitude'], subset['log_velocity'])
+            corr_rows.append({
+                'subject':    int(subj),
+                'time_bin':   tbin,
+                'n_saccades': len(subset),
+                'pearson_r':  float(r),
+                'p_value':    float(p),
+            })
+    corr_df = pd.DataFrame(corr_rows)
+
+    def _bca(vals):
+        res = scipy_bootstrap(
+            (np.asarray(vals),), np.mean,
+            n_resamples=N_BOOTSTRAP, confidence_level=0.95, method='BCa',
+        )
+        return res.confidence_interval.low, res.confidence_interval.high
+
+    bin_summary = []
+    for tbin in TIME_BIN_ORDER:
+        subj_r = corr_df[corr_df['time_bin'] == tbin]['pearson_r'].values
+        if len(subj_r) < 2:
+            continue
+        ci = _bca(subj_r)
+        bin_summary.append({
+            'time_bin': tbin,
+            'n_subjects': len(subj_r),
+            'mean_r':   float(np.mean(subj_r)),
+            'sd_r':     float(np.std(subj_r)),
+            'ci_low':   float(ci[0]),
+            'ci_high':  float(ci[1]),
+        })
+    bin_summary_df = pd.DataFrame(bin_summary)
+
+    # ------------------------------------------------------------------
+    # 2. Mixed LM: slope × bin interaction
+    # ------------------------------------------------------------------
+    lm = smf.mixedlm(
+        "log_velocity ~ log_amplitude * C(time_bin, Treatment('<1s'))",
+        data=df,
+        groups=df['subject'],
+    ).fit(reml=True, method='lbfgs')
+
+    fe    = lm.fe_params
+    ci_lm = lm.conf_int()
+    pvals = lm.pvalues
+
+    # ------------------------------------------------------------------
+    # Save source data
+    # ------------------------------------------------------------------
+    source_data_dir = os.path.join(output_dir, 'source_data')
+    os.makedirs(source_data_dir, exist_ok=True)
+
+    plot_cols = ['subject', 'time_bin', 'amplitude_deg', 'velocity_deg',
+                 'log_amplitude', 'log_velocity']
+    df[plot_cols].to_csv(
+        os.path.join(source_data_dir, 'main_sequence_source_data.csv'), index=False
+    )
+    corr_df.to_csv(
+        os.path.join(source_data_dir, 'main_sequence_per_subject_bin_r.csv'), index=False
+    )
+
+    # ------------------------------------------------------------------
+    # Stats txt
+    # ------------------------------------------------------------------
+    lines = [
+        'Saccade Main Sequence Stability Stats',
+        '=' * 70,
+        'Configuration:',
+        f'  subjects:            {list(subjects)}',
+        f'  n_subjects:          {n_subjects}',
+        f'  time_bins:           {TIME_BIN_ORDER}',
+        f'  pix_per_deg:         {pix_deg}',
+        f'  outlier_percentile:  {outlier_percentile}',
+        f'  amplitude_unit:      degrees of visual angle [°]',
+        f'  velocity_unit:       degrees per second [°/s]',
+        f'  ci_method:           bootstrap BCa (n={N_BOOTSTRAP}) across subjects',
+        f'  lm_formula:          log_velocity ~ log_amplitude * C(time_bin, ref="<1s")',
+        f'  lm_random_effects:   random intercepts per subject (REML)',
+        '',
+        'Per-bin Pearson r [log(amplitude [°]) vs log(peak_velocity [°/s])]:',
+        '-' * 70,
+        f"  {'time_bin':<10} {'n_subj':>7} {'n_sacc':>8} {'mean_r':>8} "
+        f"{'SD_r':>8} {'CI_low':>8} {'CI_high':>8}",
+        '  ' + '-' * 62,
+    ]
+    for _, row in bin_summary_df.iterrows():
+        n_sacc = int(corr_df[corr_df['time_bin'] == row['time_bin']]['n_saccades'].sum())
+        lines.append(
+            f"  {row['time_bin']:<10} {int(row['n_subjects']):>7} {n_sacc:>8} "
+            f"{row['mean_r']:>8.4f} {row['sd_r']:>8.4f} "
+            f"{row['ci_low']:>8.4f} {row['ci_high']:>8.4f}"
+        )
+
+    lines += [
+        '',
+        'Mixed LM fixed effects (slope stability test):',
+        '-' * 70,
+        f"  {'Parameter':<50} {'Coef':>8} {'CI_low':>8} {'CI_high':>8} {'p':>8}",
+        '  ' + '-' * 77,
+    ]
+    for param in fe.index:
+        lines.append(
+            f"  {param:<50} {fe[param]:>8.4f} "
+            f"{ci_lm.loc[param, 0]:>8.4f} {ci_lm.loc[param, 1]:>8.4f} "
+            f"{pvals[param]:>8.4f}"
+        )
+
+    lines += [
+        '',
+        'Interpretation:',
+        '  log_amplitude coef = main-sequence slope in the <1s reference bin.',
+        '  Interaction terms (log_amplitude:C(time_bin)[T.*]) = slope deviation',
+        '  from the <1s bin. Non-significant interactions confirm that the',
+        '  main-sequence slope is stable across the 4-second viewing period.',
+        '  Note: with large N, even trivial differences may reach significance;',
+        '  inspect effect sizes (interaction coefs) alongside p-values.',
+    ]
+
+    txt_path = os.path.join(source_data_dir, 'main_sequence_stability_stats.txt')
+    with open(txt_path, 'w') as f:
+        f.write('\n'.join(lines) + '\n')
+    logger.info(f"Stats saved: {txt_path}")
 
 
 def main():
@@ -409,6 +592,15 @@ def main():
     if len(saccades) == 0:
         logger.error("No saccades remaining after preprocessing. Cannot generate plot.")
         return
+
+    # Export stability stats (must run BEFORE plot — plot converts units in-place)
+    logger.info("Exporting main sequence stability stats...")
+    report_main_sequence_stats(
+        saccades_df=saccades,
+        output_dir=args.output_dir,
+        pix_deg=31.0,
+        outlier_percentile=args.outlier_percentile,
+    )
 
     # Create plot
     plot_main_sequence_temporal(
