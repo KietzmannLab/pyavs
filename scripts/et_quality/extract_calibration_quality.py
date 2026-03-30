@@ -409,8 +409,8 @@ def main():
     parser.add_argument(
         "--output-dir", "-o",
         type=str,
-        default=None,
-        help="Output directory (default: {data_path}/derivatives/pyavs/et_quality/)"
+        default="/share/klab/psulewski/psulewski/pyavs/et_quality/",
+        help="Output directory (default: /share/klab/psulewski/psulewski/pyavs/et_quality/)"
     )
 
     parser.add_argument(
@@ -446,11 +446,7 @@ def main():
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    # Determine output directory
-    if args.output_dir is None:
-        output_dir = os.path.join(args.data_path, 'derivatives', 'pyavs', 'et_quality')
-    else:
-        output_dir = args.output_dir
+    output_dir = args.output_dir
 
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)

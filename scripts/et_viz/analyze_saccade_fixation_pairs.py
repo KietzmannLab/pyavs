@@ -207,107 +207,137 @@ def plot_duration_heatmap(
     plt.close()
 
 
-def report_fixation_duration_stats(
+def report_gaze_event_stats(
     fixations_df: pd.DataFrame,
+    saccades_df: pd.DataFrame,
     output_dir: str,
     duration_col: str = 'duration',
 ) -> None:
     """
-    Compute fixation duration stats (median, IQR) for the paper and save source data.
+    Compute fixation and saccade duration stats for the paper and save source data.
 
-    The pooled median and IQR describe the shape of the distribution (Figure 2E).
-    Per-subject medians with BCa CIs are also reported as supporting stats.
+    Pooled median + IQR describe distribution shape for paper text.
+    Per-subject quantiles with BCa CIs are reported as supporting stats.
 
     Saves:
-      source_data/fixation_duration_source_data.csv — per-fixation durations [ms] with subject
-      source_data/fixation_duration_stats.txt       — median, IQR, per-subject breakdown
+      source_data/fixation_duration_source_data.csv — per-fixation durations [ms]
+      source_data/saccade_duration_source_data.csv  — per-saccade durations [ms]
+      source_data/gaze_event_duration_stats.txt     — full stats report
     """
-    durations_ms = fixations_df[duration_col].dropna() * 1000  # convert to ms
-    subjects     = sorted(fixations_df['subject'].dropna().unique())
-    n_subjects   = len(subjects)
+    N_BOOTSTRAP = 10_000
 
-    # Pooled stats (describe distribution shape for paragraph)
-    pooled_median = float(np.median(durations_ms))
-    pooled_q25    = float(np.percentile(durations_ms, 25))
-    pooled_q75    = float(np.percentile(durations_ms, 75))
-    pooled_mean   = float(np.mean(durations_ms))
-    pooled_std    = float(np.std(durations_ms))
-
-    # Per-subject breakdown
-    subj_rows = []
-    for subj in subjects:
-        d = fixations_df[fixations_df['subject'] == subj][duration_col].dropna() * 1000
-        subj_rows.append({
-            'subject':     int(subj),
-            'n_fixations': len(d),
-            'median_ms':   float(np.median(d)),
-            'q25_ms':      float(np.percentile(d, 25)),
-            'q75_ms':      float(np.percentile(d, 75)),
-            'mean_ms':     float(np.mean(d)),
-        })
-    subj_df = pd.DataFrame(subj_rows)
-
-    # BCa CI over subjects on each quantile
     def _bca(vals):
         res = scipy_bootstrap(
             (np.asarray(vals),), np.mean,
-            n_resamples=10_000, confidence_level=0.95, method='BCa',
+            n_resamples=N_BOOTSTRAP, confidence_level=0.95, method='BCa',
         )
         return res.confidence_interval.low, res.confidence_interval.high
 
-    ci_med = _bca(subj_df['median_ms'].values)
-    ci_q25 = _bca(subj_df['q25_ms'].values)
-    ci_q75 = _bca(subj_df['q75_ms'].values)
+    def _event_stats(df, event_name, n_col):
+        """Compute pooled + per-subject quantile stats for one event type."""
+        subjects = sorted(df['subject'].dropna().unique())
+        vals_ms  = df[duration_col].dropna() * 1000
 
-    # Source data CSV
+        pooled = {
+            'median': float(np.median(vals_ms)),
+            'q25':    float(np.percentile(vals_ms, 25)),
+            'q75':    float(np.percentile(vals_ms, 75)),
+            'mean':   float(np.mean(vals_ms)),
+            'std':    float(np.std(vals_ms)),
+        }
+
+        rows = []
+        for subj in subjects:
+            d = df[df['subject'] == subj][duration_col].dropna() * 1000
+            rows.append({
+                'subject':  int(subj),
+                n_col:      len(d),
+                'median_ms': float(np.median(d)),
+                'q25_ms':   float(np.percentile(d, 25)),
+                'q75_ms':   float(np.percentile(d, 75)),
+                'mean_ms':  float(np.mean(d)),
+            })
+        subj_df = pd.DataFrame(rows)
+
+        ci_med = _bca(subj_df['median_ms'].values)
+        ci_q25 = _bca(subj_df['q25_ms'].values)
+        ci_q75 = _bca(subj_df['q75_ms'].values)
+
+        return pooled, subj_df, ci_med, ci_q25, ci_q75
+
+    subjects   = sorted(fixations_df['subject'].dropna().unique())
+    n_subjects = len(subjects)
+
+    fix_pooled, fix_subj, fix_ci_med, fix_ci_q25, fix_ci_q75 = _event_stats(
+        fixations_df, 'fixation', 'n_fixations'
+    )
+    sac_pooled, sac_subj, sac_ci_med, sac_ci_q25, sac_ci_q75 = _event_stats(
+        saccades_df, 'saccade', 'n_saccades'
+    )
+
+    # Source data CSVs
     source_data_dir = os.path.join(output_dir, 'source_data')
     os.makedirs(source_data_dir, exist_ok=True)
 
-    src_df = fixations_df[['subject', duration_col]].copy()
-    src_df['duration_ms'] = src_df[duration_col] * 1000
-    src_df = src_df.drop(columns=[duration_col])
-    src_df.to_csv(
-        os.path.join(source_data_dir, 'fixation_duration_source_data.csv'), index=False
-    )
-
-    # Stats txt
-    lines = [
-        'Fixation Duration Stats',
-        '=' * 60,
-        'Configuration:',
-        f'  subjects:         {subjects}',
-        f'  n_subjects:       {n_subjects}',
-        f'  n_fixations:      {len(durations_ms)}',
-        f'  duration_filter:  top 2% removed (98th-percentile cutoff)',
-        f'  recording:        scene viewing only',
-        f'  unit:             ms',
-        f'  ci_method:        bootstrap BCa (n=10,000) across subjects',
-        '',
-        'Pooled distribution — use for paper text (describes distribution shape):',
-        f'  median:           {pooled_median:.1f} ms',
-        f'  IQR (Q25–Q75):    {pooled_q25:.1f}–{pooled_q75:.1f} ms',
-        f'  mean ± SD:        {pooled_mean:.1f} ± {pooled_std:.1f} ms',
-        '',
-        'Per-subject medians (mean of subject-level quantiles ± BCa 95% CI across subjects):',
-        f'  mean median:      {subj_df["median_ms"].mean():.1f} ms  '
-        f'[{ci_med[0]:.1f}, {ci_med[1]:.1f}]',
-        f'  mean Q25:         {subj_df["q25_ms"].mean():.1f} ms  '
-        f'[{ci_q25[0]:.1f}, {ci_q25[1]:.1f}]',
-        f'  mean Q75:         {subj_df["q75_ms"].mean():.1f} ms  '
-        f'[{ci_q75[0]:.1f}, {ci_q75[1]:.1f}]',
-        '',
-        'Per-subject breakdown:',
-        '-' * 60,
-        f"  {'subject':<10} {'n_fix':>8} {'median_ms':>12} {'Q25_ms':>10} {'Q75_ms':>10}",
-        '  ' + '-' * 53,
-    ]
-    for _, r in subj_df.iterrows():
-        lines.append(
-            f"  {int(r['subject']):<10} {int(r['n_fixations']):>8} "
-            f"{r['median_ms']:>12.1f} {r['q25_ms']:>10.1f} {r['q75_ms']:>10.1f}"
+    for df, fname in [
+        (fixations_df, 'fixation_duration_source_data.csv'),
+        (saccades_df,  'saccade_duration_source_data.csv'),
+    ]:
+        out = df[['subject', duration_col]].copy()
+        out['duration_ms'] = out[duration_col] * 1000
+        out.drop(columns=[duration_col]).to_csv(
+            os.path.join(source_data_dir, fname), index=False
         )
 
-    txt_path = os.path.join(source_data_dir, 'fixation_duration_stats.txt')
+    # Stats txt
+    def _block(title, n_total, pooled, subj_df, ci_med, ci_q25, ci_q75, n_col):
+        return [
+            title,
+            '-' * 60,
+            f'  n_total:          {n_total}',
+            f'  duration_filter:  top 2% removed (98th-percentile cutoff)',
+            '',
+            '  Pooled distribution:',
+            f'    median:         {pooled["median"]:.1f} ms',
+            f'    IQR (Q25–Q75):  {pooled["q25"]:.1f}–{pooled["q75"]:.1f} ms',
+            f'    mean ± SD:      {pooled["mean"]:.1f} ± {pooled["std"]:.1f} ms',
+            '',
+            '  Per-subject quantiles (mean ± BCa 95% CI across subjects):',
+            f'    mean median:    {subj_df["median_ms"].mean():.1f} ms  '
+            f'[{ci_med[0]:.1f}, {ci_med[1]:.1f}]',
+            f'    mean Q25:       {subj_df["q25_ms"].mean():.1f} ms  '
+            f'[{ci_q25[0]:.1f}, {ci_q25[1]:.1f}]',
+            f'    mean Q75:       {subj_df["q75_ms"].mean():.1f} ms  '
+            f'[{ci_q75[0]:.1f}, {ci_q75[1]:.1f}]',
+            '',
+            f'  Per-subject breakdown:',
+            f"    {'subject':<10} {n_col:>12} {'median_ms':>12} {'Q25_ms':>10} {'Q75_ms':>10}",
+            '    ' + '-' * 48,
+        ] + [
+            f"    {int(r['subject']):<10} {int(r[n_col]):>12} "
+            f"{r['median_ms']:>12.1f} {r['q25_ms']:>10.1f} {r['q75_ms']:>10.1f}"
+            for _, r in subj_df.iterrows()
+        ]
+
+    lines = [
+        'Gaze Event Duration Stats',
+        '=' * 60,
+        'Configuration:',
+        f'  subjects:         {list(subjects)}',
+        f'  n_subjects:       {n_subjects}',
+        f'  recording:        scene viewing only',
+        f'  unit:             ms',
+        f'  ci_method:        bootstrap BCa (n={N_BOOTSTRAP}) across subjects',
+        '',
+    ] + _block(
+        'Fixation durations:', len(fixations_df),
+        fix_pooled, fix_subj, fix_ci_med, fix_ci_q25, fix_ci_q75, 'n_fixations'
+    ) + [''] + _block(
+        'Saccade durations:', len(saccades_df),
+        sac_pooled, sac_subj, sac_ci_med, sac_ci_q25, sac_ci_q75, 'n_saccades'
+    )
+
+    txt_path = os.path.join(source_data_dir, 'gaze_event_duration_stats.txt')
     with open(txt_path, 'w') as f:
         f.write('\n'.join(lines) + '\n')
     logger.info(f"Stats saved: {txt_path}")
@@ -356,9 +386,9 @@ def main():
     logger.info(f"Saccades: {len(saccades_df)}")
     logger.info(f"Fixations: {len(fixations_df)}")
 
-    # Export fixation duration stats and source data
-    logger.info("\nExporting fixation duration stats...")
-    report_fixation_duration_stats(fixations_df, output_dir=OUTPUT_DIR)
+    # Export fixation and saccade duration stats and source data
+    logger.info("\nExporting gaze event duration stats...")
+    report_gaze_event_stats(fixations_df, saccades_df, output_dir=OUTPUT_DIR)
 
     # Step 3: Match saccades to fixations
     logger.info("\nStep 3: Matching saccades to fixations...")
