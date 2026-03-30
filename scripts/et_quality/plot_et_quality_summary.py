@@ -739,7 +739,7 @@ def main():
     parser.add_argument(
         '--derivatives-dir', '-d',
         type=str,
-        default='/share/klab/datasets/avs/derivatives/pyavs/et_quality',
+        default='/share/klab/psulewski/psulewski/pyavs/et_quality
         help='Path to ET quality derivatives directory (default: /share/klab/datasets/avs/derivatives/pyavs/et_quality)'
     )
 
