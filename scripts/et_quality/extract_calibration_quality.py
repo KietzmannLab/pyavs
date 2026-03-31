@@ -28,58 +28,6 @@ from pyavs.utils.logging import get_logger
 logger = get_logger('scripts.et_quality')
 
 
-def discover_subject_sessions(data_path: str, prefix: str = 'as') -> List[Tuple[int, int]]:
-    """
-    Auto-discover all available subject-session combinations.
-
-    Scans the results directory for subdirectories matching the pattern
-    {prefix}{subject:02d}_{session:02d} and extracts subject and session numbers.
-
-    Parameters
-    ----------
-    data_path : str
-        Base data directory path
-    prefix : str, default='as'
-        Subject directory prefix
-
-    Returns
-    -------
-    List[Tuple[int, int]]
-        List of (subject_id, session) tuples sorted by subject then session
-
-    Examples
-    --------
-    >>> discover_subject_sessions('/share/klab/datasets/avs/')
-    [(1, 1), (1, 2), (2, 1), (2, 2), ...]
-    """
-    results_dir = os.path.join(data_path, 'results')
-
-    if not os.path.exists(results_dir):
-        logger.error(f"Results directory not found: {results_dir}")
-        return []
-
-    # Pattern: {prefix}{subject:02d}_{session:02d}
-    pattern = os.path.join(results_dir, f"{prefix}[0-9][0-9]_[0-9][0-9]")
-    dirs = glob.glob(pattern)
-
-    subject_sessions = []
-    for dir_path in dirs:
-        dir_name = os.path.basename(dir_path)
-
-        # Extract subject and session from directory name
-        match = re.match(rf'{prefix}(\d{{2}})_(\d{{2}})', dir_name)
-        if match:
-            subject_id = int(match.group(1))
-            session = int(match.group(2))
-            subject_sessions.append((subject_id, session))
-
-    # Sort by subject then session
-    subject_sessions.sort()
-
-    logger.info(f"Discovered {len(subject_sessions)} subject-session combinations")
-
-    return subject_sessions
-
 
 def associate_drift_with_trials(drift_df: pd.DataFrame,
                                 messages_df: pd.DataFrame) -> pd.DataFrame:
@@ -414,13 +362,6 @@ def main():
     )
 
     parser.add_argument(
-        "--prefix", "-p",
-        type=str,
-        default="as",
-        help="Subject directory prefix (default: 'as')"
-    )
-
-    parser.add_argument(
         "--subject", "-s",
         type=int,
         default=None,
@@ -432,6 +373,22 @@ def main():
         type=int,
         default=None,
         help="Process specific session only (requires --subject)"
+    )
+
+    parser.add_argument(
+        "--subjects",
+        type=int,
+        nargs="+",
+        default=list(range(1, 6)),
+        help="List of subjects to process (default: 1 2 3 4 5)"
+    )
+
+    parser.add_argument(
+        "--sessions",
+        type=int,
+        nargs="+",
+        default=list(range(1, 11)),
+        help="List of sessions to process (default: 1 2 3 4 5 6 7 8 9 10)"
     )
 
     parser.add_argument(
@@ -452,20 +409,21 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
     logger.info(f"Output directory: {output_dir}")
 
-    # Discover or select subject-sessions
+    # Build subject-session list
     if args.subject is not None and args.session is not None:
         # Process single subject-session
         subject_sessions = [(args.subject, args.session)]
         logger.info(f"Processing single subject-session: {args.subject}, {args.session}")
     elif args.subject is not None:
         # Process all sessions for one subject
-        all_sessions = discover_subject_sessions(args.data_path, args.prefix)
-        subject_sessions = [(s, sess) for s, sess in all_sessions if s == args.subject]
-        logger.info(f"Processing all sessions for subject {args.subject}: {len(subject_sessions)} sessions")
+        subject_sessions = [(args.subject, sess) for sess in args.sessions]
+        logger.info(f"Processing subject {args.subject}, sessions {args.sessions}: {len(subject_sessions)} sessions")
     else:
-        # Process all subjects and sessions
-        subject_sessions = discover_subject_sessions(args.data_path, args.prefix)
-        logger.info(f"Processing all subjects and sessions: {len(subject_sessions)} combinations")
+        # Process specified subjects and sessions
+        subject_sessions = [
+            (subj, sess) for subj in args.subjects for sess in args.sessions
+        ]
+        logger.info(f"Processing subjects {args.subjects}, sessions {args.sessions}: {len(subject_sessions)} combinations")
 
     if len(subject_sessions) == 0:
         logger.error("No subject-session combinations found")

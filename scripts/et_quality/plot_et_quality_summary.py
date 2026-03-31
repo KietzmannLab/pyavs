@@ -8,8 +8,8 @@ across all subjects and sessions.
 
 GENERATED FIGURES:
 - calibration_quality.png/pdf - Violin plot of calibration errors by quality category
-- calibration_avg_error_hist.png/pdf - Histogram + KDE of average calibration errors
-- calibration_max_error_hist.png/pdf - Histogram + KDE of maximum calibration errors
+- calibration_avg_error_boxplot.png/pdf - Per-subject horizontal boxplots of average calibration errors
+- calibration_max_error_boxplot.png/pdf - Per-subject horizontal boxplots of maximum calibration errors
 - drift_histogram.png/pdf - Histogram of drift correction magnitudes
 - drift_cdf.png/pdf - Cumulative distribution of drift corrections
 - session_heatmap.png/pdf - Per-session quality heatmap (optional, with --include-heatmap)
@@ -282,10 +282,10 @@ def plot_drift_cdf(drift_df: pd.DataFrame, output_dir: str,
     plt.close()
 
 
-def plot_calibration_avg_error_hist(cal_df: pd.DataFrame, output_dir: str,
-                                    dpi: int = 300, fmt: str = 'both'):
+def plot_calibration_avg_error_boxplot(cal_df: pd.DataFrame, output_dir: str,
+                                       dpi: int = 300, fmt: str = 'both'):
     """
-    Create calibration average error histogram with KDE.
+    Create per-subject horizontal boxplots of average calibration error.
 
     Parameters
     ----------
@@ -298,49 +298,44 @@ def plot_calibration_avg_error_hist(cal_df: pd.DataFrame, output_dir: str,
     fmt : str, default='both'
         Output format ('png', 'pdf', or 'both')
     """
-    logger.info("Creating figure: Calibration average error histogram with KDE")
+    logger.info("Creating figure: Calibration average error per-subject boxplots")
 
-    # Setup styling
     sns.set_context("poster")
-  
-    # Create figure
-    plt.figure(figsize=(6,7))
 
-    # Get average errors
-    avg_errors = cal_df['avg_error_deg'].dropna()
+    sub_col = 'subject' if 'subject' in cal_df.columns else 'subject_id'
+    plot_df = cal_df[[sub_col, 'avg_error_deg']].dropna().copy()
+    plot_df[sub_col] = plot_df[sub_col].astype(str)
 
-    # Histogram with KDE
-    sns.histplot(avg_errors, color='steelblue',
-                edgecolor='white', bins=20)
-
-    # Add threshold line
-    #plt.axvline(0.5, ls='--', color='red', linewidth=2)
-
-    # Labels
-    plt.xlabel('average 9-point calibration\nerror [°]')
-    plt.ylabel('frequency [count]')
-    #plt.grid(axis='y', alpha=0.3)
+    plt.figure(figsize=(8, 6))
+    sns.boxplot(
+        data=plot_df,
+        x='avg_error_deg',
+        y=sub_col,
+        orient='h',
+        color='cornflowerblue',
+    )
+    plt.xlabel('average 9-point calibration error [°]')
+    plt.ylabel('subject')
     sns.despine()
     plt.tight_layout()
 
-    # Save figure
     if fmt in ['png', 'both']:
-        png_file = os.path.join(output_dir, 'calibration_avg_error_hist.png')
+        png_file = os.path.join(output_dir, 'calibration_avg_error_boxplot.png')
         plt.savefig(png_file, dpi=dpi, bbox_inches='tight', facecolor='white', edgecolor='none')
         logger.info(f"Saved: {png_file}")
 
     if fmt in ['pdf', 'both']:
-        pdf_file = os.path.join(output_dir, 'calibration_avg_error_hist.pdf')
+        pdf_file = os.path.join(output_dir, 'calibration_avg_error_boxplot.pdf')
         plt.savefig(pdf_file, format='pdf', bbox_inches='tight', facecolor='white', edgecolor='none')
         logger.info(f"Saved: {pdf_file}")
 
     plt.close()
 
 
-def plot_calibration_max_error_hist(cal_df: pd.DataFrame, output_dir: str,
-                                    dpi: int = 300, fmt: str = 'both'):
+def plot_calibration_max_error_boxplot(cal_df: pd.DataFrame, output_dir: str,
+                                       dpi: int = 300, fmt: str = 'both'):
     """
-    Create calibration maximum error histogram with KDE.
+    Create per-subject horizontal boxplots of maximum calibration error.
 
     Parameters
     ----------
@@ -353,40 +348,34 @@ def plot_calibration_max_error_hist(cal_df: pd.DataFrame, output_dir: str,
     fmt : str, default='both'
         Output format ('png', 'pdf', or 'both')
     """
-    logger.info("Creating figure: Calibration maximum error histogram with KDE")
+    logger.info("Creating figure: Calibration maximum error per-subject boxplots")
 
-    # Setup styling
     sns.set_context("poster")
-    #sns.set_style("white")
 
-    # Create figure
-    plt.figure(figsize=(6,7))
+    sub_col = 'subject' if 'subject' in cal_df.columns else 'subject_id'
+    plot_df = cal_df[[sub_col, 'max_error_deg']].dropna().copy()
+    plot_df[sub_col] = plot_df[sub_col].astype(str)
 
-    # Get maximum errors
-    max_errors = cal_df['max_error_deg'].dropna()
-
-    # Histogram with KDE
-    sns.histplot(max_errors, color='steelblue',
-                edgecolor='white', bins=20)
-
-    # Add threshold line
-    #plt.axvline(1.0, ls='--', color='red', linewidth=2)
-
-    # Labels
-    plt.xlabel('maximum 9-point calibration\nerror [°]')
-    plt.ylabel('frequency [count]')
-    #plt.grid(axis='y', alpha=0.3)
+    plt.figure(figsize=(8, 6))
+    sns.boxplot(
+        data=plot_df,
+        x='max_error_deg',
+        y=sub_col,
+        orient='h',
+        color='cornflowerblue',
+    )
+    plt.xlabel('maximum 9-point calibration error [°]')
+    plt.ylabel('subject')
     sns.despine()
     plt.tight_layout()
 
-    # Save figure
     if fmt in ['png', 'both']:
-        png_file = os.path.join(output_dir, 'calibration_max_error_hist.png')
+        png_file = os.path.join(output_dir, 'calibration_max_error_boxplot.png')
         plt.savefig(png_file, dpi=dpi, bbox_inches='tight', facecolor='white', edgecolor='none')
         logger.info(f"Saved: {png_file}")
 
     if fmt in ['pdf', 'both']:
-        pdf_file = os.path.join(output_dir, 'calibration_max_error_hist.pdf')
+        pdf_file = os.path.join(output_dir, 'calibration_max_error_boxplot.pdf')
         plt.savefig(pdf_file, format='pdf', bbox_inches='tight', facecolor='white', edgecolor='none')
         logger.info(f"Saved: {pdf_file}")
 
@@ -694,17 +683,17 @@ def generate_all_figures(derivatives_dir: str, output_dir: str,
     else:
         logger.warning("No calibration data found. Skipping calibration plot.")
 
-    # Generate calibration average error histogram
+    # Generate calibration average error boxplot
     if len(cal_df) > 0:
-        plot_calibration_avg_error_hist(cal_df, output_dir, dpi=dpi, fmt=fmt)
+        plot_calibration_avg_error_boxplot(cal_df, output_dir, dpi=dpi, fmt=fmt)
     else:
-        logger.warning("No calibration data found. Skipping average error histogram.")
+        logger.warning("No calibration data found. Skipping average error boxplot.")
 
-    # Generate calibration maximum error histogram
+    # Generate calibration maximum error boxplot
     if len(cal_df) > 0:
-        plot_calibration_max_error_hist(cal_df, output_dir, dpi=dpi, fmt=fmt)
+        plot_calibration_max_error_boxplot(cal_df, output_dir, dpi=dpi, fmt=fmt)
     else:
-        logger.warning("No calibration data found. Skipping maximum error histogram.")
+        logger.warning("No calibration data found. Skipping maximum error boxplot.")
 
     # Generate drift histogram
     if len(drift_df) > 0:
