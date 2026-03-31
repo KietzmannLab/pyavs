@@ -318,10 +318,10 @@ def report_statistics(data_df: pd.DataFrame, output_dir: str) -> None:
     span_min = subject_spans.min()
     span_max = subject_spans.max()
 
-    # Inter-session intervals per subject
+    # Inter-session intervals per subject (sorted by actual recording date)
     intervals = []
     for subject, grp in df.groupby('subject'):
-        grp = grp.sort_values('session')
+        grp = grp.sort_values('days_from_first')
         diffs = grp['days_from_first'].diff().dropna()
         for d in diffs:
             intervals.append({'subject': subject, 'interval_days': d})
