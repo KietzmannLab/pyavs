@@ -378,6 +378,9 @@ def generate_all_figures(subjects: List[int], sessions: List[int],
     # Compute per-subject statistics
     summary_df = compute_event_counts_per_subject(events)
 
+    # Print statistics report
+    report_statistics(events)
+
     # Generate plots
     plot_dataset_counts(counts_df, output_dir, dpi=dpi, fmt=fmt)
     plot_per_subject_counts(summary_df, output_dir, dpi=dpi, fmt=fmt)
