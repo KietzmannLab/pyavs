@@ -61,6 +61,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from scipy.stats import chi2_contingency
 from sklearn.manifold import TSNE
 
 from pyavs.utils.logging import get_logger
@@ -391,25 +392,98 @@ def plot_cluster_share_comparison(
     logger.info(f"Saved: {png_path}")
     logger.info(f"Saved: {pdf_path}")
 
-    # Export source data for Fig 1D: cluster proportion comparison
-    source_dir = os.path.join(output_dir, "source_data")
-    os.makedirs(source_dir, exist_ok=True)
 
-    source_csv = os.path.join(source_dir, "sourcedata_fig1d_cluster_share_avs_nsd.csv")
-    comparison_df.to_csv(source_csv, index=False)
+def report_cluster_share_statistics(
+    df_embeddings: pd.DataFrame,
+    avs_coco_ids: set[int],
+    output_dir: str,
+) -> None:
+    """
+    Compute and save statistics for the AVS vs NSD cluster share comparison.
 
-    with open(source_csv.replace(".csv", "_stats.txt"), "w") as f:
-        n_avs = df['in_avs'].sum()
-        n_nsd = len(df)
-        n_clusters = len(all_clusters)
-        f.write("Figure 1D: AVS vs NSD cluster proportion comparison\n")
-        f.write("Plot type: barplot (no statistical aggregation, deterministic proportions)\n")
-        f.write(f"N AVS scenes: {n_avs}\n")
-        f.write(f"N NSD scenes (total): {n_nsd}\n")
-        f.write(f"N clusters: {n_clusters}\n")
-        f.write("Columns: cluster, dataset (avs/nsd), share [%]\n")
+    Tests whether the AVS cluster distribution differs from the NSD distribution
+    using a chi-square test of independence on raw scene counts.
 
-    logger.info(f"Saved source data: {source_csv}")
+    Saves
+    -----
+    source_data/cluster_share_source_data.csv   — per-cluster proportions (avs, nsd)
+    source_data/cluster_share_stats.txt         — chi-square result + per-cluster table
+
+    Parameters
+    ----------
+    df_embeddings : pd.DataFrame
+        Embeddings dataframe with 'cluster' and 'cocoID' columns
+    avs_coco_ids : set[int]
+        Set of COCO IDs in AVS dataset
+    output_dir : str
+        Output directory (source_data/ subdirectory is created here)
+    """
+    df = df_embeddings.copy()
+    df['in_avs'] = df['cocoID'].isin(avs_coco_ids)
+
+    all_clusters = sorted(df['cluster'].unique())
+    n_avs_total = df['in_avs'].sum()
+    n_nsd_total = len(df)
+    n_clusters = len(all_clusters)
+
+    # Per-cluster counts and proportions
+    avs_counts = df[df['in_avs']]['cluster'].value_counts().reindex(all_clusters, fill_value=0)
+    nsd_counts = df['cluster'].value_counts().reindex(all_clusters, fill_value=0)
+    avs_shares = avs_counts / n_avs_total * 100
+    nsd_shares = nsd_counts / n_nsd_total * 100
+
+    # Chi-square test of independence: AVS vs NSD cluster counts
+    contingency = np.array([avs_counts.values, nsd_counts.values])
+    chi2, p_value, dof, expected = chi2_contingency(contingency)
+
+    # Source data dataframe
+    source_df = pd.DataFrame({
+        'cluster': all_clusters,
+        'avs_count': avs_counts.values,
+        'nsd_count': nsd_counts.values,
+        'avs_share_pct': avs_shares.values,
+        'nsd_share_pct': nsd_shares.values,
+        'share_diff_pct': (avs_shares - nsd_shares).values,
+    })
+
+    # Build stats report
+    lines = [
+        'Cluster Share Statistics: AVS vs NSD',
+        '=' * 65,
+        f'  n_avs_scenes:  {n_avs_total}',
+        f'  n_nsd_scenes:  {n_nsd_total}',
+        f'  n_clusters:    {n_clusters}',
+        '',
+        'Chi-square test of independence (AVS vs NSD cluster counts):',
+        f'  chi2({dof}) = {chi2:.3f},  p = {p_value:.4g}',
+        '',
+        'Per-cluster proportions:',
+        f"  {'cluster':>8} {'avs_n':>8} {'nsd_n':>8} "
+        f"{'avs_%':>8} {'nsd_%':>8} {'diff_%':>8}",
+        '  ' + '-' * 56,
+    ]
+    for _, row in source_df.iterrows():
+        lines.append(
+            f"  {int(row['cluster']):>8} {int(row['avs_count']):>8} {int(row['nsd_count']):>8} "
+            f"{row['avs_share_pct']:>8.2f} {row['nsd_share_pct']:>8.2f} {row['share_diff_pct']:>8.2f}"
+        )
+
+    print('\n' + '\n'.join(lines) + '\n')
+
+    # Save files
+    source_data_dir = os.path.join(output_dir, 'source_data')
+    os.makedirs(source_data_dir, exist_ok=True)
+
+    source_df.to_csv(
+        os.path.join(source_data_dir, 'cluster_share_source_data.csv'),
+        index=False
+    )
+
+    txt_path = os.path.join(source_data_dir, 'cluster_share_stats.txt')
+    with open(txt_path, 'w') as f:
+        f.write('\n'.join(lines) + '\n')
+
+    logger.info(f"Source data saved to: {source_data_dir}")
 
 
 def save_cluster_examples(
@@ -814,6 +888,11 @@ def main():
     # Generate AVS vs NSD comparison
     logger.info("Creating cluster share comparison...")
     plot_cluster_share_comparison(
+        df_embeddings,
+        avs_coco_ids,
+        args.output_dir
+    )
+    report_cluster_share_statistics(
         df_embeddings,
         avs_coco_ids,
         args.output_dir
