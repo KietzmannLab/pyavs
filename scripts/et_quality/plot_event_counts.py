@@ -168,14 +168,22 @@ def compute_event_counts_per_subject(events_df: pd.DataFrame) -> pd.DataFrame:
     return summary
 
 
-def report_statistics(events_df: pd.DataFrame) -> None:
+def report_statistics(events_df: pd.DataFrame, output_dir: str) -> None:
     """
-    Print total counts and bootstrapped 95% CI per subject, by event type and task.
+    Print and save event count statistics and source data CSVs.
+
+    Saves
+    -----
+    source_data/event_counts_dataset_source_data.csv    — total counts per event type and task
+    source_data/event_counts_per_subject_source_data.csv — per-subject counts
+    source_data/event_counts_stats.txt                  — full stats report
 
     Parameters
     ----------
     events_df : pd.DataFrame
         Events dataframe with columns: type, recording, subject
+    output_dir : str
+        Output directory (source_data/ subdirectory is created here)
     """
     event_types = ['fixation', 'saccade', 'blink']
     recordings = ['scene', 'caption']
@@ -183,39 +191,102 @@ def report_statistics(events_df: pd.DataFrame) -> None:
     rng = np.random.default_rng(0)
     n_boot = 1000
 
+    # ------------------------------------------------------------------
+    # Per-subject counts (source data for per-subject figure)
+    # ------------------------------------------------------------------
+    per_subject_df = (
+        events_df.groupby(['subject', 'type', 'recording'])
+        .size()
+        .reset_index(name='count')
+    )
+
+    # ------------------------------------------------------------------
+    # Total counts (source data for dataset figure)
+    # ------------------------------------------------------------------
+    total_counts = (
+        events_df.groupby(['type', 'recording'])
+        .size()
+        .reset_index(name='count')
+    )
+
+    # ------------------------------------------------------------------
+    # Compute stats and build report lines
+    # ------------------------------------------------------------------
+    lines = [
+        'Event Count Statistics',
+        '=' * 70,
+        f'  n_subjects: {events_df["subject"].nunique()}',
+        f'  ci_method:  bootstrap percentile (n={n_boot}) across subjects',
+        '',
+    ]
+
     print("\n" + "=" * 70)
     print("EVENT COUNT STATISTICS")
     print("=" * 70)
 
     for rec in recordings:
         rec_df = events_df[events_df['recording'] == rec]
+        header = (
+            f"  {'event type':<12} {'total':>10}  "
+            f"{'mean [events/subject]':>22}  {'95% CI':>20}"
+        )
+        separator = f"  {'-'*12}  {'-'*10}  {'-'*22}  {'-'*20}"
+
+        lines += [f'Task: {rec}', header, separator]
         print(f"\nTask: {rec}")
-        print(f"  {'event type':<12} {'total':>10}  {'mean [events/subject]':>22}  {'95% CI':>20}")
-        print(f"  {'-'*12}  {'-'*10}  {'-'*22}  {'-'*20}")
+        print(header)
+        print(separator)
 
         for evt in event_types:
             mask = rec_df['type'] == evt
-            total = mask.sum()
+            total = int(mask.sum())
 
-            # Per-subject counts
             per_subj = rec_df[mask].groupby('subject').size().values.astype(float)
 
             if len(per_subj) == 0:
-                print(f"  {evt:<12} {total:>10}  {'N/A':>22}  {'N/A':>20}")
+                row = f"  {evt:<12} {total:>10}  {'N/A':>22}  {'N/A':>20}"
+                lines.append(row)
+                print(row)
                 continue
 
             mean_val = per_subj.mean()
-
-            # Bootstrapped 95% CI
             boot_means = np.array([
                 rng.choice(per_subj, size=len(per_subj), replace=True).mean()
                 for _ in range(n_boot)
             ])
             ci_lo, ci_hi = np.percentile(boot_means, [2.5, 97.5])
 
-            print(f"  {evt:<12} {total:>10}  {mean_val:>22.1f}  [{ci_lo:>8.1f}, {ci_hi:>8.1f}]")
+            row = (
+                f"  {evt:<12} {total:>10}  {mean_val:>22.1f}"
+                f"  [{ci_lo:>8.1f}, {ci_hi:>8.1f}]"
+            )
+            lines.append(row)
+            print(row)
+
+        lines.append('')
 
     print("\n" + "=" * 70 + "\n")
+
+    # ------------------------------------------------------------------
+    # Save source data CSVs and stats txt
+    # ------------------------------------------------------------------
+    source_data_dir = os.path.join(output_dir, 'source_data')
+    os.makedirs(source_data_dir, exist_ok=True)
+
+    total_counts.to_csv(
+        os.path.join(source_data_dir, 'event_counts_dataset_source_data.csv'),
+        index=False
+    )
+    per_subject_df.to_csv(
+        os.path.join(source_data_dir, 'event_counts_per_subject_source_data.csv'),
+        index=False
+    )
+
+    txt_path = os.path.join(source_data_dir, 'event_counts_stats.txt')
+    with open(txt_path, 'w') as f:
+        f.write('\n'.join(lines) + '\n')
+
+    logger.info(f"Source data saved to: {source_data_dir}")
 
 
 def plot_dataset_counts(counts_df: pd.DataFrame, output_dir: str,
@@ -378,8 +449,8 @@ def generate_all_figures(subjects: List[int], sessions: List[int],
     # Compute per-subject statistics
     summary_df = compute_event_counts_per_subject(events)
 
-    # Print statistics report
-    report_statistics(events)
+    # Print statistics report and save source data
+    report_statistics(events, output_dir)
 
     # Generate plots
     plot_dataset_counts(counts_df, output_dir, dpi=dpi, fmt=fmt)
