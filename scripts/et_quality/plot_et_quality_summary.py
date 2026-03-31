@@ -123,7 +123,7 @@ def plot_calibration_quality(cal_df: pd.DataFrame, output_dir: str,
     #sns.set_style("white")
 
     # Create figure
-    plt.figure(figsize=(7,7))
+    plt.figure(figsize=(5,7))
 
     # Filter out unknown quality
     cal_plot = cal_df[cal_df['quality'].isin(['GOOD', 'FAIR', 'POOR'])].copy()
@@ -186,7 +186,7 @@ def plot_drift_boxplot(drift_df: pd.DataFrame, output_dir: str,
     plot_df[sub_col] = plot_df[sub_col].astype(str)
     subjects = sorted(plot_df[sub_col].unique())
 
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(5, 7))
     sns.boxplot(
         data=plot_df,
         x='offset_total_deg',
@@ -241,7 +241,7 @@ def plot_drift_cdf(drift_df: pd.DataFrame, output_dir: str,
     #sns.set_style("white")
 
     # Create figure
-    plt.figure(figsize=(6,7))
+    plt.figure(figsize=(5,  7))
 
     # Get drift magnitudes
     drift_magnitudes = drift_df['offset_total_deg'].dropna()
@@ -307,7 +307,8 @@ def plot_calibration_avg_error_boxplot(cal_df: pd.DataFrame, output_dir: str,
     plot_df[sub_col] = plot_df[sub_col].astype(str)
     subjects = sorted(plot_df[sub_col].unique())
 
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(5, 7))
+    
     sns.boxplot(
         data=plot_df,
         x='avg_error_deg',
@@ -316,9 +317,9 @@ def plot_calibration_avg_error_boxplot(cal_df: pd.DataFrame, output_dir: str,
         hue=sub_col,
         hue_order=subjects,
         palette='colorblind',
-        orient='h',
+        orient='h', 
         showfliers=False,
-        legend=False,
+        legend=False, width=0.6
     )
     plt.xlabel('average 9-point calibration error [°]')
     plt.ylabel('subject')
@@ -364,7 +365,7 @@ def plot_calibration_max_error_boxplot(cal_df: pd.DataFrame, output_dir: str,
     plot_df[sub_col] = plot_df[sub_col].astype(str)
     subjects = sorted(plot_df[sub_col].unique())
 
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(5, 7))
     sns.boxplot(
         data=plot_df,
         x='max_error_deg',
@@ -423,7 +424,7 @@ def plot_session_heatmap(summary_df: pd.DataFrame, output_dir: str,
                                    values='avg_cal_error_deg')
 
     # Create figure
-    plt.figure(figsize=(10, max(6, len(pivot_table) * 0.4)))
+    plt.figure(figsize=(5, 7))
 
     # Create heatmap
     sns.heatmap(pivot_table, cmap='RdYlGn_r', vmin=0, vmax=1.0,
