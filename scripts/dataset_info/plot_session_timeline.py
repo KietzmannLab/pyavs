@@ -289,6 +289,96 @@ def plot_session_timeline(data_df: pd.DataFrame, output_dir: str,
     plt.close()
 
 
+def report_statistics(data_df: pd.DataFrame, output_dir: str) -> None:
+    """
+    Compute and save session timing statistics.
+
+    Reports per-subject total recording span and inter-session intervals,
+    providing the M ± SD values cited in the manuscript.
+
+    Saves
+    -----
+    source_data/session_timeline_source_data.csv  — per-session rows
+    source_data/session_timeline_stats.txt        — stats report
+
+    Parameters
+    ----------
+    data_df : pd.DataFrame
+        DataFrame with columns: subject, session, meas_date, days_from_first
+    output_dir : str
+        Output directory (source_data/ subdirectory is created here)
+    """
+    df = data_df.sort_values(['subject', 'session']).copy()
+
+    # Per-subject total span: days from session 1 to session 10
+    subject_spans = df.groupby('subject')['days_from_first'].max()
+
+    span_mean = subject_spans.mean()
+    span_sd = subject_spans.std(ddof=1)
+    span_min = subject_spans.min()
+    span_max = subject_spans.max()
+
+    # Inter-session intervals per subject
+    intervals = []
+    for subject, grp in df.groupby('subject'):
+        grp = grp.sort_values('session')
+        diffs = grp['days_from_first'].diff().dropna()
+        for d in diffs:
+            intervals.append({'subject': subject, 'interval_days': d})
+    intervals_df = pd.DataFrame(intervals)
+
+    interval_mean = intervals_df['interval_days'].mean()
+    interval_sd = intervals_df['interval_days'].std(ddof=1)
+    interval_min = intervals_df['interval_days'].min()
+    interval_max = intervals_df['interval_days'].max()
+
+    lines = [
+        'Session Timeline Statistics',
+        '=' * 65,
+        f"  subjects:      {sorted(df['subject'].unique().tolist())}",
+        f"  n_subjects:    {df['subject'].nunique()}",
+        f"  sessions:      {sorted(df['session'].unique().tolist())}",
+        f"  date range:    {df['meas_date'].min()} — {df['meas_date'].max()}",
+        '',
+        'Total recording span (days from session 1 to session 10):',
+        f"  {'subject':<10} {'span_days':>12}",
+        '  ' + '-' * 24,
+    ]
+    for subj, span in subject_spans.items():
+        lines.append(f"  {subj:<10} {span:>12.0f}")
+    lines += [
+        '',
+        f"  mean ± SD:  {span_mean:.1f} ± {span_sd:.1f} days",
+        f"  range:      {span_min:.0f} – {span_max:.0f} days",
+        '',
+        'Inter-session intervals (days between consecutive sessions):',
+        f"  mean ± SD:  {interval_mean:.1f} ± {interval_sd:.1f} days",
+        f"  range:      {interval_min:.0f} – {interval_max:.0f} days",
+        '',
+        'Manuscript placeholder:',
+        f"  [PLACEHOLDER: M ± SD] = {span_mean:.1f} ± {span_sd:.1f}",
+    ]
+
+    print('\n' + '\n'.join(lines) + '\n')
+
+    # Save files
+    source_data_dir = os.path.join(output_dir, 'source_data')
+    os.makedirs(source_data_dir, exist_ok=True)
+
+    source_cols = [c for c in ['subject', 'session', 'meas_date', 'days_from_first']
+                   if c in df.columns]
+    df[source_cols].to_csv(
+        os.path.join(source_data_dir, 'session_timeline_source_data.csv'),
+        index=False
+    )
+
+    txt_path = os.path.join(source_data_dir, 'session_timeline_stats.txt')
+    with open(txt_path, 'w') as f:
+        f.write('\n'.join(lines) + '\n')
+
+    logger.info(f"Source data saved to: {source_data_dir}")
+
+
 def load_or_extract_timestamps(cache_file: str, data_path: str,
                                subjects: List[int], sessions: List[int],
                                recompute: bool = False, verbose: bool = False) -> pd.DataFrame:
@@ -430,6 +520,12 @@ def main():
     logger.info(f"  Sessions per subject: {data_df.groupby('subject').size().to_dict()}")
     logger.info(f"  Date range: {data_df['meas_date'].min()} to {data_df['meas_date'].max()}")
     logger.info(f"  Max days from first: {data_df['days_from_first'].max()}")
+
+    # Report statistics and save source data
+    report_statistics(
+        data_df=data_df,
+        output_dir=args.output_dir,
+    )
 
     # Create plot
     plot_session_timeline(
