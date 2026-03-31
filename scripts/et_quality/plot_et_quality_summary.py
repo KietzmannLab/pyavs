@@ -743,13 +743,13 @@ def main():
         '--derivatives-dir', '-d',
         type=str,
         default='/share/klab/psulewski/psulewski/pyavs/et_quality',
-        help='Path to ET quality derivatives directory (default: /share/klab/psulewski/psulewski/pyavs/et_quality)'
+        help='Path to ET quality derivatives directory (default: /share/klab/datasets/avs/derivatives/pyavs/et_quality)'
     )
 
     parser.add_argument(
         '--output-dir', '-o',
         type=str,
-        default='./figures',
+        default='/share/klab/psulewski/psulewski/pyavs/et_quality/accuracy_figures',
         help='Output directory for figures (default: ./figures)'
     )
 
