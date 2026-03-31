@@ -168,6 +168,56 @@ def compute_event_counts_per_subject(events_df: pd.DataFrame) -> pd.DataFrame:
     return summary
 
 
+def report_statistics(events_df: pd.DataFrame) -> None:
+    """
+    Print total counts and bootstrapped 95% CI per subject, by event type and task.
+
+    Parameters
+    ----------
+    events_df : pd.DataFrame
+        Events dataframe with columns: type, recording, subject
+    """
+    event_types = ['fixation', 'saccade', 'blink']
+    recordings = ['scene', 'caption']
+
+    rng = np.random.default_rng(0)
+    n_boot = 1000
+
+    print("\n" + "=" * 70)
+    print("EVENT COUNT STATISTICS")
+    print("=" * 70)
+
+    for rec in recordings:
+        rec_df = events_df[events_df['recording'] == rec]
+        print(f"\nTask: {rec}")
+        print(f"  {'event type':<12} {'total':>10}  {'mean [events/subject]':>22}  {'95% CI':>20}")
+        print(f"  {'-'*12}  {'-'*10}  {'-'*22}  {'-'*20}")
+
+        for evt in event_types:
+            mask = rec_df['type'] == evt
+            total = mask.sum()
+
+            # Per-subject counts
+            per_subj = rec_df[mask].groupby('subject').size().values.astype(float)
+
+            if len(per_subj) == 0:
+                print(f"  {evt:<12} {total:>10}  {'N/A':>22}  {'N/A':>20}")
+                continue
+
+            mean_val = per_subj.mean()
+
+            # Bootstrapped 95% CI
+            boot_means = np.array([
+                rng.choice(per_subj, size=len(per_subj), replace=True).mean()
+                for _ in range(n_boot)
+            ])
+            ci_lo, ci_hi = np.percentile(boot_means, [2.5, 97.5])
+
+            print(f"  {evt:<12} {total:>10}  {mean_val:>22.1f}  [{ci_lo:>8.1f}, {ci_hi:>8.1f}]")
+
+    print("\n" + "=" * 70 + "\n")
+
+
 def plot_dataset_counts(counts_df: pd.DataFrame, output_dir: str,
                        dpi: int = 300, fmt: str = 'both'):
     """
