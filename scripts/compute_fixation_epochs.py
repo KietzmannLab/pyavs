@@ -103,7 +103,9 @@ def process_single_subject_session(subject_id: int, session: int,
         'subject': subject_id,
         'session_num': session,
         'data_path': data_path,
-        'output_path': str(output_dir)
+        'output_path': str(output_dir),
+        'recompute_prepro': False  # Force recomputation for clean processing
+        
     })
     composer = AVSComposer(**composer_kwargs)
     
@@ -343,11 +345,11 @@ Examples:
                        help='List of session numbers to process (default: [1])')
     
     # Data path
-    parser.add_argument('--data-path', type=str, required=True,
+    parser.add_argument('--data-path', type=str, default='/share/klab/datasets/avs/',
                        help='Path to AVS data directory')
     
     # Processing options
-    parser.add_argument('--n-jobs', type=int, default=1,
+    parser.add_argument('--n-jobs', type=int, default=-1,
                        help='Number of parallel jobs for batch processing (default: 1)')
     parser.add_argument('--no-object-labels', action='store_true',
                        help='Skip object label computation (faster processing)')
