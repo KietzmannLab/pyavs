@@ -277,7 +277,7 @@ def main():
     parser.add_argument('--train-subjects', type=int, nargs='+', default=[1, 2, 3, 4, 5],
                         help='Subject IDs used for training (default: 1 2 3 4 5)')
     parser.add_argument('--test-subject', type=int, default=60,
-                        help='Held-out test subject ID (default: 50)')
+                        help='Held-out test subject ID (default: 60)')
     parser.add_argument('--sessions', type=int, nargs='+', default=list(range(1, 11)),
                         help='Session numbers to load (default: 1..10)')
     parser.add_argument('--seed', type=int, default=42,
@@ -365,13 +365,13 @@ def main():
     print(f"  metadata.csv  : {len(train_meta)} rows")
 
     # -----------------------------------------------------------------------
-    # Test subject (50)
+    # Test subject (60)
     # -----------------------------------------------------------------------
     print("\n" + "=" * 60)
     print(f"Loading test subject {args.test_subject}...")
     print("=" * 60)
 
-    grad_data_50, metadata_50, times_50, _ = load_subject_sessions(
+    grad_data_60, metadata_60, times_60, _ = load_subject_sessions(
         args.test_subject, args.sessions, data_path
     )
 
@@ -381,10 +381,10 @@ def main():
     grad_info_50 = load_subject_grad_info(args.test_subject, args.sessions, data_path)
 
     # Epoch rejection for subject 60 only
-    grad_data_50, metadata_50, n_dropped = reject_extreme_epochs(
-        grad_data_50, metadata_50, grad_info_50, times_50
+    grad_data_60, metadata_60, n_dropped = reject_extreme_epochs(
+        grad_data_60, metadata_60, channel_names_ref, times_60
     )
-    print(f"  {len(grad_data_50)} fixations after rejection ({n_dropped} dropped)")
+    print(f"  {len(grad_data_60)} fixations after rejection ({n_dropped} dropped)")
 
     t_idx = int(np.argmin(np.abs(times_50 - C1_TIME_S)))
     grad_110_50 = grad_data_50[:, :, t_idx]  # (n_epochs, n_channels)
@@ -393,10 +393,10 @@ def main():
     grad_c2_50 = grad_data_50[:, :, c2_indices_50]  # (n_epochs, n_channels, n_timepoints)
 
     # Scene splits
-    split_masks = make_scene_splits(metadata_50, n_splits=4, seed=args.seed)
+    split_masks = make_scene_splits(metadata_60, n_splits=4, seed=args.seed)
 
     # Verify splits are mutually exclusive and exhaustive
-    combined = np.zeros(len(metadata_50), dtype=bool)
+    combined = np.zeros(len(metadata_60), dtype=bool)
     for mask in split_masks:
         assert not np.any(combined & mask), "Splits overlap — this is a bug"
         combined |= mask
@@ -408,7 +408,7 @@ def main():
     print("\nScene splits:")
     for split_name, mask in zip(SPLIT_NAMES, split_masks):
         n_fix = mask.sum()
-        n_scenes = metadata_50.loc[mask, 'sceneID'].nunique()
+        n_scenes = metadata_60.loc[mask, 'sceneID'].nunique()
         print(f"  {split_name}: {n_fix} fixations, {n_scenes} scenes")
 
         split_meta = metadata_50[mask].reset_index(drop=True)
@@ -424,16 +424,16 @@ def main():
         else:
             np.save(gt_dir / f'{split_name}_meg_c2.npy', grad_c2_50[mask])
 
-    # Subject 50 grad info
-    info_path_50 = out / 'subject60' / f'sub-{args.test_subject:02d}_grad_info.fif'
+    # Subject 60 grad info
+    info_path_60 = out / 'subject60' / f'sub-{args.test_subject:02d}_grad_info.fif'
     (out / 'subject60').mkdir(parents=True, exist_ok=True)
     try:
-        save_subject_grad_info(args.test_subject, args.sessions, data_path, info_path_50)
+        save_subject_grad_info(args.test_subject, args.sessions, data_path, info_path_60)
         print(f"  sub-{args.test_subject:02d} grad info saved")
     except RuntimeError as exc:
         print(f"  WARNING: {exc}")
 
-    print(f"\nSubject 50 data saved to {out / 'subject60'}")
+    print(f"\nSubject 60 data saved to {out / 'subject60'}")
 
     # -----------------------------------------------------------------------
     # Summary

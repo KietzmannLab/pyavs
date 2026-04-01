@@ -106,6 +106,7 @@ def process_single_subject_session(subject_id: int, session: int,
         'data_path': data_path,
         'output_path': str(output_dir),
         'skip_empty_room': skip_empty_room,
+        'recompute_prepro': True
     })
     composer = AVSComposer(**composer_kwargs)
     
