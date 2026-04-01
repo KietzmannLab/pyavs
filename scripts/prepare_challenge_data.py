@@ -7,14 +7,18 @@ compute_fixation_epochs.py) for training subjects 1-5 and test subject 60,
 then writes the challenge data package to the specified output directory.
 
 Training data (subjects 1-5):
-  - meg_110ms.npy     : (n_fixations, n_channels) gradiometer amplitudes at 110 ms
-  - metadata.csv      : aligned fixation metadata
+  - meg_110ms.npy     : (n_fixations, n_channels) gradiometer amplitudes at 110 ms [C1]
+  - meg_c2.npy        : (n_fixations, n_channels, 6) amplitudes at C2 timepoints [C2]
+  - metadata.csv      : aligned fixation metadata (shared across C1 and C2)
   - channel_names.txt : ordered gradiometer channel names
   - times.npy         : full time axis (reference)
 
-Subject 50 (4 x 25% disjoint scene splits):
-  - subject60/{split}/metadata.csv              : metadata only, no MEG
-  - subject60/ground_truth/{split}_meg_110ms.npy : hidden evaluation MEG
+Subject 60 (4 x 25% disjoint scene splits):
+  - subject60/{split}/metadata.csv                 : metadata only, no MEG
+  - subject60/ground_truth/{c1_split}_meg_110ms.npy : hidden C1 evaluation MEG
+  - subject60/ground_truth/{c2_split}_meg_c2.npy    : hidden C2 evaluation MEG
+
+Challenge 2 timepoints (seconds): -0.050, 0.050, 0.075, 0.100, 0.125, 0.150
 
 Epoch rejection (subject 60 only): MNE peak-to-peak threshold for grads
 (4000 fT/cm) to remove extreme outliers before evaluation. Training data
@@ -43,6 +47,7 @@ from pathlib import Path
 import mne
 import numpy as np
 import pandas as pd
+from joblib import Parallel, delayed
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -54,8 +59,16 @@ logger = get_logger('scripts.prepare_challenge_data')
 
 # MNE peak-to-peak rejection threshold for gradiometers (4000 fT/cm)
 GRAD_REJECT_THRESHOLD = 4000e-13
-TARGET_TIME_S = 0.110  # seconds post fixation onset
+
+# Challenge 1: single timepoint
+C1_TIME_S = 0.110  # seconds post fixation onset
+
+# Challenge 2: multiple timepoints (seconds post fixation onset)
+C2_TIMES_S = [-0.050, 0.050, 0.075, 0.100, 0.125, 0.150]
+
 SPLIT_NAMES = ['challenge1_dev', 'challenge1_eval', 'challenge2_dev', 'challenge2_eval']
+C1_SPLITS = {'challenge1_dev', 'challenge1_eval'}
+C2_SPLITS = {'challenge2_dev', 'challenge2_eval'}
 
 
 # ---------------------------------------------------------------------------
@@ -152,15 +165,15 @@ def load_subject_sessions(subject_id, sessions, data_path):
 # Epoch rejection (subject 60 only)
 # ---------------------------------------------------------------------------
 
-def reject_extreme_epochs(grad_data, metadata, channel_names, times):
+def reject_extreme_epochs(grad_data, metadata, info, times):
     """Drop epochs exceeding MNE's default gradiometer peak-to-peak threshold.
 
     Parameters
     ----------
-    grad_data     : np.ndarray, shape (n_epochs, n_channels, n_times)
-    metadata      : pd.DataFrame
-    channel_names : list of str
-    times         : np.ndarray
+    grad_data : np.ndarray, shape (n_epochs, n_channels, n_times)
+    metadata  : pd.DataFrame
+    info      : mne.Info  — real gradiometer info from raw data (with sensor positions)
+    times     : np.ndarray
 
     Returns
     -------
@@ -168,11 +181,6 @@ def reject_extreme_epochs(grad_data, metadata, channel_names, times):
     meta_clean : pd.DataFrame
     n_dropped  : int
     """
-    info = mne.create_info(
-        ch_names=channel_names,
-        sfreq=round(1.0 / (times[1] - times[0])),
-        ch_types='grad',
-    )
     mne_epochs = mne.EpochsArray(grad_data, info, tmin=float(times[0]), verbose=False)
     mne_epochs.drop_bad(reject={'grad': GRAD_REJECT_THRESHOLD}, verbose=False)
 
@@ -209,15 +217,18 @@ def make_scene_splits(metadata, n_splits=4, seed=42):
 # Sensor info
 # ---------------------------------------------------------------------------
 
-def save_subject_grad_info(subject_id, sessions, data_path, out_path):
-    """Load one raw MEG block (no preload) and save the gradiometer Info as .fif.
+def load_subject_grad_info(subject_id, sessions, data_path):
+    """Load gradiometer Info from the first available raw MEG block (no preload).
 
     Parameters
     ----------
     subject_id : int
     sessions   : list of int  — tried in order; first success wins
     data_path  : str
-    out_path   : Path  — destination .fif file
+
+    Returns
+    -------
+    mne.Info  — gradiometer channels only, with real sensor positions
     """
     for session in sessions:
         for run in range(1, 4):  # blocks 1-3 per session
@@ -234,15 +245,20 @@ def save_subject_grad_info(subject_id, sessions, data_path, out_path):
                     raw.info,
                     mne.pick_types(raw.info, meg='grad', exclude=[]),
                 )
-                mne.io.write_info(str(out_path), grad_info)
-                logger.info(f"sub-{subject_id:02d}: saved grad info from ses-{session:02d} run-{run:02d}")
-                return
+                logger.info(f"sub-{subject_id:02d}: loaded grad info from ses-{session:02d} run-{run:02d}")
+                return grad_info
             except FileNotFoundError:
                 continue
             except Exception as exc:
                 logger.warning(f"sub-{subject_id:02d} ses-{session:02d} run-{run}: could not load raw ({exc})")
                 continue
     raise RuntimeError(f"Could not obtain grad info for subject {subject_id} — no raw file found")
+
+
+def save_subject_grad_info(subject_id, sessions, data_path, out_path):
+    """Load gradiometer Info from raw data and save as .fif."""
+    grad_info = load_subject_grad_info(subject_id, sessions, data_path)
+    mne.io.write_info(str(out_path), grad_info)
 
 
 # ---------------------------------------------------------------------------
@@ -266,6 +282,8 @@ def main():
                         help='Session numbers to load (default: 1..10)')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed for scene splits (default: 42)')
+    parser.add_argument('--n-jobs', type=int, default=-1,
+                        help='Parallel workers for epoch loading (default: -1 = all cores)')
     parser.add_argument('--verbose', '-v', action='store_true')
     args = parser.parse_args()
 
@@ -282,40 +300,52 @@ def main():
     print("Loading training subjects...")
     print("=" * 60)
 
-    all_train_grad_110 = []
-    all_train_meta = []
-    times_ref = None
-    channel_names_ref = None
-
-    for subject_id in args.train_subjects:
-        print(f"  Subject {subject_id}...")
+    def _load_subject(subject_id):
         grad_data, metadata, times, channel_names = load_subject_sessions(
             subject_id, args.sessions, data_path
         )
+        t_idx = int(np.argmin(np.abs(times - C1_TIME_S)))
+        c2_indices = [int(np.argmin(np.abs(times - t))) for t in C2_TIMES_S]
+        return (
+            grad_data[:, :, t_idx],          # grad_110
+            grad_data[:, :, c2_indices],     # grad_c2
+            metadata,
+            times,
+            channel_names,
+        )
 
+    results = Parallel(n_jobs=args.n_jobs)(
+        delayed(_load_subject)(sid) for sid in args.train_subjects
+    )
+
+    all_train_grad_110, all_train_grad_c2, all_train_meta = [], [], []
+    times_ref, channel_names_ref = None, None
+
+    for subject_id, (grad_110, grad_c2, metadata, times, channel_names) in zip(
+        args.train_subjects, results
+    ):
         if times_ref is None:
             times_ref = times
         if channel_names_ref is None:
             channel_names_ref = channel_names
-
-        t_idx = int(np.argmin(np.abs(times - TARGET_TIME_S)))
-        grad_110 = grad_data[:, :, t_idx]  # (n_epochs, n_channels)
-
         all_train_grad_110.append(grad_110)
+        all_train_grad_c2.append(grad_c2)
         all_train_meta.append(metadata)
-        print(f"    {len(grad_110)} fixations, {grad_110.shape[1]} channels")
+        print(f"  Subject {subject_id}: {len(grad_110)} fixations, {grad_110.shape[1]} channels")
 
-    train_meg = np.concatenate(all_train_grad_110, axis=0)
+    train_meg_c1 = np.concatenate(all_train_grad_110, axis=0)
+    train_meg_c2 = np.concatenate(all_train_grad_c2, axis=0)
     train_meta = pd.concat(all_train_meta, axis=0, ignore_index=True)
 
-    print(f"\nTraining set: {len(train_meg)} fixations total")
-    assert len(train_meg) == len(train_meta), "MEG / metadata length mismatch"
+    print(f"\nTraining set: {len(train_meg_c1)} fixations total")
+    assert len(train_meg_c1) == len(train_meta), "MEG / metadata length mismatch"
 
     # Save training package
     train_dir = out / 'training'
     train_dir.mkdir(parents=True, exist_ok=True)
 
-    np.save(train_dir / 'meg_110ms.npy', train_meg)
+    np.save(train_dir / 'meg_110ms.npy', train_meg_c1)
+    np.save(train_dir / 'meg_c2.npy', train_meg_c2)
     train_meta.to_csv(train_dir / 'metadata.csv', index=False)
     np.save(train_dir / 'times.npy', times_ref)
     (train_dir / 'channel_names.txt').write_text('\n'.join(channel_names_ref))
@@ -330,7 +360,8 @@ def main():
             print(f"    WARNING: {exc}")
 
     print(f"Training data saved to {train_dir}")
-    print(f"  meg_110ms.npy : {train_meg.shape}")
+    print(f"  meg_110ms.npy : {train_meg_c1.shape}")
+    print(f"  meg_c2.npy    : {train_meg_c2.shape}")
     print(f"  metadata.csv  : {len(train_meta)} rows")
 
     # -----------------------------------------------------------------------
@@ -346,14 +377,20 @@ def main():
 
     print(f"  Loaded {len(grad_data_50)} fixations before rejection")
 
+    # Load real grad info from raw data for proper epoch rejection
+    grad_info_50 = load_subject_grad_info(args.test_subject, args.sessions, data_path)
+
     # Epoch rejection for subject 60 only
     grad_data_50, metadata_50, n_dropped = reject_extreme_epochs(
-        grad_data_50, metadata_50, channel_names_ref, times_50
+        grad_data_50, metadata_50, grad_info_50, times_50
     )
     print(f"  {len(grad_data_50)} fixations after rejection ({n_dropped} dropped)")
 
-    t_idx = int(np.argmin(np.abs(times_50 - TARGET_TIME_S)))
+    t_idx = int(np.argmin(np.abs(times_50 - C1_TIME_S)))
     grad_110_50 = grad_data_50[:, :, t_idx]  # (n_epochs, n_channels)
+
+    c2_indices_50 = [int(np.argmin(np.abs(times_50 - t))) for t in C2_TIMES_S]
+    grad_c2_50 = grad_data_50[:, :, c2_indices_50]  # (n_epochs, n_channels, n_timepoints)
 
     # Scene splits
     split_masks = make_scene_splits(metadata_50, n_splits=4, seed=args.seed)
@@ -375,7 +412,6 @@ def main():
         print(f"  {split_name}: {n_fix} fixations, {n_scenes} scenes")
 
         split_meta = metadata_50[mask].reset_index(drop=True)
-        split_meg = grad_110_50[mask]
 
         # Participant-facing: metadata only
         split_dir = out / 'subject60' / split_name
@@ -383,7 +419,10 @@ def main():
         split_meta.to_csv(split_dir / 'metadata.csv', index=False)
 
         # Ground truth: MEG (hidden from participants)
-        np.save(gt_dir / f'{split_name}_meg_110ms.npy', split_meg)
+        if split_name in C1_SPLITS:
+            np.save(gt_dir / f'{split_name}_meg_110ms.npy', grad_110_50[mask])
+        else:
+            np.save(gt_dir / f'{split_name}_meg_c2.npy', grad_c2_50[mask])
 
     # Subject 50 grad info
     info_path_50 = out / 'subject60' / f'sub-{args.test_subject:02d}_grad_info.fif'
