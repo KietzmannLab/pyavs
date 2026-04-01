@@ -337,7 +337,7 @@ class PyAVSConfig:
             'server': self.server,
             'verbose': self.verbose,
             'preprocessed': True,
-            'recompute_prepro': self.recompute_meg_prepro
+            'recompute_prepro': self.recompute_meg_prepro,
         }
     
     def get_source_reconstruction_kwargs(self) -> Dict[str, Any]:

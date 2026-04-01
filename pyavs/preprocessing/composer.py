@@ -67,7 +67,8 @@ class AVSComposer:
         resample_freq: float = 500.0,
         causal_filter: bool = False,
         n_jobs: int = 1,
-        random_state: int = 42
+        random_state: int = 42,
+        skip_empty_room: bool = False,
     ):
         """
         Initialize the AVSComposer object.
@@ -175,7 +176,8 @@ class AVSComposer:
         self.causal_filter = causal_filter
         self.n_jobs = n_jobs
         self.random_state = random_state
-        
+        self.skip_empty_room = skip_empty_room
+
         # Initialize data storage
         self.raws_dict = {}
         self.raws_dict_empty_room = {}
@@ -379,8 +381,9 @@ class AVSComposer:
         
         self.raws_dict = {}
         blocks = list(range(self.min_block, self.max_block + 1))
-        # Append the empty room recording blocks
-        blocks = blocks + self.empty_room_recording_names
+        # Append the empty room recording blocks (unless explicitly skipped)
+        if not self.skip_empty_room:
+            blocks = blocks + self.empty_room_recording_names
         
         if self.n_jobs == 1:
             for block in blocks:
@@ -682,7 +685,7 @@ class AVSComposer:
         
         self.raws_concatenated = mne.concatenate_raws(raws_list, on_mismatch='warn')
         
-        if self.empty_room_available:
+        if self.empty_room_available and not self.skip_empty_room:
             raws_list_empty_room = list(self.raws_dict_empty_room.values())
             if self.preprocessed:
                 if self.interpolate_bad_channels:

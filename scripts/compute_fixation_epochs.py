@@ -62,9 +62,10 @@ def setup_output_directory(data_path: str) -> Path:
 
 
 
-def process_single_subject_session(subject_id: int, session: int, 
+def process_single_subject_session(subject_id: int, session: int,
                                  data_path: str, output_dir: Path,
-                                 include_object_labels: bool = True) -> Dict[str, Any]:
+                                 include_object_labels: bool = True,
+                                 skip_empty_room: bool = False) -> Dict[str, Any]:
     """
     Process epochs for a single subject and session.
     
@@ -104,8 +105,7 @@ def process_single_subject_session(subject_id: int, session: int,
         'session_num': session,
         'data_path': data_path,
         'output_path': str(output_dir),
-        'recompute_prepro': False  # Force recomputation for clean processing
-        
+        'skip_empty_room': skip_empty_room,
     })
     composer = AVSComposer(**composer_kwargs)
     
@@ -211,9 +211,10 @@ def process_single_subject_session(subject_id: int, session: int,
     return results
 
 
-def process_batch(subjects: List[int], sessions: List[int], 
+def process_batch(subjects: List[int], sessions: List[int],
                  data_path: str, n_jobs: int = 1,
-                 include_object_labels: bool = True) -> List[Dict[str, Any]]:
+                 include_object_labels: bool = True,
+                 skip_empty_room: bool = False) -> List[Dict[str, Any]]:
     """
     Process multiple subjects and sessions in batch.
     
@@ -251,13 +252,15 @@ def process_batch(subjects: List[int], sessions: List[int],
         results = []
         for subject_id, session in combinations:
             result = process_single_subject_session(
-                subject_id, session, data_path, output_dir, include_object_labels
+                subject_id, session, data_path, output_dir, include_object_labels,
+                skip_empty_room=skip_empty_room
             )
             results.append(result)
     else:
         results = Parallel(n_jobs=n_jobs)(
             delayed(process_single_subject_session)(
-                subject_id, session, data_path, output_dir, include_object_labels
+                subject_id, session, data_path, output_dir, include_object_labels,
+                skip_empty_room=skip_empty_room
             )
             for subject_id, session in combinations
         )
@@ -353,6 +356,8 @@ Examples:
                        help='Number of parallel jobs for batch processing (default: 1)')
     parser.add_argument('--no-object-labels', action='store_true',
                        help='Skip object label computation (faster processing)')
+    parser.add_argument('--skip-empty-room', action='store_true',
+                       help='Skip empty room recording preprocessing and concatenation')
     
     # Logging
     parser.add_argument('--verbose', '-v', action='store_true',
@@ -412,7 +417,8 @@ Examples:
         sessions=sessions,
         data_path=args.data_path,
         n_jobs=args.n_jobs,
-        include_object_labels=not args.no_object_labels
+        include_object_labels=not args.no_object_labels,
+        skip_empty_room=args.skip_empty_room,
     )
     
     # Print summary
