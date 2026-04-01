@@ -135,9 +135,13 @@ def load_and_enrich_eye_events(subjects: List[int], sessions: List[int],
                 explog_all = pd.concat([explog_all, explog], ignore_index=True)
                 
     
+    if events_all is None:
+        logger.warning('No events loaded — all subject/session combinations were missing or failed')
+        return pd.DataFrame(), pd.DataFrame()
+
     if verbose:
         logger.info(f'Total events loaded: {len(events_all)}')
-    
+
     return explog_all, events_all
 
 

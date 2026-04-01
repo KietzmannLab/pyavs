@@ -3,7 +3,7 @@
 Prepare the brain encoding challenge data package.
 
 Loads fixation-locked gradiometer MEG epochs (already computed by
-compute_fixation_epochs.py) for training subjects 1-5 and test subject 50,
+compute_fixation_epochs.py) for training subjects 1-5 and test subject 60,
 then writes the challenge data package to the specified output directory.
 
 Training data (subjects 1-5):
@@ -13,10 +13,10 @@ Training data (subjects 1-5):
   - times.npy         : full time axis (reference)
 
 Subject 50 (4 x 25% disjoint scene splits):
-  - subject50/{split}/metadata.csv              : metadata only, no MEG
-  - subject50/ground_truth/{split}_meg_110ms.npy : hidden evaluation MEG
+  - subject60/{split}/metadata.csv              : metadata only, no MEG
+  - subject60/ground_truth/{split}_meg_110ms.npy : hidden evaluation MEG
 
-Epoch rejection (subject 50 only): MNE peak-to-peak threshold for grads
+Epoch rejection (subject 60 only): MNE peak-to-peak threshold for grads
 (4000 fT/cm) to remove extreme outliers before evaluation. Training data
 is provided as-is so students can practise their own preprocessing.
 
@@ -28,7 +28,7 @@ Usage:
   python prepare_challenge_data.py \\
       --data-path /share/klab/datasets/avs \\
       --train-subjects 1 2 3 4 5 \\
-      --test-subject 50 \\
+      --test-subject 60 \\
       --sessions 1 2 3 4 5 6 7 8 9 10 \\
       --seed 42 \\
       --verbose
@@ -149,7 +149,7 @@ def load_subject_sessions(subject_id, sessions, data_path):
 
 
 # ---------------------------------------------------------------------------
-# Epoch rejection (subject 50 only)
+# Epoch rejection (subject 60 only)
 # ---------------------------------------------------------------------------
 
 def reject_extreme_epochs(grad_data, metadata, channel_names, times):
@@ -260,7 +260,7 @@ def main():
                         help='Output directory for challenge package')
     parser.add_argument('--train-subjects', type=int, nargs='+', default=[1, 2, 3, 4, 5],
                         help='Subject IDs used for training (default: 1 2 3 4 5)')
-    parser.add_argument('--test-subject', type=int, default=50,
+    parser.add_argument('--test-subject', type=int, default=60,
                         help='Held-out test subject ID (default: 50)')
     parser.add_argument('--sessions', type=int, nargs='+', default=list(range(1, 11)),
                         help='Session numbers to load (default: 1..10)')
@@ -346,7 +346,7 @@ def main():
 
     print(f"  Loaded {len(grad_data_50)} fixations before rejection")
 
-    # Epoch rejection for subject 50 only
+    # Epoch rejection for subject 60 only
     grad_data_50, metadata_50, n_dropped = reject_extreme_epochs(
         grad_data_50, metadata_50, channel_names_ref, times_50
     )
@@ -365,7 +365,7 @@ def main():
         combined |= mask
     assert np.all(combined), "Not all fixations assigned to a split"
 
-    gt_dir = out / 'subject50' / 'ground_truth'
+    gt_dir = out / 'subject60' / 'ground_truth'
     gt_dir.mkdir(parents=True, exist_ok=True)
 
     print("\nScene splits:")
@@ -378,7 +378,7 @@ def main():
         split_meg = grad_110_50[mask]
 
         # Participant-facing: metadata only
-        split_dir = out / 'subject50' / split_name
+        split_dir = out / 'subject60' / split_name
         split_dir.mkdir(parents=True, exist_ok=True)
         split_meta.to_csv(split_dir / 'metadata.csv', index=False)
 
@@ -386,15 +386,15 @@ def main():
         np.save(gt_dir / f'{split_name}_meg_110ms.npy', split_meg)
 
     # Subject 50 grad info
-    info_path_50 = out / 'subject50' / f'sub-{args.test_subject:02d}_grad_info.fif'
-    (out / 'subject50').mkdir(parents=True, exist_ok=True)
+    info_path_50 = out / 'subject60' / f'sub-{args.test_subject:02d}_grad_info.fif'
+    (out / 'subject60').mkdir(parents=True, exist_ok=True)
     try:
         save_subject_grad_info(args.test_subject, args.sessions, data_path, info_path_50)
         print(f"  sub-{args.test_subject:02d} grad info saved")
     except RuntimeError as exc:
         print(f"  WARNING: {exc}")
 
-    print(f"\nSubject 50 data saved to {out / 'subject50'}")
+    print(f"\nSubject 50 data saved to {out / 'subject60'}")
 
     # -----------------------------------------------------------------------
     # Summary

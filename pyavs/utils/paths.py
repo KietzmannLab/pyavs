@@ -196,6 +196,14 @@ def get_derivatives_path(data_path: str, subject_id: int, session: Optional[int]
             return os.path.join(data_path, 'derivatives', pipeline, subject_dir)
 
 
+# Subject/session pairs whose experiment log has a non-standard run suffix.
+# Format: (subject_id, session) -> suffix string used in the filename.
+_EXPLOG_SUFFIX = {
+    (60, 3): '3_11',
+    (60, 7): '3_10',
+}
+
+
 def get_legacy_paths(data_path: str, subject_id: int, session: int,
                     prefix: str = 'as') -> dict:
     """
@@ -228,7 +236,8 @@ def get_legacy_paths(data_path: str, subject_id: int, session: int,
         'messages': os.path.join(data_path, subject_session_dir, 'preprocessed',
                                 f"{prefix}_s{subject_id}_el_msgs.csv"),
         'experiment_log': os.path.join(data_path, subject_session_dir,
-                                      f"{prefix}_exp_data_{subject_id}_{session}_3_0.csv"),
+                                      f"{prefix}_exp_data_{subject_id}_{session}_"
+                                      f"{_EXPLOG_SUFFIX.get((subject_id, session), '3_0')}.csv"),
         'cleaned_samples': os.path.join(data_path, subject_session_dir, 'preprocessed',
                                         f"{prefix}_s{subject_id}_el_cleaned_samples.csv"),
     }
