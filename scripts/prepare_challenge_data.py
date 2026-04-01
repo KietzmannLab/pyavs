@@ -47,6 +47,7 @@ import pandas as pd
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from pyavs.io.read import load_epochs_h5, load_metadata_csv
+from pyavs.dataloader.meg import load_meg_raw
 from pyavs.utils.logging import get_logger
 
 logger = get_logger('scripts.prepare_challenge_data')
@@ -205,6 +206,46 @@ def make_scene_splits(metadata, n_splits=4, seed=42):
 
 
 # ---------------------------------------------------------------------------
+# Sensor info
+# ---------------------------------------------------------------------------
+
+def save_subject_grad_info(subject_id, sessions, data_path, out_path):
+    """Load one raw MEG block (no preload) and save the gradiometer Info as .fif.
+
+    Parameters
+    ----------
+    subject_id : int
+    sessions   : list of int  — tried in order; first success wins
+    data_path  : str
+    out_path   : Path  — destination .fif file
+    """
+    for session in sessions:
+        for run in range(1, 4):  # blocks 1-3 per session
+            try:
+                raw = load_meg_raw(
+                    subject_id=subject_id,
+                    session=session,
+                    run=run,
+                    data_path=data_path,
+                    preload=False,
+                    verbose=False,
+                )
+                grad_info = mne.pick_info(
+                    raw.info,
+                    mne.pick_types(raw.info, meg='grad', exclude=[]),
+                )
+                mne.io.write_info(str(out_path), grad_info)
+                logger.info(f"sub-{subject_id:02d}: saved grad info from ses-{session:02d} run-{run:02d}")
+                return
+            except FileNotFoundError:
+                continue
+            except Exception as exc:
+                logger.warning(f"sub-{subject_id:02d} ses-{session:02d} run-{run}: could not load raw ({exc})")
+                continue
+    raise RuntimeError(f"Could not obtain grad info for subject {subject_id} — no raw file found")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -279,6 +320,15 @@ def main():
     np.save(train_dir / 'times.npy', times_ref)
     (train_dir / 'channel_names.txt').write_text('\n'.join(channel_names_ref))
 
+    # Per-subject grad info (sensor positions for layout plotting)
+    for subject_id in args.train_subjects:
+        info_path = train_dir / f'sub-{subject_id:02d}_grad_info.fif'
+        try:
+            save_subject_grad_info(subject_id, args.sessions, data_path, info_path)
+            print(f"    sub-{subject_id:02d} grad info saved")
+        except RuntimeError as exc:
+            print(f"    WARNING: {exc}")
+
     print(f"Training data saved to {train_dir}")
     print(f"  meg_110ms.npy : {train_meg.shape}")
     print(f"  metadata.csv  : {len(train_meta)} rows")
@@ -334,6 +384,15 @@ def main():
 
         # Ground truth: MEG (hidden from participants)
         np.save(gt_dir / f'{split_name}_meg_110ms.npy', split_meg)
+
+    # Subject 50 grad info
+    info_path_50 = out / 'subject50' / f'sub-{args.test_subject:02d}_grad_info.fif'
+    (out / 'subject50').mkdir(parents=True, exist_ok=True)
+    try:
+        save_subject_grad_info(args.test_subject, args.sessions, data_path, info_path_50)
+        print(f"  sub-{args.test_subject:02d} grad info saved")
+    except RuntimeError as exc:
+        print(f"  WARNING: {exc}")
 
     print(f"\nSubject 50 data saved to {out / 'subject50'}")
 
