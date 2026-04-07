@@ -6,19 +6,29 @@ Loads fixation-locked gradiometer MEG epochs (already computed by
 compute_fixation_epochs.py) for training subjects 1-5 and test subject 60,
 then writes the challenge data package to the specified output directory.
 
-Training data (subjects 1-5):
-  - meg_110ms.npy     : (n_fixations, n_channels) gradiometer amplitudes at 110 ms [C1]
-  - meg_c2.npy        : (n_fixations, n_channels, 6) amplitudes at C2 timepoints [C2]
-  - metadata.csv      : aligned fixation metadata (shared across C1 and C2)
-  - channel_names.txt : ordered gradiometer channel names
-  - times.npy         : full time axis (reference)
+Challenge 1 package ({out}/challenge1/):
+  training/
+    meg_110ms.npy     : (n_fixations, n_channels) gradiometer amplitudes at 110 ms
+    metadata.csv      : aligned fixation metadata
+    channel_names.txt : ordered gradiometer channel names
+    times.npy         : full time axis (reference)
+    sub-XX_grad_info.fif : sensor positions per training subject
+  subject60/
+    {split}/metadata.csv                        : participant-facing metadata only
+    ground_truth/{split}_meg_110ms.npy          : hidden C1 evaluation MEG
 
-Subject 60 (4 x 25% disjoint scene splits):
-  - subject60/{split}/metadata.csv                 : metadata only, no MEG
-  - subject60/ground_truth/{c1_split}_meg_110ms.npy : hidden C1 evaluation MEG
-  - subject60/ground_truth/{c2_split}_meg_c2.npy    : hidden C2 evaluation MEG
+Challenge 2 package ({out}/challenge2/):
+  training/
+    meg_c2.npy        : (n_fixations, n_channels, 61) amplitudes at C2 timepoints
+    metadata.csv      : aligned fixation metadata
+    channel_names.txt : ordered gradiometer channel names
+    times.npy         : full time axis (reference)
+    sub-XX_grad_info.fif : sensor positions per training subject
+  subject60/
+    {split}/metadata.csv                        : participant-facing metadata only
+    ground_truth/{split}_meg_c2.npy             : hidden C2 evaluation MEG
 
-Challenge 2 timepoints (seconds): -0.050, 0.050, 0.075, 0.100, 0.125, 0.150
+Challenge 2 timepoints: every 5 ms from -50 ms to +250 ms inclusive (61 timepoints)
 
 Epoch rejection (subject 60 only): MNE peak-to-peak threshold for grads
 (4000 fT/cm) to remove extreme outliers before evaluation. Training data
@@ -34,8 +44,14 @@ Usage:
       --train-subjects 1 2 3 4 5 \\
       --test-subject 60 \\
       --sessions 1 2 3 4 5 6 7 8 9 10 \\
+      --challenge both \\
       --seed 42 \\
       --verbose
+
+  # Prepare only challenge 2:
+  python prepare_challenge_data.py \\
+      --data-path /share/klab/datasets/avs \\
+      --challenge 2
 """
 
 import argparse
@@ -63,17 +79,18 @@ GRAD_REJECT_THRESHOLD = 4000e-13
 # Challenge 1: single timepoint
 C1_TIME_S = 0.110  # seconds post fixation onset
 
-# Challenge 2: multiple timepoints (seconds post fixation onset)
-C2_TIMES_S = [-0.050, 0.050, 0.075, 0.100, 0.125, 0.150]
+# Challenge 2: every 5 ms from -50 ms to +250 ms inclusive (61 timepoints)
+C2_TIMES_S = np.arange(-0.050, 0.251, 0.005).tolist()
 
-SPLIT_NAMES = ['challenge1_dev', 'challenge1_eval', 'challenge2_dev', 'challenge2_eval']
-C1_SPLITS = {'challenge1_dev', 'challenge1_eval'}
-C2_SPLITS = {'challenge2_dev', 'challenge2_eval'}
+C1_SPLITS = ['challenge1_dev', 'challenge1_eval']
+C2_SPLITS = ['challenge2_dev', 'challenge2_eval']
+ALL_SPLITS = C1_SPLITS + C2_SPLITS
 
 
 # ---------------------------------------------------------------------------
 # Data loading helpers
 # ---------------------------------------------------------------------------
+
 
 def load_subject_sessions(subject_id, sessions, data_path):
     """Load and concatenate gradiometer epochs + metadata across sessions.
@@ -181,6 +198,11 @@ def reject_extreme_epochs(grad_data, metadata, info, times):
     meta_clean : pd.DataFrame
     n_dropped  : int
     """
+    # Bad channels excluded during epoch creation may leave fewer channels in
+    # the array than in the raw info. Subset by position to match.
+    n_ch = grad_data.shape[1]
+    if len(info['ch_names']) != n_ch:
+        info = mne.pick_info(info, list(range(n_ch)))
     mne_epochs = mne.EpochsArray(grad_data, info, tmin=float(times[0]), verbose=False)
     mne_epochs.drop_bad(reject={'grad': GRAD_REJECT_THRESHOLD}, verbose=False)
 
@@ -262,6 +284,58 @@ def save_subject_grad_info(subject_id, sessions, data_path, out_path):
 
 
 # ---------------------------------------------------------------------------
+# Package writers
+# ---------------------------------------------------------------------------
+
+def _save_training_common(train_dir, metadata, times_ref, channel_names_ref):
+    """Save shared training assets (metadata, times, channel names)."""
+    metadata.to_csv(train_dir / 'metadata.csv', index=False)
+    np.save(train_dir / 'times.npy', times_ref)
+    (train_dir / 'channel_names.txt').write_text('\n'.join(channel_names_ref))
+
+
+def _save_training_grad_info(train_dir, train_subjects, sessions, data_path):
+    """Save per-subject gradiometer info files into train_dir."""
+    for subject_id in train_subjects:
+        info_path = train_dir / f'sub-{subject_id:02d}_grad_info.fif'
+        try:
+            save_subject_grad_info(subject_id, sessions, data_path, info_path)
+            print(f"    sub-{subject_id:02d} grad info saved")
+        except RuntimeError as exc:
+            print(f"    WARNING: {exc}")
+
+
+def _save_subject60_splits(challenge_out, split_names, split_masks, metadata_50,
+                            meg_data, meg_filename, sessions, data_path, test_subject):
+    """Write subject-60 split directories and ground-truth MEG for one challenge."""
+    gt_dir = challenge_out / 'subject60' / 'ground_truth'
+    gt_dir.mkdir(parents=True, exist_ok=True)
+
+    print("\nScene splits:")
+    for split_name, mask in zip(split_names, split_masks):
+        n_fix = mask.sum()
+        n_scenes = metadata_50.loc[mask, 'sceneID'].nunique()
+        print(f"  {split_name}: {n_fix} fixations, {n_scenes} scenes")
+
+        split_meta = metadata_50[mask].reset_index(drop=True)
+
+        split_dir = challenge_out / 'subject60' / split_name
+        split_dir.mkdir(parents=True, exist_ok=True)
+        split_meta.to_csv(split_dir / 'metadata.csv', index=False)
+
+        np.save(gt_dir / f'{split_name}_{meg_filename}', meg_data[mask])
+
+    # grad info
+    info_path = challenge_out / 'subject60' / f'sub-{test_subject:02d}_grad_info.fif'
+    (challenge_out / 'subject60').mkdir(parents=True, exist_ok=True)
+    try:
+        save_subject_grad_info(test_subject, sessions, data_path, info_path)
+        print(f"  sub-{test_subject:02d} grad info saved")
+    except RuntimeError as exc:
+        print(f"  WARNING: {exc}")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -278,8 +352,11 @@ def main():
                         help='Subject IDs used for training (default: 1 2 3 4 5)')
     parser.add_argument('--test-subject', type=int, default=60,
                         help='Held-out test subject ID (default: 60)')
+                        help='Held-out test subject ID (default: 60)')
     parser.add_argument('--sessions', type=int, nargs='+', default=list(range(1, 11)),
                         help='Session numbers to load (default: 1..10)')
+    parser.add_argument('--challenge', choices=['1', '2', 'both'], default='both',
+                        help='Which challenge package to prepare (default: both)')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed for scene splits (default: 42)')
     parser.add_argument('--n-jobs', type=int, default=-1,
@@ -292,6 +369,8 @@ def main():
 
     out = Path(args.output_path)
     data_path = args.data_path
+    do_c1 = args.challenge in ('1', 'both')
+    do_c2 = args.challenge in ('2', 'both')
 
     # -----------------------------------------------------------------------
     # Training subjects (1-5)
@@ -340,29 +419,29 @@ def main():
     print(f"\nTraining set: {len(train_meg_c1)} fixations total")
     assert len(train_meg_c1) == len(train_meta), "MEG / metadata length mismatch"
 
-    # Save training package
-    train_dir = out / 'training'
-    train_dir.mkdir(parents=True, exist_ok=True)
+    # Save challenge 1 training package
+    if do_c1:
+        c1_train_dir = out / 'challenge1' / 'training'
+        c1_train_dir.mkdir(parents=True, exist_ok=True)
+        np.save(c1_train_dir / 'meg_110ms.npy', train_meg_c1)
+        _save_training_common(c1_train_dir, train_meta, times_ref, channel_names_ref)
+        print(f"\nSaving challenge1 training grad info...")
+        _save_training_grad_info(c1_train_dir, args.train_subjects, args.sessions, data_path)
+        print(f"Challenge 1 training data saved to {c1_train_dir}")
+        print(f"  meg_110ms.npy : {train_meg_c1.shape}")
+        print(f"  metadata.csv  : {len(train_meta)} rows")
 
-    np.save(train_dir / 'meg_110ms.npy', train_meg_c1)
-    np.save(train_dir / 'meg_c2.npy', train_meg_c2)
-    train_meta.to_csv(train_dir / 'metadata.csv', index=False)
-    np.save(train_dir / 'times.npy', times_ref)
-    (train_dir / 'channel_names.txt').write_text('\n'.join(channel_names_ref))
-
-    # Per-subject grad info (sensor positions for layout plotting)
-    for subject_id in args.train_subjects:
-        info_path = train_dir / f'sub-{subject_id:02d}_grad_info.fif'
-        try:
-            save_subject_grad_info(subject_id, args.sessions, data_path, info_path)
-            print(f"    sub-{subject_id:02d} grad info saved")
-        except RuntimeError as exc:
-            print(f"    WARNING: {exc}")
-
-    print(f"Training data saved to {train_dir}")
-    print(f"  meg_110ms.npy : {train_meg_c1.shape}")
-    print(f"  meg_c2.npy    : {train_meg_c2.shape}")
-    print(f"  metadata.csv  : {len(train_meta)} rows")
+    # Save challenge 2 training package
+    if do_c2:
+        c2_train_dir = out / 'challenge2' / 'training'
+        c2_train_dir.mkdir(parents=True, exist_ok=True)
+        np.save(c2_train_dir / 'meg_c2.npy', train_meg_c2)
+        _save_training_common(c2_train_dir, train_meta, times_ref, channel_names_ref)
+        print(f"\nSaving challenge2 training grad info...")
+        _save_training_grad_info(c2_train_dir, args.train_subjects, args.sessions, data_path)
+        print(f"Challenge 2 training data saved to {c2_train_dir}")
+        print(f"  meg_c2.npy    : {train_meg_c2.shape}")
+        print(f"  metadata.csv  : {len(train_meta)} rows")
 
     # -----------------------------------------------------------------------
     # Test subject (60)
@@ -402,38 +481,38 @@ def main():
         combined |= mask
     assert np.all(combined), "Not all fixations assigned to a split"
 
-    gt_dir = out / 'subject60' / 'ground_truth'
-    gt_dir.mkdir(parents=True, exist_ok=True)
+    c1_masks = split_masks[:2]
+    c2_masks = split_masks[2:]
 
-    print("\nScene splits:")
-    for split_name, mask in zip(SPLIT_NAMES, split_masks):
-        n_fix = mask.sum()
-        n_scenes = metadata_60.loc[mask, 'sceneID'].nunique()
-        print(f"  {split_name}: {n_fix} fixations, {n_scenes} scenes")
+    if do_c1:
+        print("\n--- Challenge 1 subject60 splits ---")
+        _save_subject60_splits(
+            challenge_out=out / 'challenge1',
+            split_names=C1_SPLITS,
+            split_masks=c1_masks,
+            metadata_50=metadata_50,
+            meg_data=grad_110_50,
+            meg_filename='meg_110ms.npy',
+            sessions=args.sessions,
+            data_path=data_path,
+            test_subject=args.test_subject,
+        )
+        print(f"Challenge 1 subject60 data saved to {out / 'challenge1' / 'subject60'}")
 
-        split_meta = metadata_50[mask].reset_index(drop=True)
-
-        # Participant-facing: metadata only
-        split_dir = out / 'subject60' / split_name
-        split_dir.mkdir(parents=True, exist_ok=True)
-        split_meta.to_csv(split_dir / 'metadata.csv', index=False)
-
-        # Ground truth: MEG (hidden from participants)
-        if split_name in C1_SPLITS:
-            np.save(gt_dir / f'{split_name}_meg_110ms.npy', grad_110_50[mask])
-        else:
-            np.save(gt_dir / f'{split_name}_meg_c2.npy', grad_c2_50[mask])
-
-    # Subject 60 grad info
-    info_path_60 = out / 'subject60' / f'sub-{args.test_subject:02d}_grad_info.fif'
-    (out / 'subject60').mkdir(parents=True, exist_ok=True)
-    try:
-        save_subject_grad_info(args.test_subject, args.sessions, data_path, info_path_60)
-        print(f"  sub-{args.test_subject:02d} grad info saved")
-    except RuntimeError as exc:
-        print(f"  WARNING: {exc}")
-
-    print(f"\nSubject 60 data saved to {out / 'subject60'}")
+    if do_c2:
+        print("\n--- Challenge 2 subject60 splits ---")
+        _save_subject60_splits(
+            challenge_out=out / 'challenge2',
+            split_names=C2_SPLITS,
+            split_masks=c2_masks,
+            metadata_50=metadata_50,
+            meg_data=grad_c2_50,
+            meg_filename='meg_c2.npy',
+            sessions=args.sessions,
+            data_path=data_path,
+            test_subject=args.test_subject,
+        )
+        print(f"Challenge 2 subject60 data saved to {out / 'challenge2' / 'subject60'}")
 
     # -----------------------------------------------------------------------
     # Summary
@@ -441,6 +520,10 @@ def main():
     print("\n" + "=" * 60)
     print("Challenge data package complete.")
     print(f"Output: {out}")
+    if do_c1:
+        print(f"  challenge1/ : {out / 'challenge1'}")
+    if do_c2:
+        print(f"  challenge2/ : {out / 'challenge2'}")
     print("=" * 60)
 
 
