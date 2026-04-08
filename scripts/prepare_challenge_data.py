@@ -305,7 +305,7 @@ def _save_training_grad_info(train_dir, train_subjects, sessions, data_path):
             print(f"    WARNING: {exc}")
 
 
-def _save_subject60_splits(challenge_out, split_names, split_masks, metadata_50,
+def _save_subject60_splits(challenge_out, split_names, split_masks, metadata_60,
                             meg_data, meg_filename, sessions, data_path, test_subject):
     """Write subject-60 split directories and ground-truth MEG for one challenge."""
     gt_dir = challenge_out / 'subject60' / 'ground_truth'
@@ -314,10 +314,10 @@ def _save_subject60_splits(challenge_out, split_names, split_masks, metadata_50,
     print("\nScene splits:")
     for split_name, mask in zip(split_names, split_masks):
         n_fix = mask.sum()
-        n_scenes = metadata_50.loc[mask, 'sceneID'].nunique()
+        n_scenes = metadata_60.loc[mask, 'sceneID'].nunique()
         print(f"  {split_name}: {n_fix} fixations, {n_scenes} scenes")
 
-        split_meta = metadata_50[mask].reset_index(drop=True)
+        split_meta = metadata_60[mask].reset_index(drop=True)
 
         split_dir = challenge_out / 'subject60' / split_name
         split_dir.mkdir(parents=True, exist_ok=True)
@@ -351,7 +351,6 @@ def main():
     parser.add_argument('--train-subjects', type=int, nargs='+', default=[1, 2, 3, 4, 5],
                         help='Subject IDs used for training (default: 1 2 3 4 5)')
     parser.add_argument('--test-subject', type=int, default=60,
-                        help='Held-out test subject ID (default: 60)')
                         help='Held-out test subject ID (default: 60)')
     parser.add_argument('--sessions', type=int, nargs='+', default=list(range(1, 11)),
                         help='Session numbers to load (default: 1..10)')
@@ -454,22 +453,22 @@ def main():
         args.test_subject, args.sessions, data_path
     )
 
-    print(f"  Loaded {len(grad_data_50)} fixations before rejection")
+    print(f"  Loaded {len(grad_data_60)} fixations before rejection")
 
     # Load real grad info from raw data for proper epoch rejection
-    grad_info_50 = load_subject_grad_info(args.test_subject, args.sessions, data_path)
+    grad_info_60 = load_subject_grad_info(args.test_subject, args.sessions, data_path)
 
     # Epoch rejection for subject 60 only
     grad_data_60, metadata_60, n_dropped = reject_extreme_epochs(
-        grad_data_60, metadata_60, channel_names_ref, times_60
+        grad_data_60, metadata_60, grad_info_60, times_60
     )
     print(f"  {len(grad_data_60)} fixations after rejection ({n_dropped} dropped)")
 
-    t_idx = int(np.argmin(np.abs(times_50 - C1_TIME_S)))
-    grad_110_50 = grad_data_50[:, :, t_idx]  # (n_epochs, n_channels)
+    t_idx = int(np.argmin(np.abs(times_60 - C1_TIME_S)))
+    grad_110_60 = grad_data_60[:, :, t_idx]  # (n_epochs, n_channels)
 
-    c2_indices_50 = [int(np.argmin(np.abs(times_50 - t))) for t in C2_TIMES_S]
-    grad_c2_50 = grad_data_50[:, :, c2_indices_50]  # (n_epochs, n_channels, n_timepoints)
+    c2_indices_60 = [int(np.argmin(np.abs(times_60 - t))) for t in C2_TIMES_S]
+    grad_c2_60 = grad_data_60[:, :, c2_indices_60]  # (n_epochs, n_channels, n_timepoints)
 
     # Scene splits
     split_masks = make_scene_splits(metadata_60, n_splits=4, seed=args.seed)
@@ -490,8 +489,8 @@ def main():
             challenge_out=out / 'challenge1',
             split_names=C1_SPLITS,
             split_masks=c1_masks,
-            metadata_50=metadata_50,
-            meg_data=grad_110_50,
+            metadata_60=metadata_60,
+            meg_data=grad_110_60,
             meg_filename='meg_110ms.npy',
             sessions=args.sessions,
             data_path=data_path,
@@ -505,8 +504,8 @@ def main():
             challenge_out=out / 'challenge2',
             split_names=C2_SPLITS,
             split_masks=c2_masks,
-            metadata_50=metadata_50,
-            meg_data=grad_c2_50,
+            metadata_60=metadata_60,
+            meg_data=grad_c2_60,
             meg_filename='meg_c2.npy',
             sessions=args.sessions,
             data_path=data_path,
