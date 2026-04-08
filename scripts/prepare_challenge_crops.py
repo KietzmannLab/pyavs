@@ -150,16 +150,23 @@ def process_metadata(
 
     Returns
     -------
-    crops      : np.ndarray uint8 (N, crop_h, crop_w, 3)
-    valid_mask : np.ndarray bool  (N,)
+    crops           : np.ndarray uint8 (N, crop_h, crop_w, 3)
+    valid_mask      : np.ndarray bool  (N,)
+    n_missing_scene : int — rows skipped because scene image was not found
+    n_out_of_bounds : int — rows where crop extends beyond the image boundary
     """
     n = len(metadata)
     crops = np.zeros((n, crop_h, crop_w, 3), dtype=np.uint8)
     valid_mask = np.zeros(n, dtype=bool)
 
-    # Cache scaled scene images to avoid repeated I/O
+    # Diagnostic: print coordinate range before processing
+    print(f"  mean_gx range : {metadata['mean_gx'].min():.1f} – {metadata['mean_gx'].max():.1f}")
+    print(f"  mean_gy range : {metadata['mean_gy'].min():.1f} – {metadata['mean_gy'].max():.1f}")
+
     scene_cache: dict = {}
     missing_scenes: set = set()
+    n_missing_scene = 0
+    n_out_of_bounds = 0
 
     for i, row in enumerate(metadata.itertuples(index=False)):
         scene_id = int(row.sceneID)
@@ -168,21 +175,25 @@ def process_metadata(
 
         if scene_id not in scene_cache:
             if scene_id in missing_scenes:
-                continue  # already warned
+                n_missing_scene += 1
+                continue
             if scene_id not in scene_index:
                 print(f"  WARNING: no image file found for scene_id {scene_id} — rows will be zero-filled")
                 missing_scenes.add(scene_id)
+                n_missing_scene += 1
                 continue
             scene_cache[scene_id] = scale_scene(scene_index[scene_id])
 
         crop, valid = extract_crop(scene_cache[scene_id], gx, gy, crop_w, crop_h)
         crops[i] = crop
         valid_mask[i] = valid
+        if not valid:
+            n_out_of_bounds += 1
 
         if verbose and (i + 1) % 1000 == 0:
             print(f"  processed {i + 1} / {n} fixations ...")
 
-    return crops, valid_mask
+    return crops, valid_mask, n_missing_scene, n_out_of_bounds
 
 
 # ---------------------------------------------------------------------------
@@ -231,12 +242,14 @@ def main():
     print(f"  found {len(scene_index)} scene images")
 
     print("Extracting crops...")
-    crops, valid_mask = process_metadata(metadata, scene_index, crop_w, crop_h, args.verbose)
+    crops, valid_mask, n_missing, n_oob = process_metadata(
+        metadata, scene_index, crop_w, crop_h, args.verbose
+    )
 
-    n_valid   = int(valid_mask.sum())
-    n_invalid = len(valid_mask) - n_valid
-    print(f"  valid crops    : {n_valid}")
-    print(f"  out-of-bounds  : {n_invalid} (zero-filled)")
+    n_valid = int(valid_mask.sum())
+    print(f"  valid crops       : {n_valid}")
+    print(f"  out-of-bounds     : {n_oob} (zero-filled)")
+    print(f"  missing scene img : {n_missing} (zero-filled)")
 
     output_file.parent.mkdir(parents=True, exist_ok=True)
     print(f"Writing {output_file} ...")
