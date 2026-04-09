@@ -85,15 +85,18 @@ def plot_scene_fixations(
 ) -> None:
     """Generate and save a fixation scatter plot for a single scene."""
     im_w, im_h = img.size
-
+    # assert sceneID is int
+    scene_id = int(scene_id)
     # Convert screen-pixel coordinates to image-pixel coordinates
+
     x_offset = (SCREEN_W - im_w) / 2
     y_offset = (SCREEN_H - im_h) / 2
     x = df['mean_gx'] - x_offset
     y = df['mean_gy'] - y_offset
-
+    # flip y to match image coordinates (y increases downward)
+    y = im_h - y
     # Dot size proportional to duration, clipped to reasonable range
-    sizes = (df['duration'] * 200).clip(20, 400)
+    sizes = (df['duration'] * 400).clip(20, 600)
 
     sns.set_context('poster')
     plt.figure(figsize=(8, 6))
@@ -102,16 +105,22 @@ def plot_scene_fixations(
     sc = plt.scatter(x, y, s=sizes, c=df['time_in_trial'],
                      cmap='magma', alpha=0.75, edgecolors='white')
     plt.colorbar(sc, label='time in trial [s]')
+    # despine 
 
-    plt.xlabel('pixel x')
-    plt.ylabel('pixel y')
+    #plt.xlabel('pixel x')
+    #plt.ylabel('pixel y')
+    # remove x/y ticks and set limits to image size
+    plt.xticks([])
+    plt.yticks([])
     plt.xlim(0, im_w)
     plt.ylim(im_h, 0)   # y increases downward, consistent with imshow
-    sns.despine()
+    sns.despine(left=True, bottom=True)
     plt.tight_layout()
 
-    out_path = output_dir / f'scene_{scene_id:07d}.png'
+    out_path = output_dir / f'challenge_scene_{scene_id:07d}.png'
+    print(f"  saving plot → {out_path}")
     plt.savefig(out_path, dpi=150, bbox_inches='tight')
+    
     plt.close()
 
 
@@ -187,10 +196,14 @@ def main():
     print(f"Plotting {len(scene_ids)} scene(s) → {output_dir}")
 
     for scene_id in scene_ids:
+        scene_id = int(scene_id)  # ensure it's an int for indexing
         rows = metadata[metadata['sceneID'] == scene_id]
+        print(rows.head())
+        print(rows.columns)
+        print(scene_id, len(rows))
         img = load_scene(scene_index[scene_id])
         plot_scene_fixations(scene_id, img, rows, output_dir)
-        print(f"  scene {scene_id:7d}  ({len(rows)} fixations) → scene_{scene_id:07d}.png")
+        print(f"  scene {scene_id:7d}  ({len(rows)} fixations) → challenge_scene_{scene_id:07d}.png")
 
     print("Done.")
 
