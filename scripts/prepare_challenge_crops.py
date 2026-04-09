@@ -26,7 +26,7 @@ Usage
       --metadata-csv challenge2/subject60/challenge2_dev/metadata.csv \\
       --scenes-dir   /path/to/scenes \\
       --output-file  challenge2/subject60/challenge2_dev/crops.h5 \\
-      --crop-size 224 224
+      --crop-size 100 100
 """
 
 import argparse
