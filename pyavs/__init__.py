@@ -276,7 +276,13 @@ def check_data_availability(subject_id, session):
 
 # Module imports
 from . import dataloader
-from . import preprocessing  
+from . import preprocessing
 from . import scenes
 from . import utils
 from . import io
+from . import pilot
+from .pilot import (
+    load_pilot_events,
+    load_pilot_samples,
+    add_sample_scene_coordinates,
+)
