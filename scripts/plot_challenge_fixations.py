@@ -41,6 +41,7 @@ from PIL import Image
 # ---------------------------------------------------------------------------
 SCREEN_W = 1024       # screen width  [px]
 SCREEN_H = 768        # screen height [px]
+SCREEN_USAGE = 0.925  # fraction of screen height used for stimulus
 
 
 # ---------------------------------------------------------------------------
@@ -69,8 +70,18 @@ def build_scene_index(scenes_dir: Path) -> dict:
 # ---------------------------------------------------------------------------
 
 def load_scene(path: Path) -> Image.Image:
-    """Load a scene image and convert to RGB."""
-    return Image.open(path).convert('RGB')
+    """Load a scene image, resize to MEG presentation size if needed, and convert to RGB.
+
+    AVS scenes stored as ``*_MEG_size.jpg`` are already at the target height
+    (768 × 0.925 = 710 px) so no resize is applied for those files.
+    """
+    im = Image.open(path).convert('RGB')
+    target_h = int(SCREEN_H * SCREEN_USAGE)
+    scale = target_h / im.height
+    if round(scale, 4) != 1.0:
+        new_w = int(im.width * scale)
+        im = im.resize((new_w, target_h), Image.BILINEAR)
+    return im
 
 
 # ---------------------------------------------------------------------------

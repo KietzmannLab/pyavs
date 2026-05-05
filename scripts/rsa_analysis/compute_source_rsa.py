@@ -595,9 +595,10 @@ def compute_noise_ceiling_stc(
     morph_to: str = 'fsaverage',
     spatial_radius: float = 0.04,
     n_jobs: int = 1,
+    bound: str = 'lower',
 ) -> None:
     """
-    Compute a source-space noise ceiling lower bound across subjects.
+    Compute a source-space noise ceiling across subjects.
 
     Loads per-subject morphed category STCs (saved by process_subject), finds
     shared valid categories, and runs a searchlight noise ceiling using
@@ -621,6 +622,8 @@ def compute_noise_ceiling_stc(
         Searchlight radius in metres (default: 0.04).
     n_jobs : int
         Parallel jobs for the searchlight loop.
+    bound : str
+        Which noise ceiling bound to save: ``'lower'`` or ``'upper'`` (default: ``'lower'``).
     """
     logger.info(f"\nNoise ceiling: model={model_name}, layer={layer}")
 
@@ -686,8 +689,8 @@ def compute_noise_ceiling_stc(
             [pdist(d[:, patch], metric='correlation') for d in subj_data],
             axis=0,
         )  # (n_subjects, n_pairs)
-        nc_l, _ = boot_noise_ceiling(RDMs(brain_rdms), method='spearman')
-        return float(nc_l)
+        nc_l, nc_u = boot_noise_ceiling(RDMs(brain_rdms), method='spearman')
+        return float(nc_u if bound == 'upper' else nc_l)
 
     logger.info(f"  Running searchlight noise ceiling over {n_vertices} vertices ...")
     nc_values = Parallel(n_jobs=n_jobs)(
@@ -701,7 +704,7 @@ def compute_noise_ceiling_stc(
         tmin=0., tstep=1., subject=morph_to,
     )
     nc_fname = str(
-        Path(output_dir) / f"group_model-{model_name}_layer-{layer}_noise_ceiling_lower"
+        Path(output_dir) / f"group_model-{model_name}_layer-{layer}_noise_ceiling_{bound}"
     )
     nc_stc.save(nc_fname, overwrite=True)
     logger.info(f"  Saved: {Path(nc_fname).name}-lh.stc / -rh.stc")

@@ -96,6 +96,7 @@ def main():
             morph_to=args.morph_to,
             spatial_radius=0.02,
             n_jobs=args.n_jobs,
+            bound='upper',
         )
 
     logger.info("Done.")
