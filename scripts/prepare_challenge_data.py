@@ -6,27 +6,41 @@ Loads fixation-locked gradiometer MEG epochs (already computed by
 compute_fixation_epochs.py) for training subjects 1-5 and test subject 60,
 then writes the challenge data package to the specified output directory.
 
-Challenge 1 package ({out}/challenge1/):
-  training/
-    meg_110ms.npy     : (n_fixations, n_channels) gradiometer amplitudes at 110 ms
-    metadata.csv      : aligned fixation metadata
-    channel_names.txt : ordered gradiometer channel names
-    times.npy         : full time axis (reference)
-    sub-XX_grad_info.fif : sensor positions per training subject
-  subject60/
-    {split}/metadata.csv                        : participant-facing metadata only
-    ground_truth/{split}_meg_110ms.npy          : hidden C1 evaluation MEG
+Output is split into two trees:
 
-Challenge 2 package ({out}/challenge2/):
-  training/
-    meg_c2.npy        : (n_fixations, n_channels, 61) amplitudes at C2 timepoints
-    metadata.csv      : aligned fixation metadata
-    channel_names.txt : ordered gradiometer channel names
-    times.npy         : full time axis (reference)
-    sub-XX_grad_info.fif : sensor positions per training subject
-  subject60/
-    {split}/metadata.csv                        : participant-facing metadata only
-    ground_truth/{split}_meg_c2.npy             : hidden C2 evaluation MEG
+  {out}/release/   — ship this to participants
+    challenge1/
+      training/
+        meg_110ms.npy     : (n_fixations, n_channels) gradiometer amplitudes at 110 ms
+        metadata.csv      : aligned fixation metadata
+        channel_names.txt : ordered gradiometer channel names
+        times.npy         : full time axis (reference)
+        sub-XX_grad_info.fif : sensor positions per training subject
+      subject60/
+        challenge1_dev/metadata.csv             : participant-facing dev metadata
+        sub-60_grad_info.fif
+    challenge2/
+      training/
+        meg_c2.npy        : (n_fixations, n_channels, 61) amplitudes at C2 timepoints
+        metadata.csv      : aligned fixation metadata
+        channel_names.txt : ordered gradiometer channel names
+        times.npy         : full time axis (reference)
+        sub-XX_grad_info.fif : sensor positions per training subject
+      subject60/
+        challenge2_dev/metadata.csv             : participant-facing dev metadata
+        sub-60_grad_info.fif
+
+  {out}/scoring/   — organizers only, never distribute
+    challenge1/subject60/
+      challenge1_eval/metadata.csv              : eval metadata (release at eval phase)
+      ground_truth/
+        challenge1_dev_meg_110ms.npy            : hidden MEG for dev scoring
+        challenge1_eval_meg_110ms.npy           : hidden MEG for eval scoring
+    challenge2/subject60/
+      challenge2_eval/metadata.csv
+      ground_truth/
+        challenge2_dev_meg_c2.npy
+        challenge2_eval_meg_c2.npy
 
 Challenge 2 timepoints: every 5 ms from -50 ms to +250 ms inclusive (61 timepoints)
 
@@ -305,29 +319,40 @@ def _save_training_grad_info(train_dir, train_subjects, sessions, data_path):
             print(f"    WARNING: {exc}")
 
 
-def _save_subject60_splits(challenge_out, split_names, split_masks, metadata_60,
+def _save_subject60_splits(release_out, scoring_out, split_names, split_masks, metadata_60,
                             meg_data, meg_filename, sessions, data_path, test_subject):
-    """Write subject-60 split directories and ground-truth MEG for one challenge."""
-    gt_dir = challenge_out / 'subject60' / 'ground_truth'
+    """Write subject-60 split directories and ground-truth MEG for one challenge.
+
+    Dev splits (metadata only) go to release_out/subject60/{split}/.
+    Eval splits (metadata) go to scoring_out/subject60/{split}/.
+    All ground-truth MEG goes to scoring_out/subject60/ground_truth/.
+    """
+    gt_dir = scoring_out / 'subject60' / 'ground_truth'
     gt_dir.mkdir(parents=True, exist_ok=True)
 
     print("\nScene splits:")
     for split_name, mask in zip(split_names, split_masks):
         n_fix = mask.sum()
         n_scenes = metadata_60.loc[mask, 'sceneID'].nunique()
-        print(f"  {split_name}: {n_fix} fixations, {n_scenes} scenes")
+        is_eval = 'eval' in split_name
+        dest = 'scoring' if is_eval else 'release'
+        print(f"  {split_name}: {n_fix} fixations, {n_scenes} scenes  [{dest}]")
 
         split_meta = metadata_60[mask].reset_index(drop=True)
 
-        split_dir = challenge_out / 'subject60' / split_name
+        # Metadata: dev → release, eval → scoring
+        parent = scoring_out if is_eval else release_out
+        split_dir = parent / 'subject60' / split_name
         split_dir.mkdir(parents=True, exist_ok=True)
         split_meta.to_csv(split_dir / 'metadata.csv', index=False)
 
+        # Ground-truth MEG always goes to scoring
         np.save(gt_dir / f'{split_name}_{meg_filename}', meg_data[mask])
 
-    # grad info
-    info_path = challenge_out / 'subject60' / f'sub-{test_subject:02d}_grad_info.fif'
-    (challenge_out / 'subject60').mkdir(parents=True, exist_ok=True)
+    # grad info → release (participants need it to format predictions)
+    release_sub60_dir = release_out / 'subject60'
+    release_sub60_dir.mkdir(parents=True, exist_ok=True)
+    info_path = release_sub60_dir / f'sub-{test_subject:02d}_grad_info.fif'
     try:
         save_subject_grad_info(test_subject, sessions, data_path, info_path)
         print(f"  sub-{test_subject:02d} grad info saved")
@@ -420,7 +445,7 @@ def main():
 
     # Save challenge 1 training package
     if do_c1:
-        c1_train_dir = out / 'challenge1' / 'training'
+        c1_train_dir = out / 'release' / 'challenge1' / 'training'
         c1_train_dir.mkdir(parents=True, exist_ok=True)
         np.save(c1_train_dir / 'meg_110ms.npy', train_meg_c1)
         _save_training_common(c1_train_dir, train_meta, times_ref, channel_names_ref)
@@ -432,7 +457,7 @@ def main():
 
     # Save challenge 2 training package
     if do_c2:
-        c2_train_dir = out / 'challenge2' / 'training'
+        c2_train_dir = out / 'release' / 'challenge2' / 'training'
         c2_train_dir.mkdir(parents=True, exist_ok=True)
         np.save(c2_train_dir / 'meg_c2.npy', train_meg_c2)
         _save_training_common(c2_train_dir, train_meta, times_ref, channel_names_ref)
@@ -480,13 +505,14 @@ def main():
         combined |= mask
     assert np.all(combined), "Not all fixations assigned to a split"
 
-    c1_masks = split_masks[:2]
-    c2_masks = split_masks[2:]
+    c1_masks = [split_masks[0], split_masks[2]]  # dev=chunk0, eval=chunk2 (chunk1 was exposed in dev phase)
+    c2_masks = [split_masks[1], split_masks[3]]  # dev=chunk1, eval=chunk3
 
     if do_c1:
         print("\n--- Challenge 1 subject60 splits ---")
         _save_subject60_splits(
-            challenge_out=out / 'challenge1',
+            release_out=out / 'release' / 'challenge1',
+            scoring_out=out / 'scoring' / 'challenge1',
             split_names=C1_SPLITS,
             split_masks=c1_masks,
             metadata_60=metadata_60,
@@ -496,12 +522,15 @@ def main():
             data_path=data_path,
             test_subject=args.test_subject,
         )
-        print(f"Challenge 1 subject60 data saved to {out / 'challenge1' / 'subject60'}")
+        print(f"Challenge 1 subject60 data saved")
+        print(f"  release : {out / 'release' / 'challenge1' / 'subject60'}")
+        print(f"  scoring : {out / 'scoring' / 'challenge1' / 'subject60'}")
 
     if do_c2:
         print("\n--- Challenge 2 subject60 splits ---")
         _save_subject60_splits(
-            challenge_out=out / 'challenge2',
+            release_out=out / 'release' / 'challenge2',
+            scoring_out=out / 'scoring' / 'challenge2',
             split_names=C2_SPLITS,
             split_masks=c2_masks,
             metadata_60=metadata_60,
@@ -511,7 +540,9 @@ def main():
             data_path=data_path,
             test_subject=args.test_subject,
         )
-        print(f"Challenge 2 subject60 data saved to {out / 'challenge2' / 'subject60'}")
+        print(f"Challenge 2 subject60 data saved")
+        print(f"  release : {out / 'release' / 'challenge2' / 'subject60'}")
+        print(f"  scoring : {out / 'scoring' / 'challenge2' / 'subject60'}")
 
     # -----------------------------------------------------------------------
     # Summary
@@ -519,10 +550,8 @@ def main():
     print("\n" + "=" * 60)
     print("Challenge data package complete.")
     print(f"Output: {out}")
-    if do_c1:
-        print(f"  challenge1/ : {out / 'challenge1'}")
-    if do_c2:
-        print(f"  challenge2/ : {out / 'challenge2'}")
+    print(f"  release/  (ship to participants) : {out / 'release'}")
+    print(f"  scoring/  (organizers only)      : {out / 'scoring'}")
     print("=" * 60)
 
 
