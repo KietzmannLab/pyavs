@@ -112,6 +112,16 @@ Examples:
         print("Error: no MEG blocks found")
         return 1
 
+    # Extract per-block events BEFORE concatenation — mne.concatenate_raws
+    # mutates raws_dict[first_key] in-place, invalidating per-block timing.
+    print("\nExtracting scene onset event times...")
+    meg_events_per_block = extract_scene_onset_times_meg_per_block(
+        raws_dict, args.session
+    )
+    et_events_per_block = extract_scene_onset_times_et_per_block(
+        args.subject, args.session, data_path=args.data_path
+    )
+
     meg_raw = mne.concatenate_raws(
         [raws_dict[k] for k in sorted(raws_dict.keys())],
         verbose=False, on_mismatch='warn')
@@ -123,16 +133,8 @@ Examples:
     print(f"  Loaded {len(samples_df)} ET samples "
           f"({samples_df['smpl_time'].iloc[0]:.1f}–{samples_df['smpl_time'].iloc[-1]:.1f} s)")
 
-    # Extract event times
-    print("\nExtracting scene onset event times...")
     meg_times_flat = extract_scene_onset_times_meg(meg_raw, args.session)
     et_times_flat  = extract_scene_onset_times_et(
-        args.subject, args.session, data_path=args.data_path
-    )
-    meg_events_per_block = extract_scene_onset_times_meg_per_block(
-        raws_dict, args.session
-    )
-    et_events_per_block = extract_scene_onset_times_et_per_block(
         args.subject, args.session, data_path=args.data_path
     )
 

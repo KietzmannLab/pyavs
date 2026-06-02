@@ -171,16 +171,22 @@ def extract_scene_onset_times_meg_per_block(raws_dict: dict,
         block's own first_samp.  Blocks with no events map to an empty array.
     """
     validate_session(session)
-    blocks = get_avs_blocks(session_num=session, verbose=False)
+
+    # raws_dict is keyed by LOCAL run numbers (1..n_blocks).
+    # get_avs_blocks returns GLOBAL block IDs (e.g. 11..24 for session 2),
+    # which are the codes used in the MEG trigger stream.
+    local_ids = sorted(raws_dict.keys())
+    global_ids = list(get_avs_blocks(session_num=session, verbose=False))
+
+    if len(local_ids) != len(global_ids):
+        logger.warning(
+            f"raws_dict has {len(local_ids)} blocks but session {session} "
+            f"expects {len(global_ids)} — zipping up to the shorter list"
+        )
+
     per_block = {}
-
-    for block in blocks:
-        if block not in raws_dict:
-            logger.warning(f"Block {block} not in raws_dict; skipping")
-            per_block[block] = np.array([])
-            continue
-
-        meg_raw_k = raws_dict[block]
+    for local_id, global_id in zip(local_ids, global_ids):
+        meg_raw_k = raws_dict[local_id]
         sfreq = meg_raw_k.info['sfreq']
 
         try:
@@ -189,8 +195,9 @@ def extract_scene_onset_times_meg_per_block(raws_dict: dict,
                 consecutive=True, min_duration=0.005, verbose=False
             )
         except ValueError as e:
-            logger.warning(f"Block {block}: cannot find STI101 events: {e}")
-            per_block[block] = np.array([])
+            logger.warning(f"Block {local_id} (global {global_id}): "
+                           f"cannot find STI101 events: {e}")
+            per_block[local_id] = np.array([])
             continue
 
         events_repaired_k = repair_meg_trigger_events(events_k, session, verbose=False)
@@ -198,15 +205,16 @@ def extract_scene_onset_times_meg_per_block(raws_dict: dict,
         times_k = []
         for trial in range(1, 31):
             ts = get_meg_timestamp(
-                events_repaired_k, trial=trial, block=int(block),
+                events_repaired_k, trial=trial, block=int(global_id),
                 optimized_timing=False, verbose=False
             )
             if ts is not None:
                 times_k.append((ts - meg_raw_k.first_samp) / sfreq)
 
-        per_block[block] = np.array(times_k)
+        per_block[local_id] = np.array(times_k)
         if verbose:
-            logger.info(f"Block {block}: {len(times_k)} MEG trial events")
+            logger.info(f"Block {local_id} (global {global_id}): "
+                        f"{len(times_k)} MEG trial events")
 
     return per_block
 
@@ -261,27 +269,29 @@ def extract_scene_onset_times_et_per_block(subject_id: int,
     blockid_rows = blockid_rows.sort_values('BLOCKID_time')
     block_start_s = blockid_rows['BLOCKID_time'].values.astype(float) / 1000.0
 
-    meg_blocks = sorted(get_avs_blocks(session_num=session, verbose=False))
+    n_session_blocks = len(get_avs_blocks(session_num=session, verbose=False))
     n_et_blocks = len(block_start_s)
 
-    if len(meg_blocks) != n_et_blocks:
+    if n_session_blocks != n_et_blocks:
         logger.warning(
-            f"MEG block count ({len(meg_blocks)}) ≠ ET BLOCKID count "
-            f"({n_et_blocks}); using {min(len(meg_blocks), n_et_blocks)}"
+            f"Session {session} expects {n_session_blocks} blocks but ET has "
+            f"{n_et_blocks} BLOCKID rows; using {min(n_session_blocks, n_et_blocks)}"
         )
-        n_use = min(len(meg_blocks), n_et_blocks)
-        meg_blocks = meg_blocks[:n_use]
-        block_start_s = block_start_s[:n_use]
+        block_start_s = block_start_s[:min(n_session_blocks, n_et_blocks)]
+
+    # Local block IDs match raws_dict keys: 1, 2, ..., n_blocks
+    n_blocks = len(block_start_s)
+    local_ids = list(range(1, n_blocks + 1))
 
     # Each scene time belongs to block k when block_start_s[k] <= t < block_start_s[k+1]
     block_indices = np.searchsorted(block_start_s, scene_times_s, side='right') - 1
-    block_indices = np.clip(block_indices, 0, len(meg_blocks) - 1)
+    block_indices = np.clip(block_indices, 0, n_blocks - 1)
 
     per_block = {}
-    for i, meg_block in enumerate(meg_blocks):
+    for i, local_id in enumerate(local_ids):
         mask = block_indices == i
-        per_block[meg_block] = scene_times_s[mask]
-        logger.info(f"Block {meg_block}: {mask.sum()} ET scene events")
+        per_block[local_id] = scene_times_s[mask]
+        logger.info(f"Block {local_id}: {mask.sum()} ET scene events")
 
     return per_block
 
@@ -754,7 +764,7 @@ def run_ica_et_pipeline(subject_id: int,
             f"Starting ICA+ET pipeline for subject {subject_id}, session {session}"
         )
 
-    # Load and concatenate preprocessed MEG blocks
+    # Load MEG blocks
     raws_dict = load_meg_session(
         subject_id, session,
         data_path=data_path,
@@ -767,6 +777,16 @@ def run_ica_et_pipeline(subject_id: int,
             f"No MEG blocks found for subject {subject_id}, session {session}"
         )
 
+    # Extract per-block event times BEFORE concatenation — mne.concatenate_raws
+    # mutates the first raw in-place, invalidating per-block timing.
+    samples_df = load_eye_samples(subject_id, session, data_path=data_path)
+    meg_events_per_block = extract_scene_onset_times_meg_per_block(
+        raws_dict, session, verbose=verbose
+    )
+    et_events_per_block = extract_scene_onset_times_et_per_block(
+        subject_id, session, data_path
+    )
+
     meg_raw = mne.concatenate_raws(
         [raws_dict[k] for k in sorted(raws_dict.keys())],
         verbose=verbose
@@ -776,18 +796,6 @@ def run_ica_et_pipeline(subject_id: int,
             f"Concatenated {len(raws_dict)} blocks; "
             f"total duration: {meg_raw.times[-1]:.1f} s"
         )
-
-    # Load ET samples
-    samples_df = load_eye_samples(subject_id, session, data_path=data_path)
-
-    # Extract event times per block: MEG times relative to each block's own t=0;
-    # ET times grouped by block using BLOCKID messages (absolute Eyelink clock).
-    meg_events_per_block = extract_scene_onset_times_meg_per_block(
-        raws_dict, session, verbose=verbose
-    )
-    et_events_per_block = extract_scene_onset_times_et_per_block(
-        subject_id, session, data_path
-    )
 
     # Align ET to MEG per block to avoid the large residuals that arise from a
     # global linear fit when inter-block breaks vary (apparent slope ~2, residuals
