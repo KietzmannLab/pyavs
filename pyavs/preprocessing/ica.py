@@ -777,14 +777,20 @@ def run_ica_et_pipeline(subject_id: int,
             f"No MEG blocks found for subject {subject_id}, session {session}"
         )
 
-    # Extract per-block event times BEFORE concatenation — mne.concatenate_raws
-    # mutates the first raw in-place, invalidating per-block timing.
+    # Extract event times and align ET before concatenating MEG blocks.
+    # mne.concatenate_raws mutates raws_dict[first_key] in-place; doing
+    # everything per-block first preserves correct per-block durations.
     samples_df = load_eye_samples(subject_id, session, data_path=data_path)
     meg_events_per_block = extract_scene_onset_times_meg_per_block(
         raws_dict, session, verbose=verbose
     )
     et_events_per_block = extract_scene_onset_times_et_per_block(
         subject_id, session, data_path
+    )
+    et_aligned = align_et_to_meg_per_block(
+        raws_dict, samples_df,
+        meg_events_per_block, et_events_per_block,
+        verbose=verbose
     )
 
     meg_raw = mne.concatenate_raws(
@@ -796,15 +802,6 @@ def run_ica_et_pipeline(subject_id: int,
             f"Concatenated {len(raws_dict)} blocks; "
             f"total duration: {meg_raw.times[-1]:.1f} s"
         )
-
-    # Align ET to MEG per block to avoid the large residuals that arise from a
-    # global linear fit when inter-block breaks vary (apparent slope ~2, residuals
-    # up to ~200 s).
-    et_aligned = align_et_to_meg_per_block(
-        raws_dict, samples_df,
-        meg_events_per_block, et_events_per_block,
-        verbose=verbose
-    )
 
     # Fit ICA on a bandpass-filtered copy (highpass required for ICA stability)
     if verbose:

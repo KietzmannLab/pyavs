@@ -112,8 +112,14 @@ Examples:
         print("Error: no MEG blocks found")
         return 1
 
-    # Extract per-block events BEFORE concatenation — mne.concatenate_raws
-    # mutates raws_dict[first_key] in-place, invalidating per-block timing.
+    # Load ET samples and extract all per-block event times BEFORE concatenation.
+    # mne.concatenate_raws mutates raws_dict[first_key] in-place; per-block
+    # extraction and alignment must happen first to preserve correct block durations.
+    print("\nLoading ET samples...")
+    samples_df = load_eye_samples(args.subject, args.session, data_path=args.data_path)
+    print(f"  Loaded {len(samples_df)} ET samples "
+          f"({samples_df['smpl_time'].iloc[0]:.1f}–{samples_df['smpl_time'].iloc[-1]:.1f} s)")
+
     print("\nExtracting scene onset event times...")
     meg_events_per_block = extract_scene_onset_times_meg_per_block(
         raws_dict, args.session
@@ -122,16 +128,20 @@ Examples:
         args.subject, args.session, data_path=args.data_path
     )
 
+    # Align ET to MEG per block before concatenation
+    print("\nAligning ET to MEG per block...")
+    et_aligned = align_et_to_meg_per_block(
+        raws_dict, samples_df,
+        meg_events_per_block, et_events_per_block,
+        verbose=True
+    )
+    print(f"  Aligned ET duration: {et_aligned.times[-1]:.1f} s")
+
+    # Concatenate MEG blocks (mutates raws_dict[first_key] — alignment already done)
     meg_raw = mne.concatenate_raws(
         [raws_dict[k] for k in sorted(raws_dict.keys())],
         verbose=False, on_mismatch='warn')
-    print(f"  Loaded {len(raws_dict)} blocks, total duration: {meg_raw.times[-1]:.1f} s")
-
-    # Load ET samples
-    print("\nLoading ET samples...")
-    samples_df = load_eye_samples(args.subject, args.session, data_path=args.data_path)
-    print(f"  Loaded {len(samples_df)} ET samples "
-          f"({samples_df['smpl_time'].iloc[0]:.1f}–{samples_df['smpl_time'].iloc[-1]:.1f} s)")
+    print(f"  MEG concatenated duration: {meg_raw.times[-1]:.1f} s")
 
     meg_times_flat = extract_scene_onset_times_meg(meg_raw, args.session)
     et_times_flat  = extract_scene_onset_times_et(
@@ -170,16 +180,6 @@ Examples:
         offset_ms = np.median((et_k[:n_k] - meg_k[:n_k]) * 1000.0)
         block_offsets[block] = offset_ms
         print(f"  Block {block:2d}: {offset_ms:+.0f} ms  ({n_k} events)")
-
-    # Per-block alignment
-    print("\nAligning ET to MEG per block...")
-    et_aligned = align_et_to_meg_per_block(
-        raws_dict, samples_df,
-        meg_events_per_block, et_events_per_block,
-        verbose=True
-    )
-    print(f"  Aligned ET duration: {et_aligned.times[-1]:.1f} s "
-          f"(MEG: {meg_raw.times[-1]:.1f} s)")
 
     # Save diagnostic plots (gaze vs MEG time with scene_on markers)
     output_dir = setup_output_dir(args.data_path, args.subject, args.session)
