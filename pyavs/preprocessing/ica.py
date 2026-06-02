@@ -104,9 +104,7 @@ def extract_scene_onset_times_meg(raw: mne.io.Raw, session: int) -> np.ndarray:
 
     Identifies per-trial anchors using repaired block triggers (block+1000) to
     disambiguate which trial belongs to which block, then returns the trial-number
-    trigger time (1–30, n_trial_per_block=30) directly. Any constant offset between
-    this anchor and SCENEID_time on the ET side is absorbed by realign_raw's linear
-    regression fit.
+    trigger time (1–30, n_trial_per_block=30) directly.
 
     Parameters
     ----------
@@ -123,7 +121,6 @@ def extract_scene_onset_times_meg(raw: mne.io.Raw, session: int) -> np.ndarray:
     """
     validate_session(session)
 
-    # Match the find_events settings used by add_fix_event_trigger in trigger/tools.py
     try:
         events = mne.find_events(raw, stim_channel='STI101',
                                  consecutive=True, min_duration=0.005, verbose=False)
@@ -135,9 +132,6 @@ def extract_scene_onset_times_meg(raw: mne.io.Raw, session: int) -> np.ndarray:
     sfreq = raw.info['sfreq']
 
     times = []
-    # Reuse get_meg_timestamp — the same function used by the composer pipeline.
-    # optimized_timing=False returns the trial trigger sample directly;
-    # realign_raw absorbs the constant offset to SCENEID_time via its linear fit.
     for block in blocks:
         for trial in range(1, 31):
             ts = get_meg_timestamp(events_repaired, trial=trial, block=int(block),
@@ -153,6 +147,68 @@ def extract_scene_onset_times_meg(raw: mne.io.Raw, session: int) -> np.ndarray:
         logger.info(f"Found {len(times)} trial onset times from repaired MEG triggers")
 
     return times
+
+
+def extract_scene_onset_times_meg_per_block(raws_dict: dict,
+                                             session: int,
+                                             verbose: bool = False) -> dict:
+    """
+    Extract per-trial scene onset times separately for each MEG block.
+
+    Parameters
+    ----------
+    raws_dict : dict
+        {block_id: mne.io.Raw} — individual (not concatenated) MEG block raws.
+    session : int
+        Session number.
+    verbose : bool
+        Log per-block event counts.
+
+    Returns
+    -------
+    dict
+        {block_id: np.ndarray} of event times in seconds relative to each
+        block's own first_samp.  Blocks with no events map to an empty array.
+    """
+    validate_session(session)
+    blocks = get_avs_blocks(session_num=session, verbose=False)
+    per_block = {}
+
+    for block in blocks:
+        if block not in raws_dict:
+            logger.warning(f"Block {block} not in raws_dict; skipping")
+            per_block[block] = np.array([])
+            continue
+
+        meg_raw_k = raws_dict[block]
+        sfreq = meg_raw_k.info['sfreq']
+
+        try:
+            events_k = mne.find_events(
+                meg_raw_k, stim_channel='STI101',
+                consecutive=True, min_duration=0.005, verbose=False
+            )
+        except ValueError as e:
+            logger.warning(f"Block {block}: cannot find STI101 events: {e}")
+            per_block[block] = np.array([])
+            continue
+
+        events_repaired_k = repair_meg_trigger_events(events_k, session, verbose=False)
+
+        times_k = []
+        for trial in range(1, 31):
+            ts = get_meg_timestamp(
+                events_repaired_k, trial=trial, block=int(block),
+                optimized_timing=False, verbose=False
+            )
+            if ts is not None:
+                times_k.append((ts - meg_raw_k.first_samp) / sfreq)
+
+        per_block[block] = np.array(times_k)
+        if verbose:
+            logger.info(f"Block {block}: {len(times_k)} MEG trial events")
+
+    return per_block
 
 
 def extract_scene_onset_times_et(subject_id: int,
@@ -293,6 +349,143 @@ def align_et_to_meg(meg_raw: mne.io.Raw,
         )
 
     return et_raw
+
+
+def align_et_to_meg_per_block(raws_dict: dict,
+                               samples_df: pd.DataFrame,
+                               meg_events_per_block: dict,
+                               et_event_times: np.ndarray,
+                               verbose: bool = True) -> mne.io.RawArray:
+    """
+    Align ET gaze data to MEG per block, then return a concatenated ET RawArray.
+
+    Each block's ET slice is independently aligned to its MEG block via
+    realign_raw.  Within a single ~270 s block the ET–MEG relationship is a
+    simple constant offset (slope ≈ 1), so realign_raw works correctly.  This
+    avoids the large residuals that arise from a global linear fit across the
+    whole session, where inter-block breaks cause the ET–MEG offset to grow
+    monotonically and produce an apparent slope of ~2.
+
+    Parameters
+    ----------
+    raws_dict : dict
+        {block_id: mne.io.Raw} individual MEG block raws (not concatenated).
+    samples_df : pd.DataFrame
+        ET cleaned samples with at least 'smpl_time' [s], 'gx', 'gy' columns.
+        smpl_time must be absolute Eyelink clock time in seconds.
+    meg_events_per_block : dict
+        {block_id: np.ndarray} from extract_scene_onset_times_meg_per_block —
+        event times in seconds relative to each block's own first_samp.
+    et_event_times : np.ndarray
+        All ET scene onset times in seconds (absolute Eyelink clock), in the
+        same chronological order as MEG events across blocks.
+    verbose : bool
+        Log alignment details per block.
+
+    Returns
+    -------
+    mne.io.RawArray
+        Concatenated ET raw aligned to MEG, with 'gx' and 'gy' channels at
+        MEG sfreq.  Time axis matches the concatenated MEG recording.
+    """
+    sorted_blocks = sorted(raws_dict.keys())
+
+    # Split flat et_event_times into per-block slices using MEG per-block counts
+    et_per_block: dict = {}
+    et_idx = 0
+    for block in sorted_blocks:
+        n_k = len(meg_events_per_block.get(block, []))
+        et_per_block[block] = et_event_times[et_idx: et_idx + n_k]
+        et_idx += n_k
+
+    if et_idx != len(et_event_times):
+        logger.warning(
+            f"MEG event total ({et_idx}) differs from ET event total "
+            f"({len(et_event_times)}); "
+            f"{len(et_event_times) - et_idx} ET events unassigned"
+        )
+
+    et_samp_t = samples_df['smpl_time'].values
+    aligned_et_raws = []
+
+    for block in sorted_blocks:
+        meg_raw_k = raws_dict[block]
+        meg_events_k = meg_events_per_block.get(block, np.array([]))
+        et_events_k = et_per_block[block]
+
+        if len(meg_events_k) == 0 or len(et_events_k) == 0:
+            logger.warning(
+                f"Block {block}: no events — filling with zeros "
+                f"({meg_raw_k.times[-1]:.1f} s)"
+            )
+            n_samp = meg_raw_k.n_times
+            try:
+                info_k = mne.create_info(['gx', 'gy'], meg_raw_k.info['sfreq'],
+                                         ch_types=['eyegaze', 'eyegaze'])
+            except ValueError:
+                info_k = mne.create_info(['gx', 'gy'], meg_raw_k.info['sfreq'],
+                                         ch_types=['misc', 'misc'])
+            aligned_et_raws.append(
+                mne.io.RawArray(np.zeros((2, n_samp)), info_k, verbose=False)
+            )
+            continue
+
+        # Slice ET samples to cover the full MEG block duration with a 30 s buffer.
+        # pre_time: time from block start (MEG t=0) to first event plus buffer.
+        # post_time: time from last event to block end plus buffer.
+        pre_time = meg_events_k[0] + 30.0
+        post_time = (meg_raw_k.times[-1] - meg_events_k[-1]) + 30.0
+
+        et_start = et_events_k[0] - pre_time
+        et_end = et_events_k[-1] + post_time
+
+        mask = (et_samp_t >= et_start) & (et_samp_t <= et_end)
+        samples_k = samples_df[mask]
+
+        if len(samples_k) < 2:
+            logger.warning(
+                f"Block {block}: too few ET samples in window "
+                f"[{et_start:.1f}, {et_end:.1f}] s — skipping"
+            )
+            continue
+
+        et_raw_k = build_et_raw_from_samples(samples_k)
+
+        # ET event times relative to this ET raw's internal axis (starts at 0)
+        et_t0 = float(samples_k['smpl_time'].iloc[0])
+        et_events_k_rel = et_events_k - et_t0
+
+        if verbose:
+            logger.info(
+                f"Block {block}: aligning {len(meg_events_k)} event pairs "
+                f"(MEG {meg_events_k[0]:.2f}–{meg_events_k[-1]:.2f} s, "
+                f"ET rel {et_events_k_rel[0]:.2f}–{et_events_k_rel[-1]:.2f} s)"
+            )
+
+        mne.preprocessing.realign_raw(
+            et_raw_k, meg_raw_k,
+            et_events_k_rel, meg_events_k,
+            verbose=verbose
+        )
+
+        if et_raw_k.info['sfreq'] != meg_raw_k.info['sfreq']:
+            et_raw_k.resample(meg_raw_k.info['sfreq'], npad='auto', verbose=False)
+
+        et_raw_k.crop(tmin=0.0, tmax=meg_raw_k.times[-1], include_tmax=True)
+        aligned_et_raws.append(et_raw_k)
+
+    if not aligned_et_raws:
+        raise RuntimeError("No blocks successfully aligned — cannot build ET raw")
+
+    result = mne.concatenate_raws(aligned_et_raws, verbose=False)
+
+    if verbose:
+        logger.info(
+            f"Per-block ET alignment complete. "
+            f"Blocks: {len(aligned_et_raws)}, duration: {result.times[-1]:.1f} s"
+        )
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -525,18 +718,22 @@ def run_ica_et_pipeline(subject_id: int,
             f"total duration: {meg_raw.times[-1]:.1f} s"
         )
 
-    # Load ET samples and build MNE RawArray
+    # Load ET samples
     samples_df = load_eye_samples(subject_id, session, data_path=data_path)
-    et_raw = build_et_raw_from_samples(samples_df)
 
-    # Extract shared scene_on event times
-    meg_event_times = extract_scene_onset_times_meg(meg_raw, session)
+    # Extract event times: MEG per-block (relative to each block's own t=0),
+    # ET flat array (absolute Eyelink clock, same chronological order).
+    meg_events_per_block = extract_scene_onset_times_meg_per_block(
+        raws_dict, session, verbose=verbose
+    )
     et_event_times = extract_scene_onset_times_et(subject_id, session, data_path)
 
-    # Align ET to MEG timeline
-    et_aligned = align_et_to_meg(
-        meg_raw, et_raw,
-        meg_event_times, et_event_times,
+    # Align ET to MEG per block to avoid the large residuals that arise from a
+    # global linear fit when inter-block breaks vary (apparent slope ~2, residuals
+    # up to ~200 s).
+    et_aligned = align_et_to_meg_per_block(
+        raws_dict, samples_df,
+        meg_events_per_block, et_event_times,
         verbose=verbose
     )
 
