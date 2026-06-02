@@ -211,6 +211,81 @@ def extract_scene_onset_times_meg_per_block(raws_dict: dict,
     return per_block
 
 
+def extract_scene_onset_times_et_per_block(subject_id: int,
+                                            session: int,
+                                            data_path: Optional[str] = None) -> dict:
+    """
+    Extract ET scene onset times grouped by block, using BLOCKID messages.
+
+    BLOCKID rows in the ET messages file record the start time of each block
+    (in Eyelink ms).  Each TYPE=0 SCENEID_time is assigned to the block whose
+    BLOCKID_time is the largest value ≤ that scene time.
+
+    Parameters
+    ----------
+    subject_id : int
+        Subject ID.
+    session : int
+        Session number.
+    data_path : str, optional
+        Path to data directory.
+
+    Returns
+    -------
+    dict
+        {meg_block_id: np.ndarray} of scene onset times in seconds (absolute
+        Eyelink clock), one array per block in MEG block order.
+    """
+    validate_subject_id(subject_id)
+    validate_session(session)
+
+    if data_path is None:
+        data_path = get_data_path()
+        if data_path is None:
+            raise ValueError("No data path configured")
+
+    # Flat sorted ET times (reuse existing parser)
+    scene_times_s = extract_scene_onset_times_et(subject_id, session,
+                                                  data_path=data_path)
+
+    # Block start times from BLOCKID rows in the messages file
+    _, messages_df = load_eye_events(subject_id, session, data_path=data_path)
+    blockid_rows = messages_df[messages_df['BLOCKID'].notna()].copy()
+
+    if len(blockid_rows) == 0:
+        raise ValueError(
+            f"No BLOCKID rows in ET messages for subject {subject_id}, "
+            f"session {session}"
+        )
+
+    blockid_rows = blockid_rows.sort_values('BLOCKID_time')
+    block_start_s = blockid_rows['BLOCKID_time'].values.astype(float) / 1000.0
+
+    meg_blocks = sorted(get_avs_blocks(session_num=session, verbose=False))
+    n_et_blocks = len(block_start_s)
+
+    if len(meg_blocks) != n_et_blocks:
+        logger.warning(
+            f"MEG block count ({len(meg_blocks)}) ≠ ET BLOCKID count "
+            f"({n_et_blocks}); using {min(len(meg_blocks), n_et_blocks)}"
+        )
+        n_use = min(len(meg_blocks), n_et_blocks)
+        meg_blocks = meg_blocks[:n_use]
+        block_start_s = block_start_s[:n_use]
+
+    # Each scene time belongs to block k when block_start_s[k] <= t < block_start_s[k+1]
+    block_indices = np.searchsorted(block_start_s, scene_times_s, side='right') - 1
+    block_indices = np.clip(block_indices, 0, len(meg_blocks) - 1)
+
+    per_block = {}
+    for i, meg_block in enumerate(meg_blocks):
+        mask = block_indices == i
+        per_block[meg_block] = scene_times_s[mask]
+        logger.info(f"Block {meg_block}: {mask.sum()} ET scene events")
+
+    return per_block
+
+
 def extract_scene_onset_times_et(subject_id: int,
                                   session: int,
                                   data_path: Optional[str] = None) -> np.ndarray:
@@ -354,7 +429,7 @@ def align_et_to_meg(meg_raw: mne.io.Raw,
 def align_et_to_meg_per_block(raws_dict: dict,
                                samples_df: pd.DataFrame,
                                meg_events_per_block: dict,
-                               et_event_times: np.ndarray,
+                               et_events_per_block: dict,
                                verbose: bool = True) -> mne.io.RawArray:
     """
     Align ET gaze data to MEG per block, then return a concatenated ET RawArray.
@@ -376,9 +451,9 @@ def align_et_to_meg_per_block(raws_dict: dict,
     meg_events_per_block : dict
         {block_id: np.ndarray} from extract_scene_onset_times_meg_per_block —
         event times in seconds relative to each block's own first_samp.
-    et_event_times : np.ndarray
-        All ET scene onset times in seconds (absolute Eyelink clock), in the
-        same chronological order as MEG events across blocks.
+    et_events_per_block : dict
+        {block_id: np.ndarray} from extract_scene_onset_times_et_per_block —
+        absolute Eyelink clock times in seconds, one array per block.
     verbose : bool
         Log alignment details per block.
 
@@ -389,29 +464,13 @@ def align_et_to_meg_per_block(raws_dict: dict,
         MEG sfreq.  Time axis matches the concatenated MEG recording.
     """
     sorted_blocks = sorted(raws_dict.keys())
-
-    # Split flat et_event_times into per-block slices using MEG per-block counts
-    et_per_block: dict = {}
-    et_idx = 0
-    for block in sorted_blocks:
-        n_k = len(meg_events_per_block.get(block, []))
-        et_per_block[block] = et_event_times[et_idx: et_idx + n_k]
-        et_idx += n_k
-
-    if et_idx != len(et_event_times):
-        logger.warning(
-            f"MEG event total ({et_idx}) differs from ET event total "
-            f"({len(et_event_times)}); "
-            f"{len(et_event_times) - et_idx} ET events unassigned"
-        )
-
     et_samp_t = samples_df['smpl_time'].values
     aligned_et_raws = []
 
     for block in sorted_blocks:
         meg_raw_k = raws_dict[block]
         meg_events_k = meg_events_per_block.get(block, np.array([]))
-        et_events_k = et_per_block[block]
+        et_events_k = et_events_per_block.get(block, np.array([]))
 
         if len(meg_events_k) == 0 or len(et_events_k) == 0:
             logger.warning(
@@ -721,19 +780,21 @@ def run_ica_et_pipeline(subject_id: int,
     # Load ET samples
     samples_df = load_eye_samples(subject_id, session, data_path=data_path)
 
-    # Extract event times: MEG per-block (relative to each block's own t=0),
-    # ET flat array (absolute Eyelink clock, same chronological order).
+    # Extract event times per block: MEG times relative to each block's own t=0;
+    # ET times grouped by block using BLOCKID messages (absolute Eyelink clock).
     meg_events_per_block = extract_scene_onset_times_meg_per_block(
         raws_dict, session, verbose=verbose
     )
-    et_event_times = extract_scene_onset_times_et(subject_id, session, data_path)
+    et_events_per_block = extract_scene_onset_times_et_per_block(
+        subject_id, session, data_path
+    )
 
     # Align ET to MEG per block to avoid the large residuals that arise from a
     # global linear fit when inter-block breaks vary (apparent slope ~2, residuals
     # up to ~200 s).
     et_aligned = align_et_to_meg_per_block(
         raws_dict, samples_df,
-        meg_events_per_block, et_event_times,
+        meg_events_per_block, et_events_per_block,
         verbose=verbose
     )
 
