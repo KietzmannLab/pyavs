@@ -51,7 +51,7 @@ is provided as-is so students can practise their own preprocessing.
 Usage:
   python prepare_challenge_data.py \\
       --data-path /share/klab/datasets/avs \\
-      --output-path /share/klab/psulewki/psulewski/brainencoding26
+      --output-path /share/klab/psulewki/psulewski/brainencoding26_v2
 
   python prepare_challenge_data.py \\
       --data-path /share/klab/datasets/avs \\
