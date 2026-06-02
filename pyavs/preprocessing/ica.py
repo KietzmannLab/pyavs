@@ -98,41 +98,61 @@ def build_et_raw_from_samples(samples_df: pd.DataFrame,
 # Event time extraction
 # ---------------------------------------------------------------------------
 
-def extract_scene_onset_times_meg(raw: mne.io.Raw) -> np.ndarray:
+def extract_scene_onset_times_meg(raw: mne.io.Raw, session: int) -> np.ndarray:
     """
-    Extract scene onset (trigger code 100) times from the MEG data.
+    Extract per-trial scene onset times from MEG data using repaired triggers.
 
-    Trigger 100 fires once per scene viewing trial immediately after the screen
-    flip. It is the simplest and most direct MEG anchor for realign_raw: one event
-    per trial, no repair logic needed, and the constant delay to ET SCENEID_time
-    (TYPE=0) is absorbed by realign_raw's linear regression fit.
+    Identifies per-trial anchors using repaired block triggers (block+1000) to
+    disambiguate which trial belongs to which block, then returns the trial-number
+    trigger time (1–30, n_trial_per_block=30) directly. Any constant offset between
+    this anchor and SCENEID_time on the ET side is absorbed by realign_raw's linear
+    regression fit.
 
     Parameters
     ----------
     raw : mne.io.Raw
-        MEG raw data with STI101 trigger channel.
+        MEG raw data with STI101 trigger channel (concatenated session).
+    session : int
+        Session number — needed to identify valid block trigger codes after repair.
 
     Returns
     -------
     np.ndarray
-        Sorted array of trigger-100 times in seconds (relative to raw.first_samp).
+        Array of scene onset times in seconds (relative to raw.first_samp),
+        one per trial, in chronological order.
     """
+    validate_session(session)
+
+    # Match the find_events settings used by add_fix_event_trigger in trigger/tools.py
     try:
         events = mne.find_events(raw, stim_channel='STI101',
-                                 min_duration=0.001, verbose=False)
+                                 consecutive=True, min_duration=0.005, verbose=False)
     except ValueError as e:
         raise RuntimeError(f"Could not find STI101 channel in MEG raw: {e}") from e
 
-    scene_on_code = get_meg_trigger_dict()['scene_on']  # 100
-    scene_events = events[events[:, 2] == scene_on_code]
-    times = (scene_events[:, 0] - raw.first_samp) / raw.info['sfreq']
+    events_repaired = repair_meg_trigger_events(events, session, verbose=False)
+    blocks = get_avs_blocks(session_num=session, verbose=False)
+    sfreq = raw.info['sfreq']
+
+    times = []
+    # Reuse get_meg_timestamp — the same function used by the composer pipeline.
+    # optimized_timing=False returns the trial trigger sample directly;
+    # realign_raw absorbs the constant offset to SCENEID_time via its linear fit.
+    for block in blocks:
+        for trial in range(1, 31):
+            ts = get_meg_timestamp(events_repaired, trial=trial, block=int(block),
+                                   optimized_timing=False, verbose=False)
+            if ts is not None:
+                times.append((ts - raw.first_samp) / sfreq)
+
+    times = np.array(times)
 
     if len(times) == 0:
-        logger.warning("No trigger-100 (scene_on) events found in MEG data")
+        logger.warning("No trial trigger events found in repaired MEG events")
     else:
-        logger.info(f"Found {len(times)} scene_on (trigger 100) events in MEG data")
+        logger.info(f"Found {len(times)} trial onset times from repaired MEG triggers")
 
-    return np.sort(times)
+    return times
 
 
 def extract_scene_onset_times_et(subject_id: int,
@@ -510,7 +530,7 @@ def run_ica_et_pipeline(subject_id: int,
     et_raw = build_et_raw_from_samples(samples_df)
 
     # Extract shared scene_on event times
-    meg_event_times = extract_scene_onset_times_meg(meg_raw)
+    meg_event_times = extract_scene_onset_times_meg(meg_raw, session)
     et_event_times = extract_scene_onset_times_et(subject_id, session, data_path)
 
     # Align ET to MEG timeline
