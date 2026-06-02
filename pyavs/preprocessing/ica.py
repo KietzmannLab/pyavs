@@ -185,33 +185,40 @@ def extract_scene_onset_times_et(subject_id: int,
 
     _, messages_df = load_eye_events(subject_id, session, data_path=data_path)
 
-    if 'SCENEID_time' not in messages_df.columns:
-        raise KeyError(
-            f"'SCENEID_time' column not found in messages file for "
-            f"subject {subject_id}, session {session}. "
-            f"Available columns: {list(messages_df.columns)}"
-        )
-
-    raw_times = messages_df['SCENEID_time'].dropna()
+    for col in ('SCENEID_time', 'TYPE'):
+        if col not in messages_df.columns:
+            raise KeyError(
+                f"'{col}' column not found in messages file for "
+                f"subject {subject_id}, session {session}."
+            )
 
     scene_times_s = []
-    for val in raw_times:
+    for _, row in messages_df[messages_df['SCENEID_time'].notna()].iterrows():
+        # Only keep scene-viewing rows (TYPE=0).
+        # TYPE is stored as a list (onset + offset) — take the first value.
         try:
-            parsed = literal_eval(str(val)) if isinstance(val, str) else val
+            type_val = row['TYPE']
+            parsed_type = literal_eval(str(type_val)) if isinstance(type_val, str) else type_val
             from pandas.api.types import is_list_like
-            if is_list_like(parsed):
-                parsed = float(np.min(list(parsed)))
-            scene_times_s.append(float(parsed) / 1000.0)
+            first_type = float(list(parsed_type)[0]) if is_list_like(parsed_type) else float(parsed_type)
+            if first_type != 0.0:
+                continue
+
+            sceneid_val = row['SCENEID_time']
+            parsed_time = literal_eval(str(sceneid_val)) if isinstance(sceneid_val, str) else sceneid_val
+            if is_list_like(parsed_time):
+                parsed_time = float(np.min(list(parsed_time)))
+            scene_times_s.append(float(parsed_time) / 1000.0)
         except (ValueError, TypeError):
             continue
 
     if not scene_times_s:
         raise ValueError(
-            f"No valid SCENEID_time values found for subject {subject_id}, session {session}"
+            f"No TYPE=0 SCENEID_time values found for subject {subject_id}, session {session}"
         )
 
     times = np.sort(np.array(scene_times_s))
-    logger.info(f"Found {len(times)} scene onset times in ET messages file")
+    logger.info(f"Found {len(times)} scene onset times (TYPE=0) in ET messages file")
     return times
 
 
