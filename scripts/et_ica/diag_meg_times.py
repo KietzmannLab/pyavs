@@ -26,7 +26,7 @@ from pyavs.preprocessing.ica import (
     extract_scene_onset_times_meg, extract_scene_onset_times_et
 )
 
-DATA_PATH = '/Users/atlas/avs'
+DATA_PATH = '/share/klab/datasets/avs'
 SUBJECT = 1
 SESSION = 2
 
@@ -56,7 +56,7 @@ for k in sorted(raws_dict.keys()):
 # Concatenate
 meg_raw = mne.concatenate_raws(
     [raws_dict[k] for k in sorted(raws_dict.keys())],
-    verbose=False
+    verbose=False, on_mismatch='warn'
 )
 print(f"\n--- Concatenated raw ---")
 print(f"  first_samp = {meg_raw.first_samp}")
