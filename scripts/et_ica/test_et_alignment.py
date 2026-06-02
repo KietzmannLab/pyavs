@@ -128,9 +128,9 @@ Examples:
         f"duration {et_raw.times[-1]:.1f} s"
     )
 
-    # Extract shared scene_on event times
-    print("\nExtracting scene_on event times...")
-    meg_times = extract_scene_onset_times_meg(meg_raw)
+    # Extract shared scene onset event times (repaired trial triggers)
+    print("\nExtracting scene onset event times...")
+    meg_times = extract_scene_onset_times_meg(meg_raw, args.session)
     et_times = extract_scene_onset_times_et(
         args.subject, args.session, data_path=args.data_path
     )
