@@ -28,7 +28,8 @@ from ..utils.config import get_data_path
 from ..utils.paths import get_subject_session_id, convert_session_to_letter
 from ..dataloader.loaders import load_eye_samples, load_eye_events
 from ..dataloader.meg import load_meg_session
-from .trigger.tools import get_meg_trigger_dict, repair_meg_trigger_events, get_avs_blocks
+from .trigger.tools import (get_meg_trigger_dict, repair_meg_trigger_events,
+                             get_avs_blocks, get_meg_timestamp)
 
 
 logger = get_logger('preprocessing.ica')
@@ -122,29 +123,27 @@ def extract_scene_onset_times_meg(raw: mne.io.Raw, session: int) -> np.ndarray:
     """
     validate_session(session)
 
+    # Match the find_events settings used by add_fix_event_trigger in trigger/tools.py
     try:
         events = mne.find_events(raw, stim_channel='STI101',
-                                 min_duration=0.001, verbose=False)
+                                 consecutive=True, min_duration=0.005, verbose=False)
     except ValueError as e:
         raise RuntimeError(f"Could not find STI101 channel in MEG raw: {e}") from e
 
     events_repaired = repair_meg_trigger_events(events, session, verbose=False)
-
     blocks = get_avs_blocks(session_num=session, verbose=False)
-    valid_block_triggers = set((blocks + 1000).tolist())
+    sfreq = raw.info['sfreq']
 
     times = []
-    for i in range(1, len(events_repaired)):
-        sample = events_repaired[i, 0]
-        prev_code = events_repaired[i, 1]
-        code = events_repaired[i, 2]
-
-        # Trial triggers are 1–30 (n_trial_per_block=30), immediately preceded by a
-        # repaired block trigger. We use the trial trigger time directly — realign_raw
-        # absorbs any constant offset between this anchor and SCENEID_time via its
-        # linear regression fit.
-        if 1 <= code <= 30 and prev_code in valid_block_triggers:
-            times.append((sample - raw.first_samp) / raw.info['sfreq'])
+    # Reuse get_meg_timestamp — the same function used by the composer pipeline.
+    # optimized_timing=False returns the trial trigger sample directly;
+    # realign_raw absorbs the constant offset to SCENEID_time via its linear fit.
+    for block in blocks:
+        for trial in range(1, 31):
+            ts = get_meg_timestamp(events_repaired, trial=trial, block=int(block),
+                                   optimized_timing=False, verbose=False)
+            if ts is not None:
+                times.append((ts - raw.first_samp) / sfreq)
 
     times = np.array(times)
 
