@@ -113,8 +113,8 @@ Examples:
 
     meg_raw = mne.concatenate_raws(
         [raws_dict[k] for k in sorted(raws_dict.keys())],
-        verbose=False
-    )
+        verbose=False, on_mismatch='warn')
+    
     print(f"  Loaded {len(raws_dict)} blocks, total duration: {meg_raw.times[-1]:.1f} s")
 
     # Load ET samples and build RawArray
