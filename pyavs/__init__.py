@@ -42,7 +42,9 @@ from .dataloader.meg import load_meg_raw, load_meg_preprocessed, load_meg_sessio
 from .scenes.objects import get_fixated_objects
 from .preprocessing.eye import preprocess_eye_events
 from .preprocessing.meg import apply_maxwell_filter, filter_meg, resample_meg, preprocess_meg_block, apply_precomputed_ica
-from .preprocessing.ica import compute_ica, find_eye_components, apply_ica, preprocess_with_ica
+from .preprocessing.ica import (compute_ica, apply_ica, find_cardiac_components,
+                                 find_eye_components_xy_correlation, run_ica_et_pipeline,
+                                 build_et_raw_from_samples, align_et_to_meg)
 from .preprocessing.alignment import MEGETComposer, create_et_event_epochs, get_meg_trigger_mapping, repair_meg_trigger_events
 from .preprocessing.composer import AVSComposer
 from .preprocessing.trigger import get_meg_trigger_dict, get_avs_blocks, get_meg_timestamp, add_fix_event_trigger

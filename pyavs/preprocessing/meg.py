@@ -16,7 +16,7 @@ from ..utils.config import get_data_path
 from ..utils.paths import get_subject_session_id, convert_session_to_letter
 from ..utils.validation import validate_subject_id, validate_session
 from ..utils.logging import get_logger
-from .ica import compute_ica, find_eye_components, apply_ica, load_ica
+from .ica import compute_ica, apply_ica, load_ica
 
 
 # Initialize logger
