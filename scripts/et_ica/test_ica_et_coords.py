@@ -41,7 +41,7 @@ def setup_output_dir(data_path: str, subject_id: int, session: int) -> Path:
     return output_dir
 
 
-def print_scores_table(scores_df, threshold: float, eye_exclusions, cardiac_exclusions) -> None:
+def print_scores_table(scores_df, eye_exclusions, cardiac_exclusions) -> None:
     flagged_eye = set(eye_exclusions)
     flagged_cardiac = set(cardiac_exclusions)
 
@@ -60,8 +60,8 @@ def print_scores_table(scores_df, threshold: float, eye_exclusions, cardiac_excl
         )
 
 
-def plot_scatter(scores_df, threshold: float, eye_exclusions, save_path: str) -> None:
-    flagged_mask = scores_df['max_r'] >= threshold
+def plot_scatter(scores_df, eye_exclusions, save_path: str) -> None:
+    flagged_mask = scores_df['component'].isin(eye_exclusions)
 
     sns.set_context("poster")
     plt.figure(figsize=(7, 7))
@@ -75,7 +75,7 @@ def plot_scatter(scores_df, threshold: float, eye_exclusions, save_path: str) ->
         plt.scatter(
             scores_df.loc[flagged_mask, 'r_gx'],
             scores_df.loc[flagged_mask, 'r_gy'],
-            color='salmon', alpha=0.9, label=f'flagged (|r| ≥ {threshold})'
+            color='salmon', alpha=0.9, label='flagged (top 5%)'
         )
 
     plt.axhline(0, color='k', lw=0.5, alpha=0.5)
@@ -115,7 +115,7 @@ def main() -> int:
         epilog="""
 Examples:
   python test_ica_et_coords.py --subject 1 --session 1 --data-path /share/klab/datasets/avs/
-  python test_ica_et_coords.py --subject 1 --session 1 --data-path /share/klab/datasets/avs/ --threshold 0.25
+  python test_ica_et_coords.py --subject 1 --session 1 --data-path /share/klab/datasets/avs/ --top-fraction 0.10
         """
     )
     parser.add_argument('--subject', type=int, required=True, help='Subject ID')
@@ -125,8 +125,8 @@ Examples:
         help='Path to AVS data directory'
     )
     parser.add_argument(
-        '--threshold', type=float, default=0.015,
-        help='Pearson |r| threshold for flagging eye components (default: 0.3)'
+        '--top-fraction', type=float, default=0.05,
+        help='Fraction of components to flag as eye-related by max_r rank (default: 0.05)'
     )
     parser.add_argument(
         '--no-save', action='store_true',
@@ -143,19 +143,19 @@ Examples:
 
     print(f"=== ICA + ET XY Coordinate Test ===")
     print(f"Subject: {args.subject}, Session: {args.session}")
-    print(f"Threshold: {args.threshold}")
+    print(f"Top fraction: {args.top_fraction}")
     print(f"Data path: {args.data_path}")
 
     ica, eye_exclusions, cardiac_exclusions, scores_df = run_ica_et_pipeline(
         subject_id=args.subject,
         session=args.session,
         data_path=args.data_path,
-        threshold=args.threshold,
+        top_fraction=args.top_fraction,
         save_results=not args.no_save,
         verbose=True
     )
 
-    print_scores_table(scores_df, args.threshold, eye_exclusions, cardiac_exclusions)
+    print_scores_table(scores_df, eye_exclusions, cardiac_exclusions)
 
     print(f"\n--- Summary ---")
     print(f"Total ICA components:     {ica.n_components_}")
@@ -167,7 +167,7 @@ Examples:
     prefix = f"sub-{args.subject:02d}_ses-{args.session:02d}"
 
     plot_scatter(
-        scores_df, args.threshold, eye_exclusions,
+        scores_df, eye_exclusions,
         save_path=str(output_dir / f"{prefix}_test_ica_scatter.png")
     )
     plot_topos(

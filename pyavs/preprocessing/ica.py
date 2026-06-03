@@ -722,14 +722,15 @@ def build_et_gaze_epochs_per_scene(
 def find_eye_components_xy_correlation(ica: ICA,
                                         meg_raw: mne.io.Raw,
                                         et_gaze_epochs: mne.EpochsArray,
-                                        threshold: float = 0.3,
+                                        top_fraction: float = 0.05,
                                         verbose: bool = True) -> Tuple[List[int], pd.DataFrame]:
     """
     Find ICA components correlated with per-scene XY gaze position.
 
     IC sources are epoched with the same scene_on events as ``et_gaze_epochs``
     and then both are flattened across epochs before computing Pearson r.
-    This avoids the need for a continuous aligned gaze Raw.
+    The top ``top_fraction`` of components ranked by max(|r_gx|, |r_gy|) are
+    flagged as eye components.
 
     Parameters
     ----------
@@ -741,8 +742,9 @@ def find_eye_components_xy_correlation(ica: ICA,
         Per-scene gaze epochs from :func:`build_et_gaze_epochs_per_scene`,
         with 'gx' and 'gy' channels.  Its ``.events`` and ``.tmin`` /
         ``.tmax`` drive the matching MEG epoching.
-    threshold : float, optional
-        Pearson |r| threshold for flagging components (default: 0.3).
+    top_fraction : float, optional
+        Fraction of components to flag as eye-related, ranked by max_r
+        (default: 0.05 → top 5 %).
     verbose : bool, optional
         Whether to log results.
 
@@ -813,25 +815,25 @@ def find_eye_components_xy_correlation(ica: ICA,
         records.append({'component': i, 'r_gx': r_gx, 'r_gy': r_gy, 'max_r': max_r})
 
     scores_df = pd.DataFrame(records)
-    eye_components = scores_df[scores_df['max_r'] >= threshold]['component'].tolist()
+    n_flag = max(1, int(np.ceil(n_comp * top_fraction)))
+    eye_components = (
+        scores_df.nlargest(n_flag, 'max_r')['component'].tolist()
+    )
 
     if verbose:
-        if eye_components:
-            flagged = scores_df[scores_df['max_r'] >= threshold].sort_values(
-                'max_r', ascending=False
-            )
+        flagged = scores_df[scores_df['component'].isin(eye_components)].sort_values(
+            'max_r', ascending=False
+        )
+        logger.info(
+            f"Top {top_fraction*100:.0f}% eye components "
+            f"({n_flag}/{n_comp}): {eye_components}"
+        )
+        for _, row in flagged.iterrows():
             logger.info(
-                f"Found {len(eye_components)} eye components above threshold "
-                f"{threshold}: {eye_components}"
+                f"  Component {int(row['component'])}: "
+                f"r_gx={row['r_gx']:.3f}, r_gy={row['r_gy']:.3f}, "
+                f"max_r={row['max_r']:.3f}"
             )
-            for _, row in flagged.iterrows():
-                logger.info(
-                    f"  Component {int(row['component'])}: "
-                    f"r_gx={row['r_gx']:.3f}, r_gy={row['r_gy']:.3f}, "
-                    f"max_r={row['max_r']:.3f}"
-                )
-        else:
-            logger.info(f"No eye components above threshold {threshold}")
 
     return eye_components, scores_df
 
@@ -900,7 +902,7 @@ def save_et_scores(scores_df: pd.DataFrame,
 def run_ica_et_pipeline(subject_id: int,
                          session: int,
                          data_path: Optional[str] = None,
-                         threshold: float = 0.3,
+                         top_fraction: float = 0.05,
                          filter_l_freq: float = 1.0,
                          filter_h_freq: float = 40.0,
                          n_components: Optional[int] = None,
@@ -922,8 +924,8 @@ def run_ica_et_pipeline(subject_id: int,
         Session number.
     data_path : str, optional
         Path to data directory. If None, uses configured data path.
-    threshold : float, optional
-        Pearson |r| threshold for eye component flagging (default: 0.3).
+    top_fraction : float, optional
+        Fraction of components to flag as eye-related by max_r rank (default: 0.05).
     filter_l_freq : float, optional
         High-pass cutoff for ICA fitting copy (default: 1.0 Hz).
     filter_h_freq : float, optional
@@ -1013,7 +1015,7 @@ def run_ica_et_pipeline(subject_id: int,
     # Find eye components via per-scene ET xy correlation (unfiltered sources)
     eye_exclusions, scores_df = find_eye_components_xy_correlation(
         ica, meg_raw, et_gaze_epochs,
-        threshold=threshold, verbose=verbose,
+        top_fraction=top_fraction, verbose=verbose,
     )
 
     # Find cardiac components
