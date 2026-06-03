@@ -783,13 +783,16 @@ def find_eye_components_xy_correlation(ica: ICA,
     gx_flat = gaze_data[:, 0, :].ravel()
     gy_flat = gaze_data[:, 1, :].ravel()
 
-    valid = ~((np.abs(gx_flat) < 1.0) & (np.abs(gy_flat) < 1.0))
+    valid = (
+        ~np.isnan(gx_flat) & ~np.isnan(gy_flat) &
+        ~((np.abs(gx_flat) < 1.0) & (np.abs(gy_flat) < 1.0))
+    )
     n_valid = int(valid.sum())
     n_total = len(gx_flat)
 
     if verbose:
         logger.info(
-            f"Valid (non-blink) samples: {n_valid}/{n_total} "
+            f"Valid (non-NaN, non-blink) samples: {n_valid}/{n_total} "
             f"({100*n_valid/n_total:.1f}%) across {n_ep} epochs"
         )
 
