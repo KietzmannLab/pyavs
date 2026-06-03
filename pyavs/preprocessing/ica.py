@@ -945,8 +945,8 @@ def run_ica_et_pipeline(subject_id: int,
 
     if reject is None:
         reject = dict(
-            grad=4000e-13,  # T/m
-            mag=4e-12,      # T
+            grad=4000e-12,  # T/m
+            mag=4e-11,      # T
             eeg=40e-6,      # V
             eog=250e-6,     # V
         )
@@ -1047,7 +1047,7 @@ def compute_ica(raw: mne.io.Raw,
                random_state: int = 42,
                picks: Optional[Union[str, list]] = 'meg',
                decim: Optional[int] = None,
-               reject: Optional[dict] = None,
+               reject: Optional[dict] = False,
                reject_by_annotation: bool = True,
                verbose: bool = True) -> ICA:
     """

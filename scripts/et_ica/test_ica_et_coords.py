@@ -125,7 +125,7 @@ Examples:
         help='Path to AVS data directory'
     )
     parser.add_argument(
-        '--threshold', type=float, default=0.3,
+        '--threshold', type=float, default=0.015,
         help='Pearson |r| threshold for flagging eye components (default: 0.3)'
     )
     parser.add_argument(
