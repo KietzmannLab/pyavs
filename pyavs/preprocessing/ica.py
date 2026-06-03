@@ -30,6 +30,7 @@ from ..dataloader.loaders import load_eye_samples, load_eye_events
 from ..dataloader.meg import load_meg_session
 from .trigger.tools import (get_meg_trigger_dict, repair_meg_trigger_events,
                              get_avs_blocks, get_meg_timestamp)
+from .samples import load_samples_with_scenes
 
 
 logger = get_logger('preprocessing.ica')
@@ -444,12 +445,9 @@ def align_et_to_meg_per_block(raws_dict: dict,
     """
     Align ET gaze data to MEG per block, then return a concatenated ET RawArray.
 
-    Each block's ET slice is independently aligned to its MEG block via
-    realign_raw.  Within a single ~270 s block the ET–MEG relationship is a
-    simple constant offset (slope ≈ 1), so realign_raw works correctly.  This
-    avoids the large residuals that arise from a global linear fit across the
-    whole session, where inter-block breaks cause the ET–MEG offset to grow
-    monotonically and produce an apparent slope of ~2.
+    .. deprecated::
+        Use :func:`build_et_gaze_epochs_per_scene` instead. This function is
+        kept for backward compatibility with ``test_et_alignment.py`` only.
 
     Parameters
     ----------
@@ -457,21 +455,18 @@ def align_et_to_meg_per_block(raws_dict: dict,
         {block_id: mne.io.Raw} individual MEG block raws (not concatenated).
     samples_df : pd.DataFrame
         ET cleaned samples with at least 'smpl_time' [s], 'gx', 'gy' columns.
-        smpl_time must be absolute Eyelink clock time in seconds.
     meg_events_per_block : dict
-        {block_id: np.ndarray} from extract_scene_onset_times_meg_per_block —
-        event times in seconds relative to each block's own first_samp.
+        {block_id: np.ndarray} — event times in MEG seconds relative to each
+        block's first_samp.
     et_events_per_block : dict
-        {block_id: np.ndarray} from extract_scene_onset_times_et_per_block —
-        absolute Eyelink clock times in seconds, one array per block.
+        {block_id: np.ndarray} — absolute Eyelink clock times in seconds.
     verbose : bool
         Log alignment details per block.
 
     Returns
     -------
     mne.io.RawArray
-        Concatenated ET raw aligned to MEG, with 'gx' and 'gy' channels at
-        MEG sfreq.  Time axis matches the concatenated MEG recording.
+        Concatenated ET raw aligned to MEG, with 'gx' and 'gy' channels.
     """
     sorted_blocks = sorted(raws_dict.keys())
     et_samp_t = samples_df['smpl_time'].values
@@ -499,12 +494,8 @@ def align_et_to_meg_per_block(raws_dict: dict,
             )
             continue
 
-        # Slice ET samples to cover the full MEG block duration with a 30 s buffer.
-        # pre_time: time from block start (MEG t=0) to first event plus buffer.
-        # post_time: time from last event to block end plus buffer.
         pre_time = meg_events_k[0] + 30.0
         post_time = (meg_raw_k.times[-1] - meg_events_k[-1]) + 30.0
-
         et_start = et_events_k[0] - pre_time
         et_end = et_events_k[-1] + post_time
 
@@ -519,21 +510,19 @@ def align_et_to_meg_per_block(raws_dict: dict,
             continue
 
         et_raw_k = build_et_raw_from_samples(samples_k)
-
-        # ET event times relative to this ET raw's internal axis (starts at 0)
         et_t0 = float(samples_k['smpl_time'].iloc[0])
         et_events_k_rel = et_events_k - et_t0
 
+        n_common = min(len(meg_events_k), len(et_events_k_rel))
         if verbose:
             logger.info(
-                f"Block {block}: aligning {len(meg_events_k)} event pairs "
-                f"(MEG {meg_events_k[0]:.2f}–{meg_events_k[-1]:.2f} s, "
-                f"ET rel {et_events_k_rel[0]:.2f}–{et_events_k_rel[-1]:.2f} s)"
+                f"Block {block}: aligning {n_common} event pairs "
+                f"(MEG {meg_events_k[0]:.2f}–{meg_events_k[n_common-1]:.2f} s)"
             )
 
         mne.preprocessing.realign_raw(
             et_raw_k, meg_raw_k,
-            et_events_k_rel, meg_events_k,
+            et_events_k_rel[:n_common], meg_events_k[:n_common],
             verbose=verbose
         )
 
@@ -558,25 +547,191 @@ def align_et_to_meg_per_block(raws_dict: dict,
 
 
 # ---------------------------------------------------------------------------
+# Per-scene ET–MEG alignment (primary alignment approach)
+# ---------------------------------------------------------------------------
+
+def build_et_gaze_epochs_per_scene(
+        meg_raw: mne.io.Raw,
+        samples_df: pd.DataFrame,
+        session: int,
+        tmin: float = -0.1,
+        tmax: float = 8.0,
+        verbose: bool = True) -> Tuple[mne.EpochsArray, pd.DataFrame]:
+    """
+    Align ET gaze samples to MEG trial-by-trial and return as an EpochsArray.
+
+    Each scene epoch is aligned independently: ET samples for a given trial are
+    looked up by (block, trial_per_block) from ``samples_df``, which must have
+    been loaded with ``offset_scene_triggers_ms=60`` so that the
+    ``time_in_trial`` column already expresses time relative to the MEG
+    scene_on trigger (trigger code 100).
+
+    Derivation of the offset:
+      T_et_scene = T_meg_trigger + 0.060  (ET scene fires 60 ms after MEG)
+      time_in_trial = smpl_time - T_et_scene + 0.060
+                    = smpl_time - T_meg_trigger
+
+    No clock-drift model, no realign_raw, no trigger-count matching.
+
+    Parameters
+    ----------
+    meg_raw : mne.io.Raw
+        Concatenated MEG session (STI101 trigger channel required).
+    samples_df : pd.DataFrame
+        Eye tracking samples from
+        ``load_samples_with_scenes(offset_scene_triggers_ms=60)``.
+        Required columns: ``time_in_trial``, ``gx``, ``gy``,
+        ``block``, ``trial_per_block``, ``recording``.
+    session : int
+        Session number — passed to ``repair_meg_trigger_events`` and
+        ``get_avs_blocks``.
+    tmin : float
+        Epoch start in seconds relative to MEG scene_on trigger (default -0.1).
+    tmax : float
+        Epoch end in seconds relative to MEG scene_on trigger (default 8.0).
+    verbose : bool
+        Log per-trial alignment statistics.
+
+    Returns
+    -------
+    gaze_epochs : mne.EpochsArray
+        Shape (n_trials, 2, n_times), channels ``gx`` / ``gy`` at MEG sfreq.
+        ``gaze_epochs.metadata`` contains ``block`` and ``trial_per_block``.
+    trials_meta : pd.DataFrame
+        Same metadata as ``gaze_epochs.metadata``.
+    """
+    validate_session(session)
+
+    sfreq = meg_raw.info['sfreq']
+    n_times = int(round((tmax - tmin) * sfreq)) + 1
+    t_grid = np.linspace(tmin, tmax, n_times)
+
+    # --- extract per-trial MEG scene onset samples via repaired triggers ---
+    try:
+        events = mne.find_events(meg_raw, stim_channel='STI101',
+                                 consecutive=True, min_duration=0.005,
+                                 verbose=False)
+    except ValueError as exc:
+        raise RuntimeError(f"Could not find STI101 in MEG raw: {exc}") from exc
+
+    events_repaired = repair_meg_trigger_events(events, session, verbose=False)
+    blocks = get_avs_blocks(session_num=session, verbose=False)
+
+    meta_rows = []   # (block, trial_per_block, meg_sample)
+    for block in blocks:
+        for trial in range(1, 31):
+            ts = get_meg_timestamp(events_repaired, trial=trial, block=int(block),
+                                   optimized_timing=False, verbose=False)
+            if ts is not None:
+                meg_sample = int(ts - meg_raw.first_samp)
+                meta_rows.append({'block': int(block), 'trial_per_block': trial,
+                                   'meg_sample': meg_sample})
+
+    if not meta_rows:
+        raise RuntimeError("No trial triggers found in repaired MEG events")
+
+    trials_meta = pd.DataFrame(meta_rows)
+    n_trials = len(trials_meta)
+
+    # MNE events array: [sample, 0, event_id=1]
+    mne_events = np.column_stack([
+        trials_meta['meg_sample'].values,
+        np.zeros(n_trials, dtype=int),
+        np.ones(n_trials, dtype=int),
+    ]).astype(np.int64)
+
+    if verbose:
+        logger.info(f"Found {n_trials} MEG scene onset triggers for epoching")
+
+    # --- build per-trial gaze data by interpolating ET samples ---
+    gaze_data = np.full((n_trials, 2, n_times), np.nan)
+
+    required = {'time_in_trial', 'gx', 'gy', 'block', 'trial_per_block', 'recording'}
+    missing = required - set(samples_df.columns)
+    if missing:
+        raise KeyError(
+            f"samples_df is missing columns {missing}. "
+            "Load with load_samples_with_scenes(offset_scene_triggers_ms=60)."
+        )
+
+    n_no_et = 0
+    for i, row in trials_meta.iterrows():
+        b, t = int(row['block']), int(row['trial_per_block'])
+        mask = (
+            (samples_df['block'] == b) &
+            (samples_df['trial_per_block'] == t) &
+            (samples_df['recording'] == 'scene')
+        )
+        trial_samples = samples_df[mask]
+
+        if len(trial_samples) < 2:
+            n_no_et += 1
+            continue
+
+        t_et = trial_samples['time_in_trial'].values.astype(float)
+        gx   = trial_samples['gx'].values.astype(float)
+        gy   = trial_samples['gy'].values.astype(float)
+
+        # np.interp fills NaN for out-of-range — keeps edges clean
+        gaze_data[i, 0, :] = np.interp(t_grid, t_et, gx,
+                                        left=np.nan, right=np.nan)
+        gaze_data[i, 1, :] = np.interp(t_grid, t_et, gy,
+                                        left=np.nan, right=np.nan)
+
+    if verbose:
+        logger.info(
+            f"Gaze epochs built: {n_trials - n_no_et}/{n_trials} trials "
+            f"have ET data ({n_no_et} with no scene samples)"
+        )
+
+    # --- assemble EpochsArray ---
+    try:
+        info = mne.create_info(['gx', 'gy'], sfreq=sfreq,
+                               ch_types=['eyegaze', 'eyegaze'])
+    except ValueError:
+        info = mne.create_info(['gx', 'gy'], sfreq=sfreq,
+                               ch_types=['misc', 'misc'])
+
+    meta_out = trials_meta[['block', 'trial_per_block']].reset_index(drop=True)
+
+    gaze_epochs = mne.EpochsArray(
+        gaze_data, info,
+        events=mne_events,
+        tmin=tmin,
+        event_id={'scene_on': 1},
+        metadata=meta_out,
+        verbose=False,
+    )
+
+    return gaze_epochs, meta_out
+
+
+# ---------------------------------------------------------------------------
 # ET xy correlation-based eye component detection
 # ---------------------------------------------------------------------------
 
 def find_eye_components_xy_correlation(ica: ICA,
                                         meg_raw: mne.io.Raw,
-                                        et_aligned_raw: mne.io.RawArray,
+                                        et_gaze_epochs: mne.EpochsArray,
                                         threshold: float = 0.3,
                                         verbose: bool = True) -> Tuple[List[int], pd.DataFrame]:
     """
-    Find ICA components correlated with continuous XY gaze position.
+    Find ICA components correlated with per-scene XY gaze position.
+
+    IC sources are epoched with the same scene_on events as ``et_gaze_epochs``
+    and then both are flattened across epochs before computing Pearson r.
+    This avoids the need for a continuous aligned gaze Raw.
 
     Parameters
     ----------
     ica : mne.preprocessing.ICA
         Fitted ICA object.
     meg_raw : mne.io.Raw
-        MEG raw data (used to compute ICA sources).
-    et_aligned_raw : mne.io.RawArray
-        ET raw aligned to MEG timeline with 'gx' and 'gy' channels.
+        MEG raw data (unfiltered; used to compute ICA source epochs).
+    et_gaze_epochs : mne.EpochsArray
+        Per-scene gaze epochs from :func:`build_et_gaze_epochs_per_scene`,
+        with 'gx' and 'gy' channels.  Its ``.events`` and ``.tmin`` /
+        ``.tmax`` drive the matching MEG epoching.
     threshold : float, optional
         Pearson |r| threshold for flagging components (default: 0.3).
     verbose : bool, optional
@@ -589,23 +744,44 @@ def find_eye_components_xy_correlation(ica: ICA,
         'component', 'r_gx', 'r_gy', 'max_r'.
     """
     if verbose:
-        logger.info("Computing ET xy correlation for ICA components...")
+        logger.info("Computing per-scene ET xy correlation for ICA components...")
 
-    sources = ica.get_sources(meg_raw).get_data()
-    et_data = et_aligned_raw.get_data()
+    # Epoch IC sources using the same scene_on events as the gaze epochs
+    meg_epochs = mne.Epochs(
+        meg_raw,
+        events=et_gaze_epochs.events,
+        event_id=et_gaze_epochs.event_id,
+        tmin=et_gaze_epochs.tmin,
+        tmax=et_gaze_epochs.tmax,
+        baseline=None,
+        preload=True,
+        reject=None,
+        reject_by_annotation=False,
+        verbose=False,
+    )
+    ic_epochs = ica.get_sources(meg_epochs)
 
-    n_common = min(sources.shape[1], et_data.shape[1])
-    sources = sources[:, :n_common]
-    gx = et_data[0, :n_common]
-    gy = et_data[1, :n_common]
+    # Both arrays: (n_epochs, n_channels, n_times) → flatten to (n_ch, n_total)
+    ic_data   = ic_epochs.get_data()    # (n_epochs, n_components, n_times)
+    gaze_data = et_gaze_epochs.get_data()  # (n_epochs, 2, n_times)
 
-    valid = ~((np.abs(gx) < 1.0) & (np.abs(gy) < 1.0))
-    n_valid = valid.sum()
-    frac_valid = n_valid / n_common
+    n_ep = min(ic_data.shape[0], gaze_data.shape[0])
+    ic_data   = ic_data[:n_ep]
+    gaze_data = gaze_data[:n_ep]
+
+    n_comp, n_times = ic_data.shape[1], ic_data.shape[2]
+    sources_flat = ic_data.transpose(1, 0, 2).reshape(n_comp, -1)
+    gx_flat = gaze_data[:, 0, :].ravel()
+    gy_flat = gaze_data[:, 1, :].ravel()
+
+    valid = ~((np.abs(gx_flat) < 1.0) & (np.abs(gy_flat) < 1.0))
+    n_valid = int(valid.sum())
+    n_total = len(gx_flat)
 
     if verbose:
         logger.info(
-            f"Valid (non-blink) samples: {n_valid}/{n_common} ({100*frac_valid:.1f}%)"
+            f"Valid (non-blink) samples: {n_valid}/{n_total} "
+            f"({100*n_valid/n_total:.1f}%) across {n_ep} epochs"
         )
 
     if n_valid < 1000:
@@ -613,12 +789,12 @@ def find_eye_components_xy_correlation(ica: ICA,
             f"Only {n_valid} valid samples for correlation — results may be unreliable"
         )
 
-    gx_v = gx[valid]
-    gy_v = gy[valid]
+    gx_v = gx_flat[valid]
+    gy_v = gy_flat[valid]
 
     records = []
-    for i in range(ica.n_components_):
-        src_v = sources[i, valid]
+    for i in range(n_comp):
+        src_v = sources_flat[i, valid]
         r_gx, _ = pearsonr(src_v, gx_v)
         r_gy, _ = pearsonr(src_v, gy_v)
         max_r = max(abs(r_gx), abs(r_gy))
@@ -716,14 +892,15 @@ def run_ica_et_pipeline(subject_id: int,
                          filter_l_freq: float = 1.0,
                          filter_h_freq: float = 40.0,
                          n_components: Optional[int] = None,
+                         reject: Optional[dict] = None,
                          save_results: bool = True,
                          verbose: bool = True) -> Tuple[ICA, List[int], List[int], pd.DataFrame]:
     """
     Full ICA pipeline with eye tracking XY correlation for one subject/session.
 
-    Loads preprocessed MEG blocks, aligns ET samples to MEG via realign_raw,
-    fits ICA on a filtered copy of the concatenated session, then flags ICs
-    correlated with continuous gaze position.
+    Loads preprocessed MEG blocks, aligns ET samples to MEG per scene trial
+    (60 ms offset, no realign_raw), fits ICA on a filtered copy of the
+    concatenated session, then flags ICs correlated with per-scene gaze.
 
     Parameters
     ----------
@@ -754,6 +931,14 @@ def run_ica_et_pipeline(subject_id: int,
     validate_subject_id(subject_id)
     validate_session(session)
 
+    if reject is None:
+        reject = dict(
+            grad=4000e-13,  # T/m
+            mag=4e-12,      # T
+            eeg=40e-6,      # V
+            eog=250e-6,     # V
+        )
+
     if data_path is None:
         data_path = get_data_path()
         if data_path is None:
@@ -777,22 +962,6 @@ def run_ica_et_pipeline(subject_id: int,
             f"No MEG blocks found for subject {subject_id}, session {session}"
         )
 
-    # Extract event times and align ET before concatenating MEG blocks.
-    # mne.concatenate_raws mutates raws_dict[first_key] in-place; doing
-    # everything per-block first preserves correct per-block durations.
-    samples_df = load_eye_samples(subject_id, session, data_path=data_path)
-    meg_events_per_block = extract_scene_onset_times_meg_per_block(
-        raws_dict, session, verbose=verbose
-    )
-    et_events_per_block = extract_scene_onset_times_et_per_block(
-        subject_id, session, data_path
-    )
-    et_aligned = align_et_to_meg_per_block(
-        raws_dict, samples_df,
-        meg_events_per_block, et_events_per_block,
-        verbose=verbose
-    )
-
     meg_raw = mne.concatenate_raws(
         [raws_dict[k] for k in sorted(raws_dict.keys())],
         verbose=verbose
@@ -802,6 +971,20 @@ def run_ica_et_pipeline(subject_id: int,
             f"Concatenated {len(raws_dict)} blocks; "
             f"total duration: {meg_raw.times[-1]:.1f} s"
         )
+
+    # Load ET samples with the 60 ms MEG→ET scene trigger offset baked in,
+    # so that samples_df['time_in_trial'] == smpl_time - T_meg_trigger.
+    samples_df = load_samples_with_scenes(
+        subject_id, session,
+        data_path=data_path,
+        offset_scene_triggers_ms=60,
+        verbose=verbose,
+    )
+
+    et_gaze_epochs, _ = build_et_gaze_epochs_per_scene(
+        meg_raw, samples_df, session,
+        tmin=-0.1, tmax=8.0, verbose=verbose,
+    )
 
     # Fit ICA on a bandpass-filtered copy (highpass required for ICA stability)
     if verbose:
@@ -813,12 +996,12 @@ def run_ica_et_pipeline(subject_id: int,
         method='fir', fir_window='hamming', verbose=verbose
     )
 
-    ica = compute_ica(raw_for_ica, n_components=n_components, verbose=verbose)
+    ica = compute_ica(raw_for_ica, n_components=n_components, reject=reject, verbose=verbose)
 
-    # Find eye components via ET xy correlation (against unfiltered sources)
+    # Find eye components via per-scene ET xy correlation (unfiltered sources)
     eye_exclusions, scores_df = find_eye_components_xy_correlation(
-        ica, meg_raw, et_aligned,
-        threshold=threshold, verbose=verbose
+        ica, meg_raw, et_gaze_epochs,
+        threshold=threshold, verbose=verbose,
     )
 
     # Find cardiac components
