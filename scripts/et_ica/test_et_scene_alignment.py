@@ -38,7 +38,7 @@ from pyavs.utils.logging import get_logger
 
 logger = get_logger('scripts.test_et_scene_alignment')
 
-ET_OFFSET_MS = 60  # MEG trigger 100 fires 60 ms before ET SCENEID_time
+ET_OFFSET_MS = 0  # no offset correction; time_in_trial = smpl_time - T_et_scene
 
 
 def setup_output_dir(data_path: str, subject_id: int, session: int) -> Path:

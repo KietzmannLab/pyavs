@@ -651,7 +651,7 @@ def build_et_gaze_epochs_per_scene(
     if missing:
         raise KeyError(
             f"samples_df is missing columns {missing}. "
-            "Load with load_samples_with_scenes(offset_scene_triggers_ms=60)."
+            "Load with load_samples_with_scenes(offset_scene_triggers_ms=0)."
         )
 
     n_no_et = 0
@@ -683,6 +683,15 @@ def build_et_gaze_epochs_per_scene(
             f"Gaze epochs built: {n_trials - n_no_et}/{n_trials} trials "
             f"have ET data ({n_no_et} with no scene samples)"
         )
+
+    # --- outlier cleaning: ±1000 px around the global nanmedian per channel ---
+    for ch in range(2):
+        median = np.nanmedian(gaze_data[:, ch, :])
+        outlier_mask = np.abs(gaze_data[:, ch, :] - median) > 1000
+        gaze_data[:, ch, :][outlier_mask] = np.nan
+    if verbose:
+        n_outliers = int(np.isnan(gaze_data).sum())
+        logger.info(f"Outlier samples set to NaN: {n_outliers}")
 
     # --- assemble EpochsArray ---
     try:
@@ -977,7 +986,7 @@ def run_ica_et_pipeline(subject_id: int,
     samples_df = load_samples_with_scenes(
         subject_id, session,
         data_path=data_path,
-        offset_scene_triggers_ms=60,
+        offset_scene_triggers_ms=0,
         verbose=verbose,
     )
 
