@@ -233,7 +233,7 @@ Examples:
     gaze_data_y[outlier_masky] = np.nan
     gaze_epochs._data[:, 1, :] = gaze_data_y
 
-    print("Number of extreme outlier samples set to NaN:", np.sum(outlier_mask))
+    print("Number of extreme outlier samples set to NaN:", np.sum(outlier_maskx) + np.sum(outlier_masky))
 
     # --- save plots ---
     output_dir = setup_output_dir(args.data_path, args.subject, args.session)
