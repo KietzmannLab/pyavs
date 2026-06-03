@@ -38,7 +38,7 @@ from pyavs.utils.logging import get_logger
 
 logger = get_logger('scripts.test_et_scene_alignment')
 
-ET_OFFSET_MS = 0  # no offset correction; time_in_trial = smpl_time - T_et_scene
+ET_OFFSET_MS = 0  # MEG trigger 100 fires 60 ms before ET SCENEID_time
 
 
 def setup_output_dir(data_path: str, subject_id: int, session: int) -> Path:
@@ -109,7 +109,7 @@ def plot_mean_gaze(gaze_epochs: mne.EpochsArray,
 def plot_example_traces(gaze_epochs: mne.EpochsArray,
                         n_traces: int,
                         save_path: str,
-                        rng_seed: int = 42) -> None:
+                        rng_seed: int = 18) -> None:
     data = gaze_epochs.get_data()   # (n_epochs, 2, n_times)
     times = gaze_epochs.times
     n_epochs = data.shape[0]
@@ -177,7 +177,7 @@ Examples:
         data_path=args.data_path,
         preprocessed=True,
         preload=True,
-        verbose=False,
+        verbose=False, runs = [1, 2, 3, 4]
     )
     if not raws_dict:
         print("Error: no MEG blocks found")
@@ -185,7 +185,7 @@ Examples:
 
     meg_raw = mne.concatenate_raws(
         [raws_dict[k] for k in sorted(raws_dict.keys())],
-        verbose=False,
+        verbose=False, on_mismatch = "warn"
     )
     print(f"  MEG duration: {meg_raw.times[-1]:.1f} s  |  "
           f"sfreq: {meg_raw.info['sfreq']:.0f} Hz  |  "
@@ -207,10 +207,33 @@ Examples:
     print("\nBuilding per-scene gaze epochs...")
     gaze_epochs, trials_meta = build_et_gaze_epochs_per_scene(
         meg_raw, samples_df, args.session,
-        tmin=-0.1, tmax=8.0,
+        tmin=0, tmax=4.0,
         verbose=True,
     )
+    # what is the range of et data? 
+    print(f"ET data range: {gaze_epochs.tmin:.1f} to {gaze_epochs.tmax:.1f} s")
+    print("median et xy range across epochs:")
+    print(np.nanmedian(gaze_epochs.get_data(), axis=(0, 2)))
+    print("mean et xy range across epochs:")
+    print(np.nanmean(gaze_epochs.get_data(), axis=(0, 2)))
+    print("sd et xy range across epochs:")
+    print(np.nanstd(gaze_epochs.get_data(), axis=(0, 2)))
     print_coverage(gaze_epochs)
+    
+    # nan all data more than 1000 pix from the median xy across epochs (extreme outliers likely due to tracking loss)
+    median_x = np.nanmedian(gaze_epochs.get_data()[:, 0, :])
+    median_y = np.nanmedian(gaze_epochs.get_data()[:, 1, :])
+    outlier_maskx = np.abs(gaze_epochs.get_data()[:, 0, :] - median_x) > 1000
+    gaze_data_x = gaze_epochs.get_data()[:, 0, :]
+    gaze_data_x[outlier_maskx] = np.nan
+    gaze_epochs._data[:, 0, :] = gaze_data_x
+    
+    outlier_masky = np.abs(gaze_epochs.get_data()[:, 1, :] - median_y) > 1000
+    gaze_data_y = gaze_epochs.get_data()[:, 1, :]
+    gaze_data_y[outlier_masky] = np.nan
+    gaze_epochs._data[:, 1, :] = gaze_data_y
+
+    print("Number of extreme outlier samples set to NaN:", np.sum(outlier_mask))
 
     # --- save plots ---
     output_dir = setup_output_dir(args.data_path, args.subject, args.session)

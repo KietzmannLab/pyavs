@@ -976,7 +976,7 @@ def run_ica_et_pipeline(subject_id: int,
 
     meg_raw = mne.concatenate_raws(
         [raws_dict[k] for k in sorted(raws_dict.keys())],
-        verbose=verbose
+        verbose=verbose, on_mismatch='warn'
     )
     if verbose:
         logger.info(
@@ -995,7 +995,7 @@ def run_ica_et_pipeline(subject_id: int,
 
     et_gaze_epochs, _ = build_et_gaze_epochs_per_scene(
         meg_raw, samples_df, session,
-        tmin=-0.1, tmax=8.0, verbose=verbose,
+        tmin=-0.1, tmax=4.0, verbose=verbose,
     )
 
     # Fit ICA on a bandpass-filtered copy (highpass required for ICA stability)
@@ -1041,7 +1041,7 @@ def run_ica_et_pipeline(subject_id: int,
 
 def compute_ica(raw: mne.io.Raw,
                n_components: Optional[int] = None,
-               method: str = 'infomax',
+               method: str = 'fastica',
                fit_params: Optional[dict] = None,
                max_iter: int = 200,
                random_state: int = 42,
