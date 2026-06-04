@@ -623,15 +623,31 @@ def build_et_gaze_epochs_per_scene(
             ts = get_meg_timestamp(events_repaired, trial=trial, block=int(block),
                                    optimized_timing=False, verbose=False)
             if ts is not None:
-                meg_sample = int(ts - meg_raw.first_samp)
+                # Keep absolute sample index (same coordinate system as
+                # mne.find_events output) so that mne.Epochs(meg_raw, events=...)
+                # in find_eye_components_xy_correlation receives valid sample
+                # numbers. Subtracting first_samp here would cause mne.Epochs to
+                # epoch from wrong time points when first_samp != 0.
                 meta_rows.append({'block': int(block), 'trial_per_block': trial,
-                                   'meg_sample': meg_sample})
+                                   'meg_sample': int(ts)})
 
     if not meta_rows:
         raise RuntimeError("No trial triggers found in repaired MEG events")
 
     trials_meta = pd.DataFrame(meta_rows)
     n_trials = len(trials_meta)
+
+    if verbose:
+        first_few = trials_meta.head(3)
+        logger.info(
+            f"meg_raw.first_samp={meg_raw.first_samp}, sfreq={sfreq:.0f} Hz. "
+            f"First 3 trial samples (absolute): "
+            + ", ".join(
+                f"b{int(r.block)}/t{int(r.trial_per_block)}={int(r.meg_sample)} "
+                f"({(int(r.meg_sample)-meg_raw.first_samp)/sfreq:.2f} s)"
+                for _, r in first_few.iterrows()
+            )
+        )
 
     # MNE events array: [sample, 0, event_id=1]
     mne_events = np.column_stack([
