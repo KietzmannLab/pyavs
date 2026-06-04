@@ -829,6 +829,7 @@ def find_eye_components_xy_correlation(ica: ICA,
                                         meg_raw: mne.io.Raw,
                                         et_gaze_epochs: mne.EpochsArray,
                                         top_fraction: float = 0.05,
+                                        reject: Optional[dict] = None,
                                         verbose: bool = True) -> Tuple[List[int], pd.DataFrame]:
     """
     Find ICA components correlated with per-scene XY gaze position.
@@ -851,6 +852,10 @@ def find_eye_components_xy_correlation(ica: ICA,
     top_fraction : float, optional
         Fraction of components to flag as eye-related, ranked by max_r
         (default: 0.05 → top 5 %).
+    reject : dict or None, optional
+        Amplitude rejection thresholds applied when creating MEG epochs
+        (e.g. ``dict(grad=4000e-13, mag=4e-12)``).  ET epochs are synced
+        to the surviving MEG epochs after dropping.  ``None`` keeps all epochs.
     verbose : bool, optional
         Whether to log results.
 
@@ -863,7 +868,9 @@ def find_eye_components_xy_correlation(ica: ICA,
     if verbose:
         logger.info("Computing per-scene ET xy correlation for ICA components...")
 
-    # Epoch IC sources using the same scene_on events as the gaze epochs
+    n_requested = len(et_gaze_epochs)
+
+    # Epoch IC sources with optional amplitude rejection
     meg_epochs = mne.Epochs(
         meg_raw,
         events=et_gaze_epochs.events,
@@ -872,29 +879,37 @@ def find_eye_components_xy_correlation(ica: ICA,
         tmax=et_gaze_epochs.tmax,
         baseline=None,
         preload=True,
-        reject=None,
-        reject_by_annotation=False,
+        reject=reject,
+        reject_by_annotation=True,
         verbose=False,
     )
     ic_epochs = ica.get_sources(meg_epochs)
 
-    n_meg_ep  = len(meg_epochs)
-    n_gaze_ep = len(et_gaze_epochs)
+    n_meg_ep = len(meg_epochs)
     if verbose:
+        n_dropped = n_requested - n_meg_ep
         logger.info(
-            f"MEG epochs created: {n_meg_ep} / {n_gaze_ep} requested "
-            f"({'OK' if n_meg_ep == n_gaze_ep else 'MISMATCH — check sample coordinates'})"
+            f"MEG epochs: {n_meg_ep} kept, {n_dropped} dropped by rejection "
+            f"({100*n_dropped/n_requested:.1f}%)"
         )
 
     if n_meg_ep == 0:
         raise RuntimeError(
-            "No MEG epochs were created. Events may be outside the raw time range. "
-            "Check that build_et_gaze_epochs_per_scene was called with the same "
-            "concatenated raw as this function."
+            "No MEG epochs survived rejection. Check reject thresholds or "
+            "that build_et_gaze_epochs_per_scene was called on the same raw."
         )
 
+    # Sync ET epochs to surviving MEG epochs (rejection may have dropped some)
+    if n_meg_ep < n_requested:
+        meg_samples = set(meg_epochs.events[:, 0])
+        keep = np.array([
+            i for i, ev in enumerate(et_gaze_epochs.events)
+            if ev[0] in meg_samples
+        ])
+        et_gaze_epochs = et_gaze_epochs[keep]
+
     # Both arrays: (n_epochs, n_channels, n_times) → flatten to (n_ch, n_total)
-    ic_data   = ic_epochs.get_data()    # (n_epochs, n_components, n_times)
+    ic_data   = ic_epochs.get_data()       # (n_epochs, n_components, n_times)
     gaze_data = et_gaze_epochs.get_data()  # (n_epochs, 2, n_times)
 
     n_ep = min(ic_data.shape[0], gaze_data.shape[0])
@@ -1136,7 +1151,7 @@ def run_ica_et_pipeline(subject_id: int,
     # Find eye components via per-scene ET xy correlation (unfiltered sources)
     eye_exclusions, scores_df = find_eye_components_xy_correlation(
         ica, meg_raw, et_gaze_epochs,
-        top_fraction=top_fraction, verbose=verbose,
+        top_fraction=top_fraction, reject=reject, verbose=verbose,
     )
 
     # Find cardiac components
