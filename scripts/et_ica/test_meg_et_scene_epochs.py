@@ -49,7 +49,8 @@ def setup_output_dir(data_path: str, subject_id: int, session: int) -> Path:
 
 def plot_gfp(epochs: mne.Epochs, save_path: str) -> None:
     evoked = epochs.average(picks='meg')
-    gfp = np.std(evoked.get_data(), axis=0)
+    # nanmean across channels, ignoring NaNs (e.g. from dropped epochs)
+    gfp = np.nanmean(evoked.data, axis=0)  # (n_times,) average across channels
 
     sns.set_context("poster")
     plt.figure(figsize=(10, 4))
