@@ -1100,7 +1100,7 @@ def save_ica_exclusions(eye_exclusions: List[int],
 
     subject_key = f"as{subject_id:02d}"
     session_key = str(session)
-    all_exclusions = sorted(set(eye_exclusions + cardiac_exclusions))
+    all_exclusions = sorted({int(c) for c in eye_exclusions + cardiac_exclusions})
 
     # Read-modify-write so multiple sessions accumulate in one file
     data: Dict[str, Any] = {}
@@ -1116,7 +1116,7 @@ def save_ica_exclusions(eye_exclusions: List[int],
             f"Exclusions for {subject_key} session {session} already exist: {path}"
         )
 
-    data[subject_key][session_key] = all_exclusions
+    data[subject_key][session_key] = [int(c) for c in all_exclusions]
 
     with open(path, 'w') as f:
         json.dump(data, f, indent=2)
