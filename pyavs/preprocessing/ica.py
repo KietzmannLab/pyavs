@@ -555,7 +555,7 @@ def build_et_gaze_epochs_per_scene(
         samples_df: pd.DataFrame,
         session: int,
         tmin: float = -0.1,
-        tmax: float = 8.0,
+        tmax: float = 4.0,
         verbose: bool = True) -> Tuple[mne.EpochsArray, pd.DataFrame]:
     """
     Align ET gaze samples to MEG trial-by-trial and return as an EpochsArray.
@@ -588,7 +588,7 @@ def build_et_gaze_epochs_per_scene(
     tmin : float
         Epoch start in seconds relative to MEG scene_on trigger (default -0.1).
     tmax : float
-        Epoch end in seconds relative to MEG scene_on trigger (default 8.0).
+        Epoch end in seconds relative to MEG scene_on trigger (default 4.0).
     verbose : bool
         Log per-trial alignment statistics.
 
@@ -729,6 +729,96 @@ def build_et_gaze_epochs_per_scene(
     )
 
     return gaze_epochs, meta_out
+
+
+def build_meg_scene_epochs_with_et(
+        meg_raw: mne.io.Raw,
+        samples_df: pd.DataFrame,
+        session: int,
+        tmin: float = -0.1,
+        tmax: float = 4.0,
+        picks: Optional[Union[str, list]] = 'meg',
+        verbose: bool = True) -> Tuple[mne.Epochs, pd.DataFrame]:
+    """
+    Build MEG scene epochs with gaze channels (gx, gy) appended.
+
+    First builds ET gaze epochs via :func:`build_et_gaze_epochs_per_scene`
+    to obtain the trial events, then creates matching MEG epochs (no amplitude
+    rejection, so epoch counts are guaranteed to stay in sync), and finally
+    appends the two gaze channels to the MEG epoch object.
+
+    Parameters
+    ----------
+    meg_raw : mne.io.Raw
+        Concatenated MEG session (STI101 required).
+    samples_df : pd.DataFrame
+        ET samples from
+        ``load_samples_with_scenes(offset_scene_triggers_ms=0)``.
+    session : int
+        Session number.
+    tmin : float
+        Epoch start in seconds relative to MEG scene_on trigger (default -0.1).
+    tmax : float
+        Epoch end in seconds relative to MEG scene_on trigger (default 4.0).
+    picks : str or list, optional
+        MEG channel selection passed to ``mne.Epochs`` (default: ``'meg'``).
+    verbose : bool
+        Log progress.
+
+    Returns
+    -------
+    epochs : mne.Epochs
+        Scene epochs with MEG channels followed by ``gx`` / ``gy``.
+        Shape ``(n_trials, n_meg_picks + 2, n_times)``.
+    trials_meta : pd.DataFrame
+        Trial metadata with ``block`` and ``trial_per_block`` columns.
+    """
+    et_gaze_epochs, trials_meta = build_et_gaze_epochs_per_scene(
+        meg_raw, samples_df, session, tmin=tmin, tmax=tmax, verbose=verbose
+    )
+
+    meg_epochs = mne.Epochs(
+        meg_raw,
+        events=et_gaze_epochs.events,
+        event_id=et_gaze_epochs.event_id,
+        tmin=tmin,
+        tmax=tmax,
+        picks=picks,
+        baseline=None,
+        preload=True,
+        reject=None,
+        reject_by_annotation=False,
+        verbose=False,
+    )
+
+    n_meg = len(meg_epochs)
+    n_et  = len(et_gaze_epochs)
+
+    if n_meg != n_et:
+        logger.warning(
+            f"MEG epoch count ({n_meg}) != ET epoch count ({n_et}); "
+            "syncing by keeping only trials present in MEG epochs."
+        )
+        meg_samples = set(meg_epochs.events[:, 0])
+        keep = np.array([
+            i for i, ev in enumerate(et_gaze_epochs.events)
+            if ev[0] in meg_samples
+        ])
+        et_gaze_epochs = et_gaze_epochs[keep]
+        trials_meta = trials_meta.iloc[keep].reset_index(drop=True)
+
+    meg_epochs.add_channels([et_gaze_epochs], force_update_info=True)
+    meg_epochs.metadata = trials_meta.reset_index(drop=True)
+
+    if verbose:
+        n_ch = len(meg_epochs.ch_names)
+        logger.info(
+            f"Scene epochs built: {len(meg_epochs)} epochs, "
+            f"{n_ch} channels ({n_ch - 2} MEG + 2 gaze), "
+            f"{tmin:.1f}–{tmax:.1f} s"
+        )
+
+    return meg_epochs, trials_meta
 
 
 # ---------------------------------------------------------------------------
@@ -1091,7 +1181,7 @@ def compute_ica(raw: mne.io.Raw,
     raw : mne.io.Raw
         MEG raw data.
     n_components : int, optional
-        Number of ICA components (default: None, uses min(64, n_meg_channels)).
+        Number of ICA components (default: None, uses min(80, n_meg_channels)).
     method : str, optional
         ICA algorithm (default: 'infomax').
     fit_params : dict, optional
@@ -1124,9 +1214,9 @@ def compute_ica(raw: mne.io.Raw,
 
     if n_components is None:
         if picks == 'meg':
-            n_components = min(64, len(mne.pick_types(raw.info, meg=True)))
+            n_components = min(80, len(mne.pick_types(raw.info, meg=True)))
         else:
-            n_components = min(64, len(mne.pick_channels(raw.ch_names, include=picks)))
+            n_components = min(80, len(mne.pick_channels(raw.ch_names, include=picks)))
 
     ica = ICA(
         n_components=n_components,
