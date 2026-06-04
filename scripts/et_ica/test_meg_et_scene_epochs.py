@@ -48,7 +48,7 @@ def setup_output_dir(data_path: str, subject_id: int, session: int) -> Path:
 
 
 def plot_channel_median(epochs: mne.Epochs, save_path: str) -> None:
-    evoked = epochs.average(picks='meg')
+    evoked = epochs.average(picks='meg', method='median')
     data = evoked.get_data()  # (n_channels, n_times)
 
     sns.set_context("poster")

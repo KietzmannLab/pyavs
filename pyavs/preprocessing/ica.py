@@ -1241,14 +1241,22 @@ def run_ica_et_pipeline(subject_id: int,
 
     ica = compute_ica(raw_for_ica, n_components=n_components, reject=reject, verbose=verbose)
 
-    # Find eye components via per-scene ET xy correlation (unfiltered sources)
+    # Broadband-filtered copy for correlation epoching (0.2–100 Hz).
+    # Removes slow drifts that inflate epoch variance without carrying
+    # eye-movement information.
+    meg_raw_corr = meg_raw.copy().filter(
+        l_freq=0.2, h_freq=100.0,
+        method='fir', fir_window='hamming', verbose=verbose
+    )
+
+    # Find eye components via per-scene ET xy correlation
     eye_exclusions, scores_df = find_eye_components_xy_correlation(
-        ica, meg_raw, et_gaze_epochs,
+        ica, meg_raw_corr, et_gaze_epochs,
         top_fraction=top_fraction, reject=reject, verbose=verbose,
     )
 
-    # Find cardiac components
-    cardiac_exclusions = find_cardiac_components(ica, meg_raw, verbose=verbose)
+    # Find cardiac components (use same filtered raw for consistency)
+    cardiac_exclusions = find_cardiac_components(ica, meg_raw_corr, verbose=verbose)
 
     all_exclusions = list(set(eye_exclusions + cardiac_exclusions))
     ica.exclude = all_exclusions
