@@ -870,51 +870,58 @@ def find_eye_components_xy_correlation(ica: ICA,
 
     n_requested = len(et_gaze_epochs)
 
-    # Epoch IC sources with optional amplitude rejection
+    # Step 1: MEG epochs without rejection so the count matches et_gaze_epochs.
     meg_epochs = mne.Epochs(
         meg_raw,
         events=et_gaze_epochs.events,
         event_id=et_gaze_epochs.event_id,
         tmin=et_gaze_epochs.tmin,
         tmax=et_gaze_epochs.tmax,
+        picks='meg',
         baseline=None,
         preload=True,
-        reject=reject,
-        reject_by_annotation=True,
+        reject=None,
+        reject_by_annotation=False,
         verbose=False,
     )
-    ic_epochs = ica.get_sources(meg_epochs)
 
-    n_meg_ep = len(meg_epochs)
-    if verbose:
-        n_dropped = n_requested - n_meg_ep
-        logger.info(
-            f"MEG epochs: {n_meg_ep} kept, {n_dropped} dropped by rejection "
-            f"({100*n_dropped/n_requested:.1f}%)"
-        )
-
-    if n_meg_ep == 0:
-        raise RuntimeError(
-            "No MEG epochs survived rejection. Check reject thresholds or "
-            "that build_et_gaze_epochs_per_scene was called on the same raw."
-        )
-
-    # Sync ET epochs to surviving MEG epochs (rejection may have dropped some)
-    if n_meg_ep < n_requested:
+    # Step 2: attach gaze channels BEFORE rejection.
+    # Sync for any out-of-range drops that happened at epoch creation.
+    if len(meg_epochs) != n_requested:
         meg_samples = set(meg_epochs.events[:, 0])
         keep = np.array([
             i for i, ev in enumerate(et_gaze_epochs.events)
             if ev[0] in meg_samples
         ])
         et_gaze_epochs = et_gaze_epochs[keep]
+    meg_epochs.add_channels([et_gaze_epochs], force_update_info=True)
 
-    # Both arrays: (n_epochs, n_channels, n_times) → flatten to (n_ch, n_total)
-    ic_data   = ic_epochs.get_data()       # (n_epochs, n_components, n_times)
-    gaze_data = et_gaze_epochs.get_data()  # (n_epochs, 2, n_times)
+    # Step 3: apply rejection on the combined object — MEG and gaze rows are
+    # dropped together, so sync is guaranteed with no bookkeeping.
+    if reject is not None:
+        meg_epochs.drop_bad(reject=reject)
 
-    n_ep = min(ic_data.shape[0], gaze_data.shape[0])
-    ic_data   = ic_data[:n_ep]
-    gaze_data = gaze_data[:n_ep]
+    n_kept = len(meg_epochs)
+    if verbose:
+        n_dropped = n_requested - n_kept
+        logger.info(
+            f"MEG epochs: {n_kept} kept, {n_dropped} dropped by rejection "
+            f"({100*n_dropped/n_requested:.1f}%)"
+        )
+
+    if n_kept == 0:
+        raise RuntimeError(
+            "No MEG epochs survived rejection. Check reject thresholds or "
+            "that build_et_gaze_epochs_per_scene was called on the same raw."
+        )
+
+    # Step 4: extract IC sources (MEG channels only) and gaze from the same object.
+    ic_epochs = ica.get_sources(meg_epochs.copy().pick('meg'))
+    gaze_data = meg_epochs.get_data(picks=['gx', 'gy'])  # (n_ep, 2, n_times)
+
+    # Flatten epochs × time → pseudo-continuous signals
+    ic_data = ic_epochs.get_data()   # (n_ep, n_components, n_times)
+    n_ep    = ic_data.shape[0]
 
     n_comp, n_times = ic_data.shape[1], ic_data.shape[2]
     sources_flat = ic_data.transpose(1, 0, 2).reshape(n_comp, -1)
