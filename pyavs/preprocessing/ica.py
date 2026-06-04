@@ -788,6 +788,21 @@ def find_eye_components_xy_correlation(ica: ICA,
     )
     ic_epochs = ica.get_sources(meg_epochs)
 
+    n_meg_ep  = len(meg_epochs)
+    n_gaze_ep = len(et_gaze_epochs)
+    if verbose:
+        logger.info(
+            f"MEG epochs created: {n_meg_ep} / {n_gaze_ep} requested "
+            f"({'OK' if n_meg_ep == n_gaze_ep else 'MISMATCH — check sample coordinates'})"
+        )
+
+    if n_meg_ep == 0:
+        raise RuntimeError(
+            "No MEG epochs were created. Events may be outside the raw time range. "
+            "Check that build_et_gaze_epochs_per_scene was called with the same "
+            "concatenated raw as this function."
+        )
+
     # Both arrays: (n_epochs, n_channels, n_times) → flatten to (n_ch, n_total)
     ic_data   = ic_epochs.get_data()    # (n_epochs, n_components, n_times)
     gaze_data = et_gaze_epochs.get_data()  # (n_epochs, 2, n_times)
