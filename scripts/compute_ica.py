@@ -195,12 +195,12 @@ Examples:
 
     parser.add_argument('--data-path', type=str, default='/share/klab/datasets/avs/',
                         help='Path to AVS data directory')
-    parser.add_argument('--n-jobs', type=int, default=1,
+    parser.add_argument('--n-jobs', type=int, default=-1,
                         help='Parallel jobs for batch processing (default: 1)')
     parser.add_argument('--skip-existing', action='store_true',
                         help='Skip subject-sessions where ICA .fif already exists')
-    parser.add_argument('--top-fraction', type=float, default=0.05,
-                        help='Fraction of components to flag as eye-related (default: 0.05)')
+    parser.add_argument('--top-fraction', type=float, default=0.04,
+                        help='Fraction of components to flag as eye-related (default: 0.04)')
     parser.add_argument('--n-components', type=int, default=None,
                         help='Number of ICA components (default: min(80, n_meg_channels))')
     parser.add_argument('--no-save', action='store_true',
