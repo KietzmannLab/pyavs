@@ -1040,6 +1040,93 @@ def save_et_scores(scores_df: pd.DataFrame,
     return path
 
 
+def save_ica_exclusions(eye_exclusions: List[int],
+                        cardiac_exclusions: List[int],
+                        subject_id: int,
+                        session: int,
+                        data_path: Optional[str] = None,
+                        overwrite: bool = True) -> str:
+    """
+    Save ICA component exclusions to a JSON file in the BIDS derivatives directory.
+
+    The format mirrors the legacy ``ex_components.json`` used by
+    :func:`apply_ica_to_raws`:
+
+    .. code-block:: json
+
+        {"as01": {"1": [0, 3, 12, 15], "2": [1, 5, 22]}}
+
+    If the file already exists its contents are merged (read-modify-write),
+    so successive sessions accumulate in the same file.
+
+    Parameters
+    ----------
+    eye_exclusions : list of int
+        ICA component indices flagged as eye-movement artefacts.
+    cardiac_exclusions : list of int
+        ICA component indices flagged as cardiac artefacts.
+    subject_id : int
+        Subject ID.
+    session : int
+        Session number.
+    data_path : str, optional
+        Path to data directory.
+    overwrite : bool, optional
+        Whether to overwrite an existing session entry (default: True).
+
+    Returns
+    -------
+    str
+        Path to the saved JSON file.
+    """
+    validate_subject_id(subject_id)
+    validate_session(session)
+
+    if data_path is None:
+        data_path = get_data_path()
+        if data_path is None:
+            raise ValueError("No data path configured")
+
+    meg_dir = os.path.join(
+        data_path, 'derivatives', 'pyavs',
+        f"sub-{subject_id:02d}", f"ses-{session:02d}", 'meg'
+    )
+    os.makedirs(meg_dir, exist_ok=True)
+
+    filename = (
+        f"sub-{subject_id:02d}_ses-{session:02d}_task-avs_ica-exclusions.json"
+    )
+    path = os.path.join(meg_dir, filename)
+
+    subject_key = f"as{subject_id:02d}"
+    session_key = str(session)
+    all_exclusions = sorted(set(eye_exclusions + cardiac_exclusions))
+
+    # Read-modify-write so multiple sessions accumulate in one file
+    data: Dict[str, Any] = {}
+    if os.path.exists(path):
+        with open(path, 'r') as f:
+            data = json.load(f)
+
+    if subject_key not in data:
+        data[subject_key] = {}
+
+    if session_key in data[subject_key] and not overwrite:
+        raise FileExistsError(
+            f"Exclusions for {subject_key} session {session} already exist: {path}"
+        )
+
+    data[subject_key][session_key] = all_exclusions
+
+    with open(path, 'w') as f:
+        json.dump(data, f, indent=2)
+
+    logger.info(
+        f"Saved ICA exclusions ({len(all_exclusions)} components) to: {path}"
+    )
+    return path
+
+
 # ---------------------------------------------------------------------------
 # Full pipeline
 # ---------------------------------------------------------------------------
@@ -1175,6 +1262,10 @@ def run_ica_et_pipeline(subject_id: int,
     if save_results:
         save_ica(ica, subject_id, session, data_path=data_path)
         save_et_scores(scores_df, subject_id, session, data_path=data_path)
+        save_ica_exclusions(
+            eye_exclusions, cardiac_exclusions,
+            subject_id, session, data_path=data_path,
+        )
 
     return ica, eye_exclusions, cardiac_exclusions, scores_df
 
@@ -1587,6 +1678,7 @@ def apply_ica_to_raws(raws_dict: Dict[Any, mne.io.Raw],
                      use_precomputed: bool = True,
                      ica_solutions_dir: Optional[str] = None,
                      ica_exclusions_file: Optional[str] = None,
+                     data_path: Optional[str] = None,
                      compute_new_ica: bool = False,
                      find_artifacts: bool = True,
                      verbose: bool = True) -> Dict[Any, mne.io.Raw]:
@@ -1675,26 +1767,57 @@ def apply_ica_to_raws(raws_dict: Dict[Any, mne.io.Raw],
             ica = mne.preprocessing.read_ica(ica_solution_path, verbose=verbose)
 
             try:
-                with open(ica_exclusions_file, 'r') as f:
-                    exclusions_data = json.load(f)
-
                 subject_key = f"as{subject_id:02d}"
-                if subject_key in exclusions_data:
-                    session_idx = session - 1
-                    if session_idx < len(exclusions_data[subject_key]):
-                        exclude_components = exclusions_data[subject_key][session_idx]
-                        ica.exclude = exclude_components
+                session_key = str(session)
+                exclude_components = None
+
+                # --- 1. Try new per-session BIDS exclusions JSON first ---
+                _data_path = data_path or get_data_path()
+                if _data_path:
+                    bids_excl_path = os.path.join(
+                        _data_path, 'derivatives', 'pyavs',
+                        f"sub-{subject_id:02d}", f"ses-{session:02d}", 'meg',
+                        f"sub-{subject_id:02d}_ses-{session:02d}_task-avs_ica-exclusions.json"
+                    )
+                else:
+                    bids_excl_path = None
+
+                if bids_excl_path and os.path.exists(bids_excl_path):
+                    with open(bids_excl_path, 'r') as f:
+                        bids_data = json.load(f)
+                    if subject_key in bids_data and session_key in bids_data[subject_key]:
+                        exclude_components = bids_data[subject_key][session_key]
                         if verbose:
                             logger.info(
-                                f"Excluding {len(exclude_components)} ICA components: "
-                                f"{exclude_components}"
+                                f"Loaded exclusions from BIDS path: {bids_excl_path}"
                             )
-                    else:
-                        if verbose:
-                            logger.warning(f"No exclusions found for session {session}")
+
+                # --- 2. Fall back to legacy ex_components.json ---
+                if exclude_components is None:
+                    with open(ica_exclusions_file, 'r') as f:
+                        exclusions_data = json.load(f)
+                    if subject_key in exclusions_data:
+                        session_idx = session - 1
+                        subj_excl = exclusions_data[subject_key]
+                        # Support both list-indexed and dict-keyed formats
+                        if isinstance(subj_excl, list):
+                            if session_idx < len(subj_excl):
+                                exclude_components = subj_excl[session_idx]
+                        elif isinstance(subj_excl, dict) and session_key in subj_excl:
+                            exclude_components = subj_excl[session_key]
+
+                if exclude_components is not None:
+                    ica.exclude = exclude_components
+                    if verbose:
+                        logger.info(
+                            f"Excluding {len(exclude_components)} ICA components: "
+                            f"{exclude_components}"
+                        )
                 else:
                     if verbose:
-                        logger.warning(f"No exclusions found for subject {subject_id}")
+                        logger.warning(
+                            f"No exclusions found for {subject_key} session {session}"
+                        )
 
             except Exception as e:
                 if verbose:
