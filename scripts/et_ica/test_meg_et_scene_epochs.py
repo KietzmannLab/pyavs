@@ -47,21 +47,17 @@ def setup_output_dir(data_path: str, subject_id: int, session: int) -> Path:
     return output_dir
 
 
-def plot_channel_median(epochs: mne.Epochs, save_path: str,
-                        l_freq: float = 0.2, h_freq: float = 100.0) -> None:
-    ep = epochs.copy().pick('meg')
-    ep.filter(l_freq, h_freq, method='fir', fir_window='hamming', verbose=False)
-
-    evoked = ep.average()
-    # Median across channels at each time point
-    median_tc = np.median(evoked.get_data(), axis=0)
+def plot_channel_median(epochs: mne.Epochs, save_path: str) -> None:
+    evoked = epochs.average(picks='meg')
+    data = evoked.get_data()  # (n_channels, n_times)
 
     sns.set_context("poster")
     plt.figure(figsize=(10, 4))
-    plt.plot(evoked.times, median_tc * 1e13, color='cornflowerblue')
+    for ch_data in data:
+        plt.plot(evoked.times, ch_data * 1e13, color='cornflowerblue', alpha=0.15)
     plt.axvline(x=0.0, color='salmon', alpha=0.8)
     plt.xlabel('time [s]')
-    plt.ylabel('median channel amplitude [fT/cm]')
+    plt.ylabel('amplitude [fT/cm]')
     sns.despine()
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
@@ -142,6 +138,9 @@ Examples:
     )
     print(f"  {meg_raw.times[-1]:.1f} s  |  {meg_raw.info['sfreq']:.0f} Hz  |  "
           f"{len(raws_dict)} blocks")
+
+    print("\nFiltering MEG raw (0.2–100 Hz)...")
+    meg_raw.filter(0.2, 100.0, method='fir', fir_window='hamming', verbose=False)
 
     # --- load ET samples ---
     print(f"\nLoading ET samples (offset={ET_OFFSET_MS} ms)...")
