@@ -443,12 +443,18 @@ def main():
     print(f"\nTraining set: {len(train_meg_c1)} fixations total")
     assert len(train_meg_c1) == len(train_meta), "MEG / metadata length mismatch"
 
+    # Cropped time vectors matching the saved MEG arrays
+    t_idx_ref = int(np.argmin(np.abs(times_ref - C1_TIME_S)))
+    c1_times_ref = times_ref[np.array([t_idx_ref])]  # shape (1,)
+    c2_indices_ref = [int(np.argmin(np.abs(times_ref - t))) for t in C2_TIMES_S]
+    c2_times_ref = times_ref[c2_indices_ref]  # shape (61,)
+
     # Save challenge 1 training package
     if do_c1:
         c1_train_dir = out / 'release' / 'challenge1' / 'training'
         c1_train_dir.mkdir(parents=True, exist_ok=True)
         np.save(c1_train_dir / 'meg_110ms.npy', train_meg_c1)
-        _save_training_common(c1_train_dir, train_meta, times_ref, channel_names_ref)
+        _save_training_common(c1_train_dir, train_meta, c1_times_ref, channel_names_ref)
         print(f"\nSaving challenge1 training grad info...")
         _save_training_grad_info(c1_train_dir, args.train_subjects, args.sessions, data_path)
         print(f"Challenge 1 training data saved to {c1_train_dir}")
@@ -460,7 +466,7 @@ def main():
         c2_train_dir = out / 'release' / 'challenge2' / 'training'
         c2_train_dir.mkdir(parents=True, exist_ok=True)
         np.save(c2_train_dir / 'meg_c2.npy', train_meg_c2)
-        _save_training_common(c2_train_dir, train_meta, times_ref, channel_names_ref)
+        _save_training_common(c2_train_dir, train_meta, c2_times_ref, channel_names_ref)
         print(f"\nSaving challenge2 training grad info...")
         _save_training_grad_info(c2_train_dir, args.train_subjects, args.sessions, data_path)
         print(f"Challenge 2 training data saved to {c2_train_dir}")
