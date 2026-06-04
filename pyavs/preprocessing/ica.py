@@ -958,18 +958,20 @@ def find_eye_components_xy_correlation(ica: ICA,
         records.append({'component': i, 'r_gx': r_gx, 'r_gy': r_gy, 'max_r': max_r})
 
     scores_df = pd.DataFrame(records)
+    scores_df['abs_r_gx'] = scores_df['r_gx'].abs()
+    scores_df['abs_r_gy'] = scores_df['r_gy'].abs()
     n_flag = max(1, int(np.ceil(n_comp * top_fraction)))
-    eye_components = (
-        scores_df.nlargest(n_flag, 'max_r')['component'].tolist()
-    )
+    top_gx = set(scores_df.nlargest(n_flag, 'abs_r_gx')['component'])
+    top_gy = set(scores_df.nlargest(n_flag, 'abs_r_gy')['component'])
+    eye_components = sorted(top_gx | top_gy)
 
     if verbose:
         flagged = scores_df[scores_df['component'].isin(eye_components)].sort_values(
             'max_r', ascending=False
         )
         logger.info(
-            f"Top {top_fraction*100:.0f}% eye components "
-            f"({n_flag}/{n_comp}): {eye_components}"
+            f"Top {top_fraction*100:.0f}% by |r_gx| ∪ top {top_fraction*100:.0f}% by |r_gy|: "
+            f"{len(eye_components)} components {eye_components}"
         )
         for _, row in flagged.iterrows():
             logger.info(
