@@ -47,17 +47,21 @@ def setup_output_dir(data_path: str, subject_id: int, session: int) -> Path:
     return output_dir
 
 
-def plot_gfp(epochs: mne.Epochs, save_path: str) -> None:
-    evoked = epochs.average(picks='meg')
-    # nanmean across channels, ignoring NaNs (e.g. from dropped epochs)
-    gfp = np.nanmean(evoked.data, axis=0)  # (n_times,) average across channels
+def plot_channel_median(epochs: mne.Epochs, save_path: str,
+                        l_freq: float = 0.2, h_freq: float = 100.0) -> None:
+    ep = epochs.copy().pick('meg')
+    ep.filter(l_freq, h_freq, method='fir', fir_window='hamming', verbose=False)
+
+    evoked = ep.average()
+    # Median across channels at each time point
+    median_tc = np.median(evoked.get_data(), axis=0)
 
     sns.set_context("poster")
     plt.figure(figsize=(10, 4))
-    plt.plot(evoked.times, gfp * 1e13, color='cornflowerblue')
+    plt.plot(evoked.times, median_tc * 1e13, color='cornflowerblue')
     plt.axvline(x=0.0, color='salmon', alpha=0.8)
     plt.xlabel('time [s]')
-    plt.ylabel('gfp [fT/cm]')
+    plt.ylabel('median channel amplitude [fT/cm]')
     sns.despine()
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
@@ -164,9 +168,9 @@ Examples:
     prefix = f"sub-{args.subject:02d}_ses-{args.session:02d}"
 
     print("\nSaving evoked plots...")
-    plot_gfp(
+    plot_channel_median(
         epochs,
-        save_path=str(output_dir / f"{prefix}_scene_evoked_gfp.png"),
+        save_path=str(output_dir / f"{prefix}_scene_evoked_median.png"),
     )
     plot_gaze_evoked(
         epochs, channel='gx',
