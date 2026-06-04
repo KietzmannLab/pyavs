@@ -1090,12 +1090,9 @@ def run_ica_et_pipeline(subject_id: int,
 
     if reject is None:
         reject = dict(
-            grad=4000e-12,  # T/m
-            mag=4e-11,      # T
-            eeg=40e-6,      # V
-            eog=250e-6,     # V
+            grad=4000e-13,  # T/m
+            mag=4e-12,      # T
         )
-
     if data_path is None:
         data_path = get_data_path()
         if data_path is None:

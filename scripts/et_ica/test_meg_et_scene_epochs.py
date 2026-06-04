@@ -152,7 +152,7 @@ Examples:
     epochs, trials_meta = build_meg_scene_epochs_with_et(
         meg_raw, samples_df, args.session,
         tmin=-0.1, tmax=4.0,
-        verbose=True,
+        verbose=True, 
     )
     print(f"  {len(epochs)} epochs  |  {len(epochs.ch_names)} channels  "
           f"|  {epochs.tmin:.1f}–{epochs.tmax:.1f} s")
