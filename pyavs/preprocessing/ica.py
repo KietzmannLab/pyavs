@@ -1735,6 +1735,77 @@ def apply_ica_to_raws(raws_dict: Dict[Any, mne.io.Raw],
         if verbose:
             logger.info("Attempting to use precomputed ICA solutions...")
 
+        _data_path = data_path or get_data_path()
+
+        # --- 1. BIDS derivatives ICA (primary) ---
+        if _data_path:
+            bids_ica_path = os.path.join(
+                _data_path, 'derivatives', 'pyavs',
+                f"sub-{subject_id:02d}", f"ses-{session:02d}", 'meg',
+                f"sub-{subject_id:02d}_ses-{session:02d}_task-avs_ica.fif"
+            )
+            bids_excl_path = os.path.join(
+                _data_path, 'derivatives', 'pyavs',
+                f"sub-{subject_id:02d}", f"ses-{session:02d}", 'meg',
+                f"sub-{subject_id:02d}_ses-{session:02d}_task-avs_ica-exclusions.json"
+            )
+        else:
+            bids_ica_path = None
+            bids_excl_path = None
+
+        if bids_ica_path and os.path.exists(bids_ica_path):
+            try:
+                if verbose:
+                    logger.info(f"Loading ICA from BIDS derivatives: {bids_ica_path}")
+                ica = mne.preprocessing.read_ica(bids_ica_path, verbose=verbose)
+
+                subject_key = f"as{subject_id:02d}"
+                session_key = str(session)
+                exclude_components = None
+
+                if bids_excl_path and os.path.exists(bids_excl_path):
+                    with open(bids_excl_path, 'r') as f:
+                        bids_data = json.load(f)
+                    if subject_key in bids_data and session_key in bids_data[subject_key]:
+                        exclude_components = bids_data[subject_key][session_key]
+                        if verbose:
+                            logger.info(
+                                f"Loaded exclusions from BIDS derivatives: {bids_excl_path}"
+                            )
+
+                if exclude_components is not None:
+                    ica.exclude = exclude_components
+                    if verbose:
+                        logger.info(
+                            f"Excluding {len(exclude_components)} ICA components: "
+                            f"{exclude_components}"
+                        )
+                else:
+                    if verbose:
+                        logger.warning(
+                            f"No BIDS exclusions found for "
+                            f"sub-{subject_id:02d} ses-{session:02d}; "
+                            f"using ica.exclude from .fif"
+                        )
+
+                for block_id, raw in raws_dict.items():
+                    if verbose:
+                        logger.info(f"Applying BIDS derivatives ICA to block {block_id}")
+                    cleaned_raws[block_id] = apply_ica(raw, ica, verbose=verbose)
+
+                if verbose:
+                    logger.info("Successfully applied BIDS derivatives ICA to all blocks")
+
+                return cleaned_raws
+
+            except Exception as e:
+                if verbose:
+                    logger.warning(
+                        f"Failed to apply BIDS derivatives ICA ({e}); "
+                        f"falling back to legacy AVS-UTILS ICA"
+                    )
+
+        # --- 2. Legacy AVS-UTILS ICA (fallback) ---
         if ica_solutions_dir is None or ica_exclusions_file is None:
             shared_ica_dir = '/share/klab/datasets/avs/AVS-UTILS/ica'
 
@@ -1770,7 +1841,7 @@ def apply_ica_to_raws(raws_dict: Dict[Any, mne.io.Raw],
 
         try:
             if verbose:
-                logger.info(f"Loading precomputed ICA from: {ica_solution_path}")
+                logger.info(f"Loading legacy ICA from: {ica_solution_path}")
 
             ica = mne.preprocessing.read_ica(ica_solution_path, verbose=verbose)
 
@@ -1779,40 +1850,16 @@ def apply_ica_to_raws(raws_dict: Dict[Any, mne.io.Raw],
                 session_key = str(session)
                 exclude_components = None
 
-                # --- 1. Try new per-session BIDS exclusions JSON first ---
-                _data_path = data_path or get_data_path()
-                if _data_path:
-                    bids_excl_path = os.path.join(
-                        _data_path, 'derivatives', 'pyavs',
-                        f"sub-{subject_id:02d}", f"ses-{session:02d}", 'meg',
-                        f"sub-{subject_id:02d}_ses-{session:02d}_task-avs_ica-exclusions.json"
-                    )
-                else:
-                    bids_excl_path = None
-
-                if bids_excl_path and os.path.exists(bids_excl_path):
-                    with open(bids_excl_path, 'r') as f:
-                        bids_data = json.load(f)
-                    if subject_key in bids_data and session_key in bids_data[subject_key]:
-                        exclude_components = bids_data[subject_key][session_key]
-                        if verbose:
-                            logger.info(
-                                f"Loaded exclusions from BIDS path: {bids_excl_path}"
-                            )
-
-                # --- 2. Fall back to legacy ex_components.json ---
-                if exclude_components is None:
-                    with open(ica_exclusions_file, 'r') as f:
-                        exclusions_data = json.load(f)
-                    if subject_key in exclusions_data:
-                        session_idx = session - 1
-                        subj_excl = exclusions_data[subject_key]
-                        # Support both list-indexed and dict-keyed formats
-                        if isinstance(subj_excl, list):
-                            if session_idx < len(subj_excl):
-                                exclude_components = subj_excl[session_idx]
-                        elif isinstance(subj_excl, dict) and session_key in subj_excl:
-                            exclude_components = subj_excl[session_key]
+                with open(ica_exclusions_file, 'r') as f:
+                    exclusions_data = json.load(f)
+                if subject_key in exclusions_data:
+                    session_idx = session - 1
+                    subj_excl = exclusions_data[subject_key]
+                    if isinstance(subj_excl, list):
+                        if session_idx < len(subj_excl):
+                            exclude_components = subj_excl[session_idx]
+                    elif isinstance(subj_excl, dict) and session_key in subj_excl:
+                        exclude_components = subj_excl[session_key]
 
                 if exclude_components is not None:
                     ica.exclude = exclude_components
@@ -1829,21 +1876,21 @@ def apply_ica_to_raws(raws_dict: Dict[Any, mne.io.Raw],
 
             except Exception as e:
                 if verbose:
-                    logger.warning(f"Could not load ICA exclusions: {e}")
+                    logger.warning(f"Could not load legacy ICA exclusions: {e}")
 
             for block_id, raw in raws_dict.items():
                 if verbose:
-                    logger.info(f"Applying precomputed ICA to block {block_id}")
+                    logger.info(f"Applying legacy ICA to block {block_id}")
                 cleaned_raws[block_id] = apply_ica(raw, ica, verbose=verbose)
 
             if verbose:
-                logger.info("Successfully applied precomputed ICA to all blocks")
+                logger.info("Successfully applied legacy ICA to all blocks")
 
             return cleaned_raws
 
         except (FileNotFoundError, ValueError) as e:
             if verbose:
-                logger.error(f"Error loading precomputed ICA: {e}")
+                logger.error(f"Error loading legacy ICA: {e}")
 
             if not compute_new_ica:
                 if verbose:
