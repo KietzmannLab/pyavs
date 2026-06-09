@@ -371,7 +371,7 @@ def main():
     )
     parser.add_argument('--data-path', required=True,
                         help='Path to AVS dataset root (where derivatives/ lives)')
-    parser.add_argument('--output-path', default='/share/klab/psulewki/psulewski/brainencoding26',
+    parser.add_argument('--output-path', default='/share/klab/psulewki/psulewski/brainencoding26v3',
                         help='Output directory for challenge package')
     parser.add_argument('--train-subjects', type=int, nargs='+', default=[1, 2, 3, 4, 5],
                         help='Subject IDs used for training (default: 1 2 3 4 5)')
