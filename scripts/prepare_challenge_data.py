@@ -378,7 +378,9 @@ def main():
     parser.add_argument('--test-subject', type=int, default=60,
                         help='Held-out test subject ID (default: 60)')
     parser.add_argument('--sessions', type=int, nargs='+', default=list(range(1, 11)),
-                        help='Session numbers to load (default: 1..10)')
+                        help='Session numbers to load for training subjects (default: 1..10)')
+    parser.add_argument('--test-sessions', type=int, nargs='+', default=None,
+                        help='Session numbers to load for the test subject (default: same as --sessions)')
     parser.add_argument('--challenge', choices=['1', '2', 'both'], default='both',
                         help='Which challenge package to prepare (default: both)')
     parser.add_argument('--seed', type=int, default=42,
@@ -393,6 +395,7 @@ def main():
 
     out = Path(args.output_path)
     data_path = args.data_path
+    test_sessions = args.test_sessions if args.test_sessions is not None else args.sessions
     do_c1 = args.challenge in ('1', 'both')
     do_c2 = args.challenge in ('2', 'both')
 
@@ -481,13 +484,13 @@ def main():
     print("=" * 60)
 
     grad_data_60, metadata_60, times_60, _ = load_subject_sessions(
-        args.test_subject, args.sessions, data_path
+        args.test_subject, test_sessions, data_path
     )
 
     print(f"  Loaded {len(grad_data_60)} fixations before rejection")
 
     # Load real grad info from raw data for proper epoch rejection
-    grad_info_60 = load_subject_grad_info(args.test_subject, args.sessions, data_path)
+    grad_info_60 = load_subject_grad_info(args.test_subject, test_sessions, data_path)
 
     # Epoch rejection for subject 60 only
     grad_data_60, metadata_60, n_dropped = reject_extreme_epochs(
@@ -524,7 +527,7 @@ def main():
             metadata_60=metadata_60,
             meg_data=grad_110_60,
             meg_filename='meg_110ms.npy',
-            sessions=args.sessions,
+            sessions=test_sessions,
             data_path=data_path,
             test_subject=args.test_subject,
         )
@@ -542,7 +545,7 @@ def main():
             metadata_60=metadata_60,
             meg_data=grad_c2_60,
             meg_filename='meg_c2.npy',
-            sessions=args.sessions,
+            sessions=test_sessions,
             data_path=data_path,
             test_subject=args.test_subject,
         )
