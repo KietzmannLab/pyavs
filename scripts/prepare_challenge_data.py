@@ -498,6 +498,16 @@ def main():
     )
     print(f"  {len(grad_data_60)} fixations after rejection ({n_dropped} dropped)")
 
+    # Z-score per (channel, timepoint) over epochs — brings SI-unit pT/m values
+    # to a float32-safe range. Pearson r is invariant to linear transforms.
+    ch_t_mean = grad_data_60.mean(axis=0, keepdims=True)
+    ch_t_std  = grad_data_60.std(axis=0, keepdims=True)
+    ch_t_std[ch_t_std == 0] = 1.0
+    grad_data_60 = (grad_data_60 - ch_t_mean) / ch_t_std
+    print(f"  Z-scored (per channel×timepoint over epochs): "
+          f"mean={grad_data_60.mean():.3g}  std={grad_data_60.std():.3g}  "
+          f"min={grad_data_60.min():.3g}  max={grad_data_60.max():.3g}")
+
     t_idx = int(np.argmin(np.abs(times_60 - C1_TIME_S)))
     grad_110_60 = grad_data_60[:, :, t_idx]  # (n_epochs, n_channels)
 
