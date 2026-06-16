@@ -78,6 +78,7 @@ import mne
 import numpy as np
 import pandas as pd
 from joblib import Parallel, delayed
+from sklearn.preprocessing import StandardScaler
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -498,13 +499,14 @@ def main():
     )
     print(f"  {len(grad_data_60)} fixations after rejection ({n_dropped} dropped)")
 
-    # Z-score per (channel, timepoint) over epochs — brings SI-unit pT/m values
-    # to a float32-safe range. Pearson r is invariant to linear transforms.
-    ch_t_mean = grad_data_60.mean(axis=0, keepdims=True)
-    ch_t_std  = grad_data_60.std(axis=0, keepdims=True)
-    ch_t_std[ch_t_std == 0] = 1.0
-    grad_data_60 = (grad_data_60 - ch_t_mean) / ch_t_std
-    print(f"  Z-scored (per channel×timepoint over epochs): "
+    # StandardScaler per (channel, timepoint) feature over epochs — brings
+    # SI-unit pT/m values to a float32-safe range. Pearson r is invariant
+    # to linear transforms so evaluation is unaffected.
+    n_epochs, n_ch, n_times = grad_data_60.shape
+    scaler = StandardScaler()
+    data_2d = grad_data_60.reshape(n_epochs, n_ch * n_times)
+    grad_data_60 = scaler.fit_transform(data_2d).reshape(n_epochs, n_ch, n_times)
+    print(f"  StandardScaler applied (per channel×timepoint): "
           f"mean={grad_data_60.mean():.3g}  std={grad_data_60.std():.3g}  "
           f"min={grad_data_60.min():.3g}  max={grad_data_60.max():.3g}")
 
