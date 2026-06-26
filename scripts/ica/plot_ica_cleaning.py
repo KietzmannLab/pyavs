@@ -131,6 +131,44 @@ def plot_et_scatter_axis(
     plt.close()
 
 
+def plot_et_scatter_2d(
+    df: pd.DataFrame, output_path: str, top_fraction: float
+) -> None:
+    rejected = df['rejected_gx'] | df['rejected_gy']
+    r2_gx = df['abs_r_gx'] ** 2
+    r2_gy = df['abs_r_gy'] ** 2
+
+    # Pooled quantile thresholds as approximate visual guides
+    thresh_gx = float(np.quantile(r2_gx, 1.0 - top_fraction))
+    thresh_gy = float(np.quantile(r2_gy, 1.0 - top_fraction))
+
+    sns.set_context('poster')
+    plt.figure(figsize=(5, 5))
+
+    plt.scatter(
+        r2_gx[~rejected], r2_gy[~rejected],
+        color='cornflowerblue', s=6, alpha=0.25, label='kept',
+    )
+    plt.scatter(
+        r2_gx[rejected], r2_gy[rejected],
+        color='salmon', s=6, alpha=0.5, label='rejected',
+    )
+    plt.axvline(thresh_gx, color='gray', linestyle='--', alpha=0.7)
+    plt.axhline(thresh_gy, color='gray', linestyle='--', alpha=0.7)
+
+    plt.xlabel('r² with gaze x')
+    plt.ylabel('r² with gaze y')
+    plt.legend(frameon=False, loc='upper right')
+    sns.despine()
+    plt.tight_layout()
+
+    base = str(output_path).rsplit('.', 1)[0]
+    for ext in ('.png', '.pdf'):
+        plt.savefig(base + ext, dpi=300, bbox_inches='tight')
+        print(f'  Saved: {base + ext}')
+    plt.close()
+
+
 # ---------------------------------------------------------------------------
 # Plot 2: Average removed-signal topomap
 # ---------------------------------------------------------------------------
@@ -290,6 +328,8 @@ Examples:
         for axis in ('gx', 'gy'):
             out = os.path.join(args.output_dir, f'ica_et_scatter_{axis}.png')
             plot_et_scatter_axis(scatter_df, axis, out, args.top_fraction)
+        out = os.path.join(args.output_dir, 'ica_et_scatter_2d.png')
+        plot_et_scatter_2d(scatter_df, out, args.top_fraction)
 
     # ---- Plot 2: Average removed topo -------------------------------------
     print('\n--- Loading ICA objects ---')
