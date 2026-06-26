@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --time=2:00:00
+#SBATCH --time=1:00:00
 #SBATCH --nodes=1
 #SBATCH --mem=64G
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=10
 
 #SBATCH -p klab-cpu
 #SBATCH --job-name=ica

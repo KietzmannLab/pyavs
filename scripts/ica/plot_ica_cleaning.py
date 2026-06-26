@@ -103,7 +103,7 @@ def plot_et_scatter_axis(
     label    = 'gaze x' if axis == 'gx' else 'gaze y'
 
     sns.set_context('poster')
-    plt.figure(figsize=(4, 5))
+    plt.figure(figsize=(5, 5))
 
     kept = df[~df[rej_col]]
     rej  = df[ df[rej_col]]
@@ -119,7 +119,7 @@ def plot_et_scatter_axis(
     #plt.axvline(1.0 - top_fraction, color='gray', linestyle='--')
     # log scale for y-axis if |r| values span multiple orders of magnitude
 
-    plt.xlabel(f'normalized rank [{label}]')
+    plt.xlabel(f'normalized IC rank [{label}]')
     plt.ylabel(f'|r| with {label}')
     plt.legend(frameon=False, loc='upper left')
     sns.despine()
