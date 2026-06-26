@@ -176,7 +176,7 @@ def plot_et_scatter_2d(
 
 def load_ica_rms(
     data_path: str, sub: int, sess: int
-) -> Optional[Tuple[np.ndarray, mne.Info]]:
+) -> Optional[Tuple[np.ndarray, mne.Info, int]]:
     path = _meg_dir(data_path, sub, sess) / f'{_prefix(sub, sess)}_ica.fif'
     if not path.exists():
         print(f'  [skip] ICA file not found: {path}')
@@ -206,20 +206,20 @@ def load_ica_rms(
     rms = np.sqrt(np.mean(excl_cols ** 2, axis=1))  # (n_mags,)
 
     mag_info = mne.pick_info(ica.info, mag_picks)
-    return rms, mag_info
+    return rms, mag_info, len(valid_excl)
 
 
 def average_rms_vectors(
-    rms_data: List[Tuple[np.ndarray, mne.Info]]
+    rms_data: List[Tuple[np.ndarray, mne.Info, int]]
 ) -> Tuple[np.ndarray, mne.Info]:
     # Use the session with the most channels as reference
-    ref_idx = int(np.argmax([r.shape[0] for r, _ in rms_data]))
-    ref_rms, ref_info = rms_data[ref_idx]
+    ref_idx = int(np.argmax([r.shape[0] for r, _, _n in rms_data]))
+    ref_rms, ref_info, _ = rms_data[ref_idx]
     ref_ch_names = ref_info['ch_names']
     ch_index = {ch: i for i, ch in enumerate(ref_ch_names)}
 
     matrix = np.full((len(ref_ch_names), len(rms_data)), np.nan)
-    for col, (rms, info) in enumerate(rms_data):
+    for col, (rms, info, _n) in enumerate(rms_data):
         for i, ch in enumerate(info['ch_names']):
             if ch in ch_index:
                 matrix[ch_index[ch], col] = rms[i]
@@ -257,6 +257,58 @@ def plot_avg_topo(
         plt.savefig(base + ext, dpi=300, bbox_inches='tight')
         print(f'  Saved: {base + ext}')
     plt.close()
+
+
+# ---------------------------------------------------------------------------
+# Statistics
+# ---------------------------------------------------------------------------
+
+def print_scatter_stats(df: pd.DataFrame) -> None:
+    rows = []
+    for (sub, sess), grp in df.groupby(['subject', 'session']):
+        rej = grp[grp['rejected_gx'] | grp['rejected_gy']]
+        rows.append({
+            'subject': sub,
+            'session': sess,
+            'n_rejected': len(rej),
+            'mean_r_gx': rej['abs_r_gx'].mean() if len(rej) else np.nan,
+            'mean_r_gy': rej['abs_r_gy'].mean() if len(rej) else np.nan,
+        })
+    s = pd.DataFrame(rows)
+    n = len(s)
+
+    print(f'\n=== ET correlation statistics ({n} sessions) ===')
+    print(
+        f'  rejected components / session:  '
+        f'{s["n_rejected"].mean():.1f} ± {s["n_rejected"].std():.1f}  '
+        f'(range {int(s["n_rejected"].min())}–{int(s["n_rejected"].max())})'
+    )
+    r_gx = s['mean_r_gx'].dropna()
+    print(
+        f'  mean |r_gx| of rejected:        '
+        f'{r_gx.mean():.3f} ± {r_gx.std():.3f}'
+    )
+    r_gy = s['mean_r_gy'].dropna()
+    print(
+        f'  mean |r_gy| of rejected:        '
+        f'{r_gy.mean():.3f} ± {r_gy.std():.3f}'
+    )
+
+
+def print_topo_stats(rms_data: List[Tuple[np.ndarray, mne.Info, int]]) -> None:
+    n_excl_per_sess = [n for _, _, n in rms_data]
+    total = sum(n_excl_per_sess)
+    n_sess = len(rms_data)
+    mean_n = np.mean(n_excl_per_sess)
+    std_n  = np.std(n_excl_per_sess)
+
+    print(f'\n=== Topomap statistics ({n_sess} sessions) ===')
+    print(f'  total components in average:    {total}')
+    print(
+        f'  components / session:           '
+        f'{mean_n:.1f} ± {std_n:.1f}  '
+        f'(range {min(n_excl_per_sess)}–{max(n_excl_per_sess)})'
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -326,6 +378,7 @@ Examples:
             f'Loaded {n_sess} subject-sessions ({n_comp} components, '
             f'rejected: gx={n_rej_gx}, gy={n_rej_gy})'
         )
+        print_scatter_stats(scatter_df)
         for axis in ('gx', 'gy'):
             out = os.path.join(args.output_dir, f'ica_et_scatter_{axis}.png')
             plot_et_scatter_axis(scatter_df, axis, out, args.top_fraction)
@@ -344,7 +397,7 @@ Examples:
     if not rms_data:
         print('No ICA files found — skipping topomap.')
     else:
-        print(f'Averaging RMS across {len(rms_data)} subject-sessions')
+        print_topo_stats(rms_data)
         avg_rms, ref_info = average_rms_vectors(rms_data)
         out = os.path.join(args.output_dir, 'ica_avg_removed_topo.png')
         plot_avg_topo(avg_rms, ref_info, out)
