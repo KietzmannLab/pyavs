@@ -27,9 +27,7 @@ data_path="/share/klab/datasets/avs/"
 subject=$SLURM_ARRAY_TASK_ID
 
 # Layers to process
-layers=("layer4")
-# "layer2" "layer3")
-# "layer2" "layer3")
+layers=("layer1" "layer2" "layer3" "layer4" "avgpool")
 
 echo "==================================================="
 echo "Running MEG RSA analysis for subject $subject"

@@ -2,9 +2,9 @@
 #SBATCH --time=10:00:00
 #SBATCH --nodes=1
 #SBATCH --mem=300G
-#SBATCH --cpus-per-task=80
+#SBATCH --cpus-per-task=50
 
-#SBATCH -p workq
+#SBATCH -p klab-cpu
 #SBATCH --job-name=encoding
 #SBATCH --error=error_encoding_%A_%a.err
 #SBATCH --output=output_encoding_%A_%a.out
