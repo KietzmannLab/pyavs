@@ -79,11 +79,12 @@ def plot_evoked_joint(evoked: mne.Evoked,
     cbar_ax = fig.add_subplot(gs[0, n_topos])
     ts_ax = fig.add_subplot(gs[1, :])
 
-    # Butterfly + GFP
+    # Butterfly + GFP — channels coloured by peak absolute amplitude
     times_ms = evoked.times * 1000
     data_scaled = evoked.data * scaling
-    n_ch = data_scaled.shape[0]
-    ch_colors = plt.cm.viridis(np.linspace(0, 1, n_ch))
+    peak_heights = np.max(np.abs(data_scaled), axis=1)
+    peak_norm = (peak_heights - peak_heights.min()) / (peak_heights.ptp() + 1e-30)
+    ch_colors = plt.cm.magma(peak_norm)
     for i, color in enumerate(ch_colors):
         ts_ax.plot(times_ms, data_scaled[i], color=color, alpha=0.3)
     gfp_line = np.std(data_scaled, axis=0)
@@ -99,7 +100,7 @@ def plot_evoked_joint(evoked: mne.Evoked,
         axes=map_axes,
         show=False,
         colorbar=False,
-        cmap='viridis',
+        cmap='magma',
         outlines='head',
     )
     for ax, t_sec in zip(map_axes, times_sec):
