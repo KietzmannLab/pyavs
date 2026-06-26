@@ -103,7 +103,7 @@ def plot_evoked_joint(evoked: mne.Evoked,
         axes=map_axes,
         show=False,
         colorbar=False,
-        cmap='RdBu_r',
+        cmap='magma',
         outlines='head',
     )
     for ax, t_sec in zip(map_axes, times_sec):
