@@ -407,7 +407,7 @@ def plot_grand_average_butterfly(
     )
     evoked.crop(tmin=tlims[0], tmax=tlims[1])
 
-    fig = plot_evoked_joint(evoked, show=False)
+    fig = plot_evoked_joint(evoked, times=[0.015, 0.090, 0.150], show=False)
 
     os.makedirs(output_path, exist_ok=True)
 
