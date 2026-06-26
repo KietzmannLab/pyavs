@@ -4,12 +4,13 @@ ICA Cleaning Quality Plots
 
 Two minimalistic figures that show ICA-based eye artifact removal was successful:
 
-  1. ica_et_scatter_gx.png/.pdf  and  ica_et_scatter_gy.png/.pdf
-     Two scatter plots — one for horizontal gaze (gx) and one for vertical (gy).
-     x-axis: within-session rank by |r| for that gaze axis (normalised 0–1).
+    1. ica_et_scatter_xy.png/.pdf
+         A single figure with two stacked scatter plots — one for horizontal gaze
+         (gx) and one for vertical (gy) — sharing the same x-axis.
+    x-axis: within-session rank by |r| for that gaze axis.
      y-axis: |r| with that gaze axis.
      Components in the top fraction by that axis are shown in salmon; the rest
-     in cornflowerblue.  A dashed vertical line marks the rank threshold.
+    in cornflowerblue.
 
   2. ica_avg_removed_topo.png/.pdf
      Average topographic map (magnetometers) of the sensor-space signal power
@@ -82,12 +83,67 @@ def build_scatter_df(dfs: List[pd.DataFrame], top_fraction: float) -> pd.DataFra
     group_sizes = df.groupby(['subject', 'session'])['abs_r_gx'].transform('count')
     for axis in ('gx', 'gy'):
         col = f'abs_r_{axis}'
-        df[f'rank_norm_{axis}'] = (
+        df[f'rank_{axis}'] = (
             df.groupby(['subject', 'session'])[col]
-            .rank(method='first') / group_sizes
+            .rank(method='first')
         )
-        df[f'rejected_{axis}'] = df[f'rank_norm_{axis}'] > (1.0 - top_fraction)
+        df[f'rejected_{axis}'] = df[f'rank_{axis}'] > (group_sizes * (1.0 - top_fraction))
     return df
+
+
+def _plot_et_scatter_axis(
+    ax: plt.Axes,
+    df: pd.DataFrame,
+    axis: str,
+    top_fraction: float,
+    show_legend: bool = False,
+) -> None:
+    """axis: 'gx' or 'gy'"""
+    r_col   = f'abs_r_{axis}'
+    rank_col = f'rank_{axis}'
+    rej_col  = f'rejected_{axis}'
+    label    = 'gaze x' if axis == 'gx' else 'gaze y'
+
+    kept = df[~df[rej_col]]
+    rej  = df[ df[rej_col]]
+
+    ax.scatter(
+        kept[rank_col], kept[r_col],
+        color='cornflowerblue', s=50, alpha=0.25, label='kept', edgecolor='k', linewidth=0.75
+    )
+    ax.scatter(
+        rej[rank_col], rej[r_col],
+        color='salmon', s=50, alpha=0.5, label='rejected', edgecolor='k', linewidth=0.75
+    )
+
+    ax.set_ylabel(f'gaze X [|r|]' if axis == 'gx' else 'gaze Y [|r|]')
+    ax.set_xlim(left=0)
+    if show_legend:
+        ax.legend(frameon=False, loc='upper left')
+
+
+def plot_et_scatter_stacked(
+    df: pd.DataFrame, output_path: str, top_fraction: float
+) -> None:
+    sns.set_context('poster')
+    fig, axes = plt.subplots(2, 1, figsize=(8, 5), sharex=True)
+
+    max_rank = int(df.groupby(['subject', 'session']).size().max())
+
+    _plot_et_scatter_axis(axes[0], df, 'gx', top_fraction, show_legend=True)
+    _plot_et_scatter_axis(axes[1], df, 'gy', top_fraction)
+
+    for ax in axes:
+        ax.set_xlim(0, max_rank + 1)
+    axes[1].set_xlabel('IC rank within session')
+    sns.despine()
+    #plt.tight_layout()
+
+    base = str(output_path).rsplit('.', 1)[0]
+    for ext in ('.png', '.pdf'):
+        plt.savefig(base + ext, dpi=300, bbox_inches='tight')
+        print(f'  Saved: {base + ext}')
+    plt.close()
 
 
 def plot_et_scatter_axis(
@@ -96,32 +152,11 @@ def plot_et_scatter_axis(
     output_path: str,
     top_fraction: float,
 ) -> None:
-    """axis: 'gx' or 'gy'"""
-    r_col   = f'abs_r_{axis}'
-    rank_col = f'rank_norm_{axis}'
-    rej_col  = f'rejected_{axis}'
-    label    = 'gaze x' if axis == 'gx' else 'gaze y'
-
+    """Backward-compatible wrapper for a single axis."""
     sns.set_context('poster')
-    plt.figure(figsize=(5, 5))
-
-    kept = df[~df[rej_col]]
-    rej  = df[ df[rej_col]]
-
-    plt.scatter(
-        kept[rank_col], kept[r_col],
-        color='cornflowerblue', s=50, alpha=0.25, label='kept', edgecolor='k', linewidth=0.75
-    )
-    plt.scatter(
-        rej[rank_col], rej[r_col],
-        color='salmon', s=50, alpha=0.5, label='rejected', edgecolor='k', linewidth=0.75
-    )
-    #plt.axvline(1.0 - top_fraction, color='gray', linestyle='--')
-    # log scale for y-axis if |r| values span multiple orders of magnitude
-
-    plt.xlabel(f'normalized IC rank [{label}]')
-    plt.ylabel(f'|r| with {label}')
-    plt.legend(frameon=False, loc='upper left')
+    fig, ax = plt.subplots(1, 1, figsize=(4.5, 4))
+    _plot_et_scatter_axis(ax, df, axis, top_fraction, show_legend=True)
+    ax.set_xlabel(f'IC rank within session [{"gaze x" if axis == "gx" else "gaze y"}]')
     sns.despine()
     plt.tight_layout()
 
@@ -144,7 +179,7 @@ def plot_et_scatter_2d(
     thresh_gy = float(np.quantile(r2_gy, 1.0 - top_fraction))
 
     sns.set_context('poster')
-    plt.figure(figsize=(5, 5))
+    plt.figure(figsize=(3.4, 6))
 
     plt.scatter(
         r2_gx[~rejected], r2_gy[~rejected],
@@ -379,9 +414,8 @@ Examples:
             f'rejected: gx={n_rej_gx}, gy={n_rej_gy})'
         )
         print_scatter_stats(scatter_df)
-        for axis in ('gx', 'gy'):
-            out = os.path.join(args.output_dir, f'ica_et_scatter_{axis}.png')
-            plot_et_scatter_axis(scatter_df, axis, out, args.top_fraction)
+        out = os.path.join(args.output_dir, 'ica_et_scatter_xy.png')
+        plot_et_scatter_stacked(scatter_df, out, args.top_fraction)
         out = os.path.join(args.output_dir, 'ica_et_scatter_2d.png')
         plot_et_scatter_2d(scatter_df, out, args.top_fraction)
 
