@@ -79,12 +79,15 @@ def plot_evoked_joint(evoked: mne.Evoked,
     cbar_ax = fig.add_subplot(gs[0, n_topos])
     ts_ax = fig.add_subplot(gs[1, :])
 
-    # Butterfly + GFP — channels coloured by peak absolute amplitude
+    # Butterfly + GFP — channels coloured by signed peak (RdBu_r: blue=negative, red=positive)
     times_ms = evoked.times * 1000
     data_scaled = evoked.data * scaling
-    peak_heights = np.max(np.abs(data_scaled), axis=1)
-    peak_norm = (peak_heights - peak_heights.min()) / (peak_heights.ptp() + 1e-30)
-    ch_colors = plt.cm.magma(peak_norm)
+    # Signed peak: amplitude at time of maximum absolute value for each channel
+    peak_idx = np.argmax(np.abs(data_scaled), axis=1)
+    peak_signed = data_scaled[np.arange(data_scaled.shape[0]), peak_idx]
+    abs_max = np.abs(peak_signed).max() + 1e-30
+    peak_norm = (peak_signed + abs_max) / (2 * abs_max)  # maps [-abs_max,+abs_max] → [0,1]
+    ch_colors = plt.cm.RdBu_r(peak_norm)
     for i, color in enumerate(ch_colors):
         ts_ax.plot(times_ms, data_scaled[i], color=color, alpha=0.6)
     gfp_line = np.std(data_scaled, axis=0)
@@ -100,7 +103,7 @@ def plot_evoked_joint(evoked: mne.Evoked,
         axes=map_axes,
         show=False,
         colorbar=False,
-        cmap='magma',
+        cmap='RdBu_r',
         outlines='head',
     )
     for ax, t_sec in zip(map_axes, times_sec):
