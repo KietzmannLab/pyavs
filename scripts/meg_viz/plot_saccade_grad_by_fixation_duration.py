@@ -44,7 +44,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 import mne
 
-from pyavs.io.read import load_epochs_h5, load_metadata_csv, load_meg_preprocessed
+from pyavs.io.read import load_epochs_h5, load_metadata_csv
 from pyavs.dataloader.eye import load_and_enrich_eye_events
 from pyavs.utils.eye_tracking import match_saccades_to_fixations
 from pyavs.utils.logging import get_logger
@@ -323,23 +323,31 @@ def compute_gfp_over_grads(data: np.ndarray) -> np.ndarray:
 
 
 def _load_grad_info(subject_id: int, sessions: List[int], data_path: str) -> Optional[mne.Info]:
-    """Load gradiometer MNE Info (with channel positions) from a preprocessed FIF header."""
+    """Load gradiometer MNE Info (with channel positions) from an annotated raw FIF header."""
+    annotated_raws_root = os.path.join(data_path, 'derivatives', 'pyavs', 'annotated_raws')
+    candidates = ['raw-concatenated', 'annotations-scene', 'annotations-caption', 'annotations-microphone']
     for session in sessions:
-        for block in [1, 2, 3, 4, 5]:
-            try:
-                raw = load_meg_preprocessed(
-                    subject_id=subject_id,
-                    session=session,
-                    block=block,
-                    data_path=data_path,
-                    preload=False,
-                )
-                raw.pick('grad')
-                logger.info(f"Loaded grad Info from sub-{subject_id:02d} ses-{session:02d} block-{block:02d}")
-                return raw.info
-            except Exception:
+        ses_dir = os.path.join(
+            annotated_raws_root,
+            f'sub-{subject_id:02d}',
+            f'ses-{session:02d}',
+        )
+        for stem in candidates:
+            fif_path = os.path.join(
+                ses_dir,
+                f'sub-{subject_id:02d}_ses-{session:02d}_task-avs_{stem}.fif',
+            )
+            if not os.path.exists(fif_path):
                 continue
-    logger.warning(f"Could not load grad Info for subject {subject_id} from any session/block")
+            try:
+                raw = mne.io.read_raw_fif(fif_path, preload=False, verbose=False)
+                raw.pick('grad')
+                logger.info(f"Loaded grad Info from {fif_path}")
+                return raw.info
+            except Exception as e:
+                logger.debug(f"Could not read {fif_path}: {e}")
+                continue
+    logger.warning(f"Could not load grad Info for subject {subject_id} from any session")
     return None
 
 
