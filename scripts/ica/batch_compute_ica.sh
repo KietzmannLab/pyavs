@@ -39,7 +39,6 @@ python ${script_path}/compute_ica.py \
     --session $session \
     --data-path $data_path \
     --top-fraction 0.04 \
-    --skip-existing \
     --verbose
 
 echo ""

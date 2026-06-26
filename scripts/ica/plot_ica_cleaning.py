@@ -103,20 +103,20 @@ def plot_et_scatter_axis(
     label    = 'gaze x' if axis == 'gx' else 'gaze y'
 
     sns.set_context('poster')
-    plt.figure(figsize=(6, 4))
+    plt.figure(figsize=(4, 5))
 
     kept = df[~df[rej_col]]
     rej  = df[ df[rej_col]]
 
     plt.scatter(
         kept[rank_col], kept[r_col],
-        color='cornflowerblue', s=50, alpha=0.25, label='kept', edgecolor='w', linewidth=0.5,
+        color='cornflowerblue', s=50, alpha=0.25, label='kept', edgecolor='k', linewidth=0.75
     )
     plt.scatter(
         rej[rank_col], rej[r_col],
-        color='salmon', s=50, alpha=0.5, label='rejected', edgecolor='w', linewidth=0.5,
+        color='salmon', s=50, alpha=0.5, label='rejected', edgecolor='k', linewidth=0.75
     )
-    plt.axvline(1.0 - top_fraction, color='gray', linestyle='--')
+    #plt.axvline(1.0 - top_fraction, color='gray', linestyle='--')
     # log scale for y-axis if |r| values span multiple orders of magnitude
 
     plt.xlabel(f'normalized rank [{label}]')
@@ -233,7 +233,7 @@ def plot_avg_topo(
     avg_rms: np.ndarray, info: mne.Info, output_path: str
 ) -> None:
     sns.set_context('poster')
-    plt.figure(figsize=(4, 4.8))
+    plt.figure(figsize=(4, 5.8))
     ax = plt.gca()
 
     im, _ = mne.viz.plot_topomap(
@@ -248,7 +248,7 @@ def plot_avg_topo(
         im, ax=ax,
         orientation='horizontal',
         fraction=0.05, pad=0.08,
-        label='artifact rms [a.u.]',
+        label='cleaned\nartifact rms [a.u.]',
     )
     plt.tight_layout()
 
