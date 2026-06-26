@@ -1397,18 +1397,13 @@ def find_cardiac_components(ica: ICA,
 
     cardiac_components = []
 
-    if method == 'automatic':
+    if method in ('automatic', 'frequency'):
         try:
             ecg_indices, _ = ica.find_bads_ecg(raw, threshold=threshold, verbose=verbose)
             cardiac_components.extend(ecg_indices)
         except Exception as e:
             if verbose:
-                logger.warning(f"Automatic ECG detection failed: {e}")
-                logger.info("Trying frequency-based detection...")
-            cardiac_components = _find_cardiac_components_by_frequency(ica, raw, verbose)
-
-    elif method == 'frequency':
-        cardiac_components = _find_cardiac_components_by_frequency(ica, raw, verbose)
+                logger.warning(f"Automatic ECG detection failed, skipping cardiac: {e}")
 
     if verbose:
         if cardiac_components:
@@ -1420,35 +1415,6 @@ def find_cardiac_components(ica: ICA,
 
     return cardiac_components
 
-
-def _find_cardiac_components_by_frequency(ica: ICA,
-                                          raw: mne.io.Raw,
-                                          verbose: bool) -> List[int]:
-    """Find cardiac components by spectral analysis in the 0.8–1.8 Hz range."""
-    ica_sources = ica.get_sources(raw)
-    cardiac_components = []
-    cardiac_freq_range = (0.8, 1.8)
-
-    for i in range(ica.n_components_):
-        source_data = ica_sources.get_data()[i]
-
-        freqs, psd = mne.time_frequency.psd_array_welch(
-            source_data[np.newaxis, :],
-            sfreq=raw.info['sfreq'],
-            fmin=0.5, fmax=3.0,
-            verbose=False
-        )
-
-        cardiac_mask = (
-            (freqs >= cardiac_freq_range[0]) & (freqs <= cardiac_freq_range[1])
-        )
-        if np.any(cardiac_mask):
-            cardiac_power = np.mean(psd[0, cardiac_mask])
-            total_power = np.mean(psd[0, :])
-            if cardiac_power / total_power > 0.3:
-                cardiac_components.append(i)
-
-    return cardiac_components
 
 
 # ---------------------------------------------------------------------------
