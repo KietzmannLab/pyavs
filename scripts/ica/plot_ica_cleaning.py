@@ -110,13 +110,14 @@ def plot_et_scatter_axis(
 
     plt.scatter(
         kept[rank_col], kept[r_col],
-        color='cornflowerblue', s=6, alpha=0.25, label='kept',
+        color='cornflowerblue', s=50, alpha=0.25, label='kept', edgecolor='w', linewidth=0.5,
     )
     plt.scatter(
         rej[rank_col], rej[r_col],
-        color='salmon', s=6, alpha=0.5, label='rejected',
+        color='salmon', s=50, alpha=0.5, label='rejected', edgecolor='w', linewidth=0.5,
     )
     plt.axvline(1.0 - top_fraction, color='gray', linestyle='--')
+    # log scale for y-axis if |r| values span multiple orders of magnitude
 
     plt.xlabel(f'normalized rank [{label}]')
     plt.ylabel(f'|r| with {label}')
@@ -276,11 +277,11 @@ Examples:
         help='BIDS root data directory containing derivatives/',
     )
     parser.add_argument(
-        '--subjects', type=int, nargs='+', required=True,
+        '--subjects', type=int, nargs='+', default = [1, 2, 3, 4, 5],
         help='Subject IDs to include',
     )
     parser.add_argument(
-        '--sessions', type=int, nargs='+', default=[1],
+        '--sessions', type=int, nargs='+', default=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
         help='Session numbers to include (default: [1])',
     )
     parser.add_argument(
