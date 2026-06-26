@@ -2,20 +2,20 @@
 """
 3D Joy Division / Unknown Pleasures ridge-line plot — Nature Neuroscience cover art.
 
-Renders the saccade duration GFP heatmap as a stacked 3D ridge-line plot
-in the style of Joy Division's Unknown Pleasures album cover. Each ridge
+Renders the saccade-locked gradiometer GFP heatmap as a stacked 3D ridge-line
+plot in the style of Joy Division's Unknown Pleasures album cover. Each ridge
 is one fixation-duration quantile; magma coloring encodes fixation duration
 from shortest (back, dark) to longest (front, bright).
 
-Data pipeline is reused from plot_saccade_duration_heatmap.py.
+Data pipeline is reused from plot_saccade_grad_by_fixation_duration.py.
 
 Usage:
-    python plot_saccade_duration_heatmap_3d.py --subject 1 --session 1 \\
+    python plot_saccade_grad_fixation_duration_3d.py --subject 1 --session 1 \\
         --data-path /share/klab/datasets/avs/ \\
         --output-dir /share/klab/psulewski/pyavs/meg_viz/
 
     # Multi-session
-    python plot_saccade_duration_heatmap_3d.py --subject 1 --sessions 1 2 3 4 5 \\
+    python plot_saccade_grad_fixation_duration_3d.py --subject 1 --sessions 1 2 3 4 5 \\
         --data-path /share/klab/datasets/avs/ \\
         --output-dir /share/klab/psulewski/pyavs/meg_viz/
 
@@ -41,7 +41,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 # Import data pipeline from sibling script
 sys.path.insert(0, os.path.dirname(__file__))
-from plot_saccade_duration_heatmap import (
+from plot_saccade_grad_by_fixation_duration import (
     load_saccade_grad_data,
     load_and_concatenate_sessions,
     compute_duration_quantiles,
@@ -52,7 +52,7 @@ from plot_saccade_duration_heatmap import (
 
 from pyavs.utils.logging import get_logger
 
-logger = get_logger('scripts.et_viz.saccade_duration_heatmap_3d')
+logger = get_logger('scripts.meg_viz.saccade_grad_fixation_duration_3d')
 
 # View parameters
 ELEV = 28
@@ -144,18 +144,7 @@ def plot_joy_division_3d(
     ) -> None:
         """
         Fake a glowing sphere by layering scatter points.
-    for x, y, z, c in onset_pts:
-        add_glow_marker(
-            ax,
-            x, y, z,
-            c,
-            base_size=22,
-            glow_scale=9.0,
-            alpha_core=0.96,
-            alpha_glow=0.08,
-            n_glow=6,
-            whiten=0.55,
-        )
+
         Parameters
         ----------
         whiten : float
@@ -351,7 +340,6 @@ def plot_joy_division_3d(
     ax.set_ylim(y_offsets.min() - 1.0, y_offsets.max() + 0.8)
     ax.set_zlim(0, (n_quantiles - 1) * ridge_step + gfp.max() * 1.12)
 
-    # Slightly dramatic but still readable
     ax.view_init(elev=24, azim=-67)
 
     # Remove all decorations for cover-art look
@@ -399,6 +387,8 @@ def plot_joy_division_3d(
     plt.close()
 
     logger.info(f"Saved Joy Division ridge plot to {png_path}")
+
+
 def process_subject(
     subject_id: int,
     sessions: List[int],
@@ -476,15 +466,15 @@ def process_subject(
 def main() -> int:
     """Command-line entry point."""
     parser = argparse.ArgumentParser(
-        description='3D Joy Division ridge plot of saccade duration GFP',
+        description='3D Joy Division ridge plot of saccade-locked grad GFP by fixation duration',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python plot_saccade_duration_heatmap_3d.py --subject 1 --session 1 \\
+  python plot_saccade_grad_fixation_duration_3d.py --subject 1 --session 1 \\
       --data-path /share/klab/datasets/avs/ \\
       --output-dir /share/klab/psulewski/pyavs/meg_viz/
 
-  python plot_saccade_duration_heatmap_3d.py --subject 1 --sessions 1 2 3 4 5 \\
+  python plot_saccade_grad_fixation_duration_3d.py --subject 1 --sessions 1 2 3 4 5 \\
       --data-path /share/klab/datasets/avs/ \\
       --output-dir /share/klab/psulewski/pyavs/meg_viz/
         """,

@@ -7,6 +7,9 @@ sensor space plots, ERF plots, and joint evoked plots.
 
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns
+from matplotlib.patches import ConnectionPatch
+from scipy.signal import find_peaks
 from typing import Optional, Union, Dict, Any, List, Tuple
 import mne
 from mne.viz import plot_topomap
@@ -16,46 +19,112 @@ from ..utils.logging import get_logger
 logger = get_logger('visualization.meg')
 
 
-def plot_evoked_joint(evoked: mne.Evoked, 
-                     times: Optional[Union[float, List[float]]] = None,
+def plot_evoked_joint(evoked: mne.Evoked,
+                     times: Optional[Union[float, List[float], str]] = None,
                      title: Optional[str] = None,
                      show: bool = True,
                      **kwargs) -> plt.Figure:
     """
-    Create a joint plot of evoked MEG data (timeseries + topomaps).
-    
-    This function creates a joint plot showing both the time series and 
-    topographic maps at specified time points, similar to MNE's plot_joint.
-    
+    Create a joint plot of evoked MEG data: topomaps above, butterfly + GFP below.
+
     Parameters
     ----------
     evoked : mne.Evoked
-        The evoked data to plot
-    times : float, list of float, or None
-        Time points for topographic maps. If None, uses peak times
+        The evoked data to plot.
+    times : float, list of float, "peaks", or None
+        Time points (in seconds) for topomaps. If None or "peaks", the 3
+        largest GFP peaks are used.
     title : str, optional
-        Title for the plot
+        Ignored (no titles per convention).
     show : bool, optional
-        Whether to show the plot (default: True)
-    **kwargs
-        Additional arguments passed to mne.Evoked.plot_joint
-        
+        Whether to call plt.show() (default: True).
+
     Returns
     -------
     fig : matplotlib.figure.Figure
-        The figure object
     """
-    if title is None:
-        title = f"Joint Evoked Plot - {evoked.comment}"
-    
-    # Use MNE's built-in plot_joint function
-    fig = evoked.plot_joint(
-        times=times,
-        title=title,
-        show=show,
-        **kwargs
+    _SCALING = {'grad': 1e13, 'mag': 1e15, 'eeg': 1e6}
+    _UNIT = {'grad': 'fT/cm', 'mag': 'fT', 'eeg': 'µV'}
+
+    ch_types = list(evoked.info.get_channel_types(unique=True, only_data_chs=True))
+    ch_type = ch_types[0] if ch_types else 'mag'
+    scaling = _SCALING.get(ch_type, 1.0)
+    ch_unit = _UNIT.get(ch_type, 'a.u.')
+
+    # Resolve topomap times (seconds)
+    if times is None or times == 'peaks':
+        gfp = np.std(evoked.data, axis=0)
+        peak_idxs, _ = find_peaks(gfp)
+        if len(peak_idxs) == 0:
+            peak_idxs = np.array([np.argmax(gfp)])
+        top = peak_idxs[np.argsort(gfp[peak_idxs])[-3:]]
+        times_sec = evoked.times[sorted(top)]
+    elif np.isscalar(times):
+        times_sec = np.array([times])
+    else:
+        times_sec = np.asarray(times)
+
+    n_topos = len(times_sec)
+
+    # Layout: topomaps (row 0) above timeseries (row 1)
+    sns.set_context("poster")
+    fig = plt.figure(figsize=(10, 5))
+    gs = fig.add_gridspec(2, n_topos, height_ratios=[1, 2.5], hspace=0.5, wspace=0.1)
+    map_axes = [fig.add_subplot(gs[0, i]) for i in range(n_topos)]
+    ts_ax = fig.add_subplot(gs[1, :])
+
+    # Butterfly + GFP
+    times_ms = evoked.times * 1000
+    data_scaled = evoked.data * scaling
+    n_ch = data_scaled.shape[0]
+    ch_colors = plt.cm.viridis(np.linspace(0, 1, n_ch))
+    for i, color in enumerate(ch_colors):
+        ts_ax.plot(times_ms, data_scaled[i], color=color, alpha=0.3)
+    gfp_line = np.std(data_scaled, axis=0)
+    ts_ax.plot(times_ms, gfp_line, color='salmon')
+    ts_ax.axvline(0, color='k', linestyle='--')
+    ts_ax.set_xlabel('time [ms]')
+    ts_ax.set_ylabel(f'amplitude [{ch_unit}]')
+    sns.despine(ax=ts_ax)
+
+    # Topomaps via MNE (handles scaling internally)
+    evoked.plot_topomap(
+        times=times_sec,
+        axes=map_axes,
+        show=False,
+        colorbar=False,
+        cmap='viridis',
+        outlines='head',
     )
-    
+    for ax, t_sec in zip(map_axes, times_sec):
+        ax.set_title(f'{t_sec * 1000:.0f} ms')
+
+    # Shared colorbar for topomaps
+    if map_axes[0].images:
+        fig.colorbar(map_axes[0].images[0], ax=map_axes, shrink=0.8)
+
+    # Connection lines from topomap bottom to timeseries peak (after ylim is set)
+    fig.canvas.draw()
+    for t_sec, map_ax in zip(times_sec, map_axes):
+        t_ms = t_sec * 1000
+        ts_ax.axvline(t_ms, color='grey', linestyle='-', alpha=0.66, zorder=0)
+        con = ConnectionPatch(
+            xyA=[t_ms, ts_ax.get_ylim()[1]],
+            xyB=[0.5, 0],
+            coordsA='data',
+            coordsB='axes fraction',
+            axesA=ts_ax,
+            axesB=map_ax,
+            color='grey',
+            linestyle='-',
+            alpha=0.5,
+            clip_on=False,
+        )
+        fig.add_artist(con)
+
+    if show:
+        plt.show()
+
     return fig
 
 
@@ -122,15 +191,10 @@ def plot_median_erf(epochs: mne.Epochs,
         nave=len(epochs)
     )
     
-    # Set title
-    if title is None:
-        title = f"Median ERF - {ch_type.upper()} - {evoked_median.comment}"
-    
     # Create joint plot
     fig = plot_evoked_joint(
         evoked_median,
         times=times,
-        title=title,
         show=show,
         **kwargs
     )

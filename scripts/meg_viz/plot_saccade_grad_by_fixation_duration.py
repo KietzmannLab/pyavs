@@ -1,24 +1,29 @@
 #!/usr/bin/env python3
 """
-Plot saccade duration quartile heatmap showing GFP over gradiometers.
+Plot saccade-locked gradiometer GFP heatmap and grand average butterfly,
+sorted by the duration of the preceding fixation.
 
-This script loads precomputed saccade event epochs during scene viewing and
-plots a duration quartile-sorted heatmap showing GFP (Global Field Power)
-over all gradiometers. Saccades are matched to their associated fixations
-to obtain fixation duration for sorting.
+This script loads precomputed saccade event epochs (gradiometers) during
+scene viewing and produces two figures per subject:
 
-When multiple sessions are requested, data is concatenated across sessions
-before computing quantiles and plotting a single combined heatmap.
+1. GFP heatmap — gradiometer GFP sorted into fixation-duration quantiles,
+   with a diagonal line marking fixation offset.
+2. Grand average butterfly — conventional joint plot (topomaps above,
+   butterfly + GFP below) averaged across all saccade epochs.
+
+Saccades are matched to their preceding fixations to obtain fixation
+duration for quantile sorting. When multiple sessions are requested, data
+is concatenated before computing quantiles.
 
 Usage:
-    python plot_saccade_duration_heatmap.py --subject 1 --session 1 \
-        --data-path /share/klab/datasets/avs/ \
-        --output-dir /share/klab/psulewski/psulewski/pyavs/meg_quality/
+    python plot_saccade_grad_by_fixation_duration.py --subject 1 --session 1 \\
+        --data-path /share/klab/datasets/avs/ \\
+        --output-dir /share/klab/psulewski/pyavs/meg_viz/
 
     # Concatenate across sessions
-    python plot_saccade_duration_heatmap.py --subject 1 --sessions 1 2 3 4 5 \
-        --data-path /share/klab/datasets/avs/ \
-        --output-dir /share/klab/psulewski/psulewski/pyavs/meg_quality/
+    python plot_saccade_grad_by_fixation_duration.py --subject 1 --sessions 1 2 3 4 5 \\
+        --data-path /share/klab/datasets/avs/ \\
+        --output-dir /share/klab/psulewski/pyavs/meg_viz/
 
 Author: pyAVS development team
 """
@@ -37,12 +42,15 @@ import seaborn as sns
 # Add pyavs to path for development
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from pyavs.io.read import load_epochs_h5, load_metadata_csv
+import mne
+
+from pyavs.io.read import load_epochs_h5, load_metadata_csv, load_meg_preprocessed
 from pyavs.dataloader.eye import load_and_enrich_eye_events
 from pyavs.utils.eye_tracking import match_saccades_to_fixations
 from pyavs.utils.logging import get_logger
+from pyavs.visualization.meg import plot_evoked_joint
 
-logger = get_logger('scripts.meg_quality.saccade_duration_heatmap')
+logger = get_logger('scripts.meg_viz.saccade_grad_by_fixation_duration')
 
 # Configuration
 N_QUANTILES = 80
@@ -314,6 +322,103 @@ def compute_gfp_over_grads(data: np.ndarray) -> np.ndarray:
     return gfp
 
 
+def _load_grad_info(subject_id: int, sessions: List[int], data_path: str) -> Optional[mne.Info]:
+    """Load gradiometer MNE Info (with channel positions) from a preprocessed FIF header."""
+    for session in sessions:
+        for block in [1, 2, 3, 4, 5]:
+            try:
+                raw = load_meg_preprocessed(
+                    subject_id=subject_id,
+                    session=session,
+                    block=block,
+                    data_path=data_path,
+                    preload=False,
+                )
+                raw.pick('grad')
+                logger.info(f"Loaded grad Info from sub-{subject_id:02d} ses-{session:02d} block-{block:02d}")
+                return raw.info
+            except Exception:
+                continue
+    logger.warning(f"Could not load grad Info for subject {subject_id} from any session/block")
+    return None
+
+
+def plot_grand_average_butterfly(
+    grad_data: np.ndarray,
+    times: np.ndarray,
+    info: Optional[mne.Info],
+    output_path: str,
+    subject_id: int,
+    sessions: List[int],
+    tlims: Tuple[float, float] = (-0.2, 0.5),
+) -> None:
+    """
+    Plot grand average butterfly + joint topomaps for gradiometer data.
+
+    Parameters
+    ----------
+    grad_data : np.ndarray
+        Raw epoch data of shape (n_epochs, n_grad_channels, n_times) — used
+        before any quantile sorting so the grand average is unbiased.
+    times : np.ndarray
+        Time points in seconds.
+    info : mne.Info or None
+        MNE Info with gradiometer channel positions. If None or channel count
+        mismatches, the function logs a warning and returns without plotting.
+    output_path : str
+        Directory to save figures.
+    subject_id : int
+        Subject ID.
+    sessions : list of int
+        Sessions included (for filename).
+    tlims : tuple
+        Time limits (tmin, tmax) in seconds for cropping the Evoked.
+    """
+    if info is None:
+        logger.warning("No grad Info available — skipping grand average butterfly")
+        return
+
+    n_grad = grad_data.shape[1]
+    if len(info.ch_names) != n_grad:
+        logger.warning(
+            f"Channel count mismatch: grad_data has {n_grad} channels but "
+            f"Info has {len(info.ch_names)} — skipping butterfly"
+        )
+        return
+
+    # Grand average across all epochs (before any quantile sorting)
+    mean_data = np.mean(grad_data, axis=0)  # (n_channels, n_times)
+
+    evoked = mne.EvokedArray(
+        mean_data,
+        info,
+        tmin=times[0],
+        comment='grand average',
+        nave=grad_data.shape[0],
+    )
+    evoked.crop(tmin=tlims[0], tmax=tlims[1])
+
+    fig = plot_evoked_joint(evoked, show=False)
+
+    os.makedirs(output_path, exist_ok=True)
+
+    if len(sessions) == 1:
+        session_str = f"ses-{sessions[0]:02d}"
+    else:
+        session_str = f"ses-{sessions[0]:02d}-{sessions[-1]:02d}"
+
+    base_filename = f"sub-{subject_id:02d}_{session_str}_saccade_grand_average_butterfly_grad"
+    png_path = os.path.join(output_path, f"{base_filename}.png")
+    pdf_path = os.path.join(output_path, f"{base_filename}.pdf")
+
+    fig.savefig(png_path, dpi=300, bbox_inches='tight')
+    fig.savefig(pdf_path, bbox_inches='tight')
+    plt.close(fig)
+
+    logger.info(f"Saved grand average butterfly to {png_path}")
+    logger.info(f"Saved grand average butterfly to {pdf_path}")
+
+
 def plot_heatmap(
     gfp_data: np.ndarray,
     times: np.ndarray,
@@ -324,7 +429,7 @@ def plot_heatmap(
     tlims: Tuple[float, float] = (-0.2, 0.5)
 ) -> None:
     """
-    Plot duration quartile sorted heatmap.
+    Plot duration quantile-sorted GFP heatmap.
 
     Parameters
     ----------
@@ -428,7 +533,7 @@ def process_subject(
     output_dir: str
 ) -> bool:
     """
-    Process heatmap for a single subject, concatenating across sessions.
+    Process both figures for a single subject, concatenating across sessions.
 
     Parameters
     ----------
@@ -486,7 +591,7 @@ def process_subject(
         # Compute GFP
         gfp_data = compute_gfp_over_grads(quantile_data)
 
-        # Plot
+        # Plot GFP heatmap
         plot_heatmap(
             gfp_data=gfp_data,
             times=times,
@@ -495,6 +600,18 @@ def process_subject(
             subject_id=subject_id,
             sessions=sessions,
             tlims=TLIMS
+        )
+
+        # Plot grand average butterfly joint plot
+        grad_info = _load_grad_info(subject_id, sessions, data_path)
+        plot_grand_average_butterfly(
+            grad_data=grad_data,
+            times=times,
+            info=grad_info,
+            output_path=output_dir,
+            subject_id=subject_id,
+            sessions=sessions,
+            tlims=TLIMS,
         )
 
         return True
@@ -509,24 +626,24 @@ def process_subject(
 def main():
     """Main function for command line execution."""
     parser = argparse.ArgumentParser(
-        description='Plot saccade duration quartile heatmap (GFP over gradiometers)',
+        description='Plot saccade-locked grad GFP heatmap and grand average butterfly by fixation duration',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   # Process single subject and session
-  python plot_saccade_duration_heatmap.py --subject 1 --session 1 \\
+  python plot_saccade_grad_by_fixation_duration.py --subject 1 --session 1 \\
       --data-path /share/klab/datasets/avs/ \\
-      --output-dir /share/klab/psulewski/psulewski/pyavs/meg_quality/
+      --output-dir /share/klab/psulewski/pyavs/meg_viz/
 
   # Concatenate across multiple sessions for one subject
-  python plot_saccade_duration_heatmap.py --subject 1 --sessions 1 2 3 4 5 \\
+  python plot_saccade_grad_by_fixation_duration.py --subject 1 --sessions 1 2 3 4 5 \\
       --data-path /share/klab/datasets/avs/ \\
-      --output-dir /share/klab/psulewski/psulewski/pyavs/meg_quality/
+      --output-dir /share/klab/psulewski/pyavs/meg_viz/
 
   # Process multiple subjects (each with concatenated sessions)
-  python plot_saccade_duration_heatmap.py --subjects 1 2 3 --sessions 1 2 3 4 5 \\
+  python plot_saccade_grad_by_fixation_duration.py --subjects 1 2 3 --sessions 1 2 3 4 5 \\
       --data-path /share/klab/datasets/avs/ \\
-      --output-dir /share/klab/psulewski/psulewski/pyavs/meg_quality/
+      --output-dir /share/klab/psulewski/pyavs/meg_viz/
         """
     )
 
@@ -544,7 +661,7 @@ Examples:
                         help='Path to AVS data directory',
                         default='/share/klab/datasets/avs/')
     parser.add_argument('--output-dir', type=str, required=False,
-                        help='Output directory for heatmaps',
+                        help='Output directory for figures',
                         default='/share/klab/psulewski/pyavs/meg_viz/')
 
     parser.add_argument('--verbose', '-v', action='store_true',
@@ -573,7 +690,7 @@ Examples:
         return 1
 
     # Process each subject
-    print("=== Saccade Duration Heatmap Generation ===")
+    print("=== Saccade Grad by Fixation Duration ===")
     print(f"Subjects: {subjects}")
     print(f"Sessions (concatenated): {sessions}")
     print(f"Data path: {args.data_path}")
