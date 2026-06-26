@@ -33,7 +33,7 @@ from typing import Any, Dict, List, Optional
 
 from joblib import Parallel, delayed
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 from pyavs.preprocessing.ica import run_ica_et_pipeline
 from pyavs.utils.validation import validate_subject_id, validate_session

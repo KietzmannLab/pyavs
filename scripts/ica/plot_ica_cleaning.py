@@ -4,11 +4,12 @@ ICA Cleaning Quality Plots
 
 Two minimalistic figures that show ICA-based eye artifact removal was successful:
 
-  1. ica_et_scatter.png/.pdf
-     Scatter of per-IC max ET correlation (max(|r_gx|, |r_gy|)) vs. normalized
-     within-session rank.  Rejected components (top-fraction by rank) are shown
-     in salmon; kept components in cornflowerblue.  A dashed vertical line marks
-     the rank threshold used during ICA computation.
+  1. ica_et_scatter_gx.png/.pdf  and  ica_et_scatter_gy.png/.pdf
+     Two scatter plots — one for horizontal gaze (gx) and one for vertical (gy).
+     x-axis: within-session rank by |r| for that gaze axis (normalised 0–1).
+     y-axis: |r| with that gaze axis.
+     Components in the top fraction by that axis are shown in salmon; the rest
+     in cornflowerblue.  A dashed vertical line marks the rank threshold.
 
   2. ica_avg_removed_topo.png/.pdf
      Average topographic map (magnetometers) of the sensor-space signal power
@@ -78,35 +79,48 @@ def load_et_scores(
 
 def build_scatter_df(dfs: List[pd.DataFrame], top_fraction: float) -> pd.DataFrame:
     df = pd.concat(dfs, ignore_index=True)
-    group_sizes = df.groupby(['subject', 'session'])['max_r'].transform('count')
-    df['rank_norm'] = (
-        df.groupby(['subject', 'session'])['max_r']
-        .rank(method='first') / group_sizes
-    )
-    df['rejected'] = df['rank_norm'] > (1.0 - top_fraction)
+    group_sizes = df.groupby(['subject', 'session'])['abs_r_gx'].transform('count')
+    for axis in ('gx', 'gy'):
+        col = f'abs_r_{axis}'
+        df[f'rank_norm_{axis}'] = (
+            df.groupby(['subject', 'session'])[col]
+            .rank(method='first') / group_sizes
+        )
+        df[f'rejected_{axis}'] = df[f'rank_norm_{axis}'] > (1.0 - top_fraction)
     return df
 
 
-def plot_et_scatter(df: pd.DataFrame, output_path: str, top_fraction: float) -> None:
+def plot_et_scatter_axis(
+    df: pd.DataFrame,
+    axis: str,
+    output_path: str,
+    top_fraction: float,
+) -> None:
+    """axis: 'gx' or 'gy'"""
+    r_col   = f'abs_r_{axis}'
+    rank_col = f'rank_norm_{axis}'
+    rej_col  = f'rejected_{axis}'
+    label    = 'gaze x' if axis == 'gx' else 'gaze y'
+
     sns.set_context('poster')
     plt.figure(figsize=(6, 4))
 
-    kept = df[~df['rejected']]
-    rej  = df[ df['rejected']]
+    kept = df[~df[rej_col]]
+    rej  = df[ df[rej_col]]
 
     plt.scatter(
-        kept['rank_norm'], kept['max_r'],
+        kept[rank_col], kept[r_col],
         color='cornflowerblue', s=6, alpha=0.25, label='kept',
     )
     plt.scatter(
-        rej['rank_norm'], rej['max_r'],
+        rej[rank_col], rej[r_col],
         color='salmon', s=6, alpha=0.5, label='rejected',
     )
     plt.axvline(1.0 - top_fraction, color='gray', linestyle='--')
 
-    plt.xlabel('normalized rank')
-    plt.ylabel('max |r| with gaze [a.u.]')
-    plt.legend(frameon=False)
+    plt.xlabel(f'normalized rank [{label}]')
+    plt.ylabel(f'|r| with {label}')
+    plt.legend(frameon=False, loc='upper left')
     sns.despine()
     plt.tight_layout()
 
@@ -180,7 +194,7 @@ def plot_avg_topo(
     avg_rms: np.ndarray, info: mne.Info, output_path: str
 ) -> None:
     sns.set_context('poster')
-    plt.figure(figsize=(4, 4))
+    plt.figure(figsize=(4, 4.8))
     ax = plt.gca()
 
     im, _ = mne.viz.plot_topomap(
@@ -191,7 +205,12 @@ def plot_avg_topo(
         sensors=False,
         cmap='magma',
     )
-    plt.colorbar(im, ax=ax, fraction=0.04, pad=0.04, label='artifact rms [a.u.]')
+    plt.colorbar(
+        im, ax=ax,
+        orientation='horizontal',
+        fraction=0.05, pad=0.08,
+        label='artifact rms [a.u.]',
+    )
     plt.tight_layout()
 
     base = str(output_path).rsplit('.', 1)[0]
@@ -262,10 +281,15 @@ Examples:
         scatter_df = build_scatter_df(all_scores, args.top_fraction)
         n_sess = len(all_scores)
         n_comp = len(scatter_df)
-        n_rej  = scatter_df['rejected'].sum()
-        print(f'Loaded {n_sess} subject-sessions ({n_comp} components, {n_rej} rejected)')
-        out = os.path.join(args.output_dir, 'ica_et_scatter.png')
-        plot_et_scatter(scatter_df, out, args.top_fraction)
+        n_rej_gx = scatter_df['rejected_gx'].sum()
+        n_rej_gy = scatter_df['rejected_gy'].sum()
+        print(
+            f'Loaded {n_sess} subject-sessions ({n_comp} components, '
+            f'rejected: gx={n_rej_gx}, gy={n_rej_gy})'
+        )
+        for axis in ('gx', 'gy'):
+            out = os.path.join(args.output_dir, f'ica_et_scatter_{axis}.png')
+            plot_et_scatter_axis(scatter_df, axis, out, args.top_fraction)
 
     # ---- Plot 2: Average removed topo -------------------------------------
     print('\n--- Loading ICA objects ---')

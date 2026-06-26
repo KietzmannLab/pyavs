@@ -20,7 +20,7 @@ eval "$(conda shell.bash hook)"
 conda activate avs
 
 # Base paths
-script_path="/home/student/p/psulewski/pyAVS/scripts"
+script_path="/home/student/p/psulewski/pyAVS/scripts/ica"
 data_path="/share/klab/datasets/avs/"
 
 # Decode subject (1-5) and session (1-10) from array task ID (1-50)
