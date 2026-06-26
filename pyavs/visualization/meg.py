@@ -66,11 +66,17 @@ def plot_evoked_joint(evoked: mne.Evoked,
 
     n_topos = len(times_sec)
 
-    # Layout: topomaps (row 0) above timeseries (row 1)
+    # Layout: topo columns + 1 narrow colorbar column, timeseries spans full width
     sns.set_context("poster")
-    fig = plt.figure(figsize=(10, 5))
-    gs = fig.add_gridspec(2, n_topos, height_ratios=[1, 2.5], hspace=0.5, wspace=0.1)
+    fig = plt.figure(figsize=(10, 6))
+    # Extra column (width_ratios last entry = 0.15 * per-topo width) holds the colorbar
+    col_widths = [1] * n_topos + [0.15]
+    gs = fig.add_gridspec(2, n_topos + 1,
+                          height_ratios=[2, 2.5],
+                          width_ratios=col_widths,
+                          hspace=0.45, wspace=0.1)
     map_axes = [fig.add_subplot(gs[0, i]) for i in range(n_topos)]
+    cbar_ax = fig.add_subplot(gs[0, n_topos])
     ts_ax = fig.add_subplot(gs[1, :])
 
     # Butterfly + GFP
@@ -99,9 +105,9 @@ def plot_evoked_joint(evoked: mne.Evoked,
     for ax, t_sec in zip(map_axes, times_sec):
         ax.set_title(f'{t_sec * 1000:.0f} ms')
 
-    # Shared colorbar for topomaps
+    # Colorbar in its dedicated column, full height of the topo row
     if map_axes[0].images:
-        fig.colorbar(map_axes[0].images[0], ax=map_axes, shrink=0.8)
+        fig.colorbar(map_axes[0].images[0], cax=cbar_ax)
 
     # Connection lines from topomap bottom to timeseries peak (after ylim is set)
     fig.canvas.draw()

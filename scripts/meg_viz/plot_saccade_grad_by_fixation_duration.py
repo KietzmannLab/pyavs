@@ -54,7 +54,8 @@ logger = get_logger('scripts.meg_viz.saccade_grad_by_fixation_duration')
 
 # Configuration
 N_QUANTILES = 80
-TLIMS = (-0.2, 0.700)  # Time limits for plotting in seconds
+TLIMS = (-0.2, 0.700)          # heatmap time window [s]
+BUTTERFLY_TLIMS = (-0.2, 0.500)  # joint butterfly plot time window [s]
 EVENT_TYPE = 'saccade_scene'
 
 
@@ -619,7 +620,7 @@ def process_subject(
             output_path=output_dir,
             subject_id=subject_id,
             sessions=sessions,
-            tlims=TLIMS,
+            tlims=BUTTERFLY_TLIMS,
         )
 
         return True
