@@ -68,7 +68,7 @@ def plot_evoked_joint(evoked: mne.Evoked,
 
     # Layout: topo columns + 1 narrow colorbar column, timeseries spans full width
     sns.set_context("poster")
-    fig = plt.figure(figsize=(10, 6))
+    fig = plt.figure(figsize=(12, 8))
     # Extra column (width_ratios last entry = 0.15 * per-topo width) holds the colorbar
     col_widths = [1] * n_topos + [0.15]
     gs = fig.add_gridspec(2, n_topos + 1,
@@ -86,10 +86,10 @@ def plot_evoked_joint(evoked: mne.Evoked,
     peak_norm = (peak_heights - peak_heights.min()) / (peak_heights.ptp() + 1e-30)
     ch_colors = plt.cm.magma(peak_norm)
     for i, color in enumerate(ch_colors):
-        ts_ax.plot(times_ms, data_scaled[i], color=color, alpha=0.3)
+        ts_ax.plot(times_ms, data_scaled[i], color=color, alpha=0.6)
     gfp_line = np.std(data_scaled, axis=0)
-    ts_ax.plot(times_ms, gfp_line, color='salmon')
-    ts_ax.axvline(0, color='k', linestyle='--')
+    #ts_ax.plot(times_ms, gfp_line, color='white')
+    ts_ax.axvline(0, color='darkgray', linestyle='--')
     ts_ax.set_xlabel('time [ms]')
     ts_ax.set_ylabel(f'amplitude [{ch_unit}]')
     sns.despine(ax=ts_ax)
