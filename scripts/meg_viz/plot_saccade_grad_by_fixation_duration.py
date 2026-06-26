@@ -396,7 +396,7 @@ def plot_grand_average_butterfly(
         return
 
     # Grand average across all epochs (before any quantile sorting)
-    mean_data = np.mean(grad_data, axis=0)  # (n_channels, n_times)
+    mean_data = np.median(grad_data, axis=0)  # (n_channels, n_times)
 
     evoked = mne.EvokedArray(
         mean_data,
