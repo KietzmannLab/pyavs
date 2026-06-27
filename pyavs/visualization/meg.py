@@ -68,7 +68,7 @@ def plot_evoked_joint(evoked: mne.Evoked,
 
     # Layout: topo columns + 1 narrow colorbar column, timeseries spans full width
     sns.set_context("poster")
-    fig = plt.figure(figsize=(12, 8))
+    fig = plt.figure(figsize=(14, 8))
     # Extra column (width_ratios last entry = 0.15 * per-topo width) holds the colorbar
     col_widths = [1] * n_topos + [0.15]
     gs = fig.add_gridspec(2, n_topos + 1,
