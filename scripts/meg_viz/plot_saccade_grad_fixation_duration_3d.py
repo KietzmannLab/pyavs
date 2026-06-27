@@ -369,6 +369,7 @@ def plot_joy_division_3d(
 
     png_path = os.path.join(output_path, f"{base_filename}.png")
     pdf_path = os.path.join(output_path, f"{base_filename}.pdf")
+    npz_path = os.path.join(output_path, f"{base_filename}_data.npz")
 
     plt.savefig(
         png_path,
@@ -386,7 +387,20 @@ def plot_joy_division_3d(
     )
     plt.close()
 
+    # Save the processed plot data for offline re-rendering (e.g. mandala cover art).
+    # gfp_data is already smoothed, clipped, and baseline-subtracted (as plotted).
+    np.savez(
+        npz_path,
+        gfp_data=gfp_data,
+        times=times[time_mask] * 1000.0,          # ms, matching the plot x-axis
+        quantile_median_durations_ms=quantile_median_durations * 1000.0,
+        tlims_ms=np.array([tlims[0] * 1000.0, tlims[1] * 1000.0]),
+        subject_id=np.array([subject_id]),
+        sessions=np.array(sessions),
+    )
+
     logger.info(f"Saved Joy Division ridge plot to {png_path}")
+    logger.info(f"Saved plot data to {npz_path}")
 
 
 def process_subject(
