@@ -237,12 +237,21 @@ def plot_session_timeline(data_df: pd.DataFrame, output_dir: str,
     """
     logger.info("Creating figure: Session temporal spacing")
 
+    # Require exactly 10 sessions per subject so the rank always runs 1–10
+    sessions_per_subject = data_df.groupby('subject').size()
+    incomplete = sessions_per_subject[sessions_per_subject != 10]
+    if len(incomplete) > 0:
+        raise ValueError(
+            "Every subject must have exactly 10 sessions to rank dots 1–10. "
+            f"Subjects with missing sessions: {incomplete.to_dict()}"
+        )
+
     # Create figure
     plt.figure(figsize=(8, 5))
 
     # Scatter plot with session coloring
-    # add a session time rank variable for coloring
-    data_df['session_rank'] = data_df.groupby('subject')['days_from_first'].rank(method='dense').astype(int)
+    # add a session time rank variable for coloring (1 = earliest, 10 = latest)
+    data_df['session_rank'] = data_df.groupby('subject')['days_from_first'].rank(method='first').astype(int)
 
     scatter = plt.scatter(
         data_df['days_from_first'],

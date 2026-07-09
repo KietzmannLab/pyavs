@@ -495,17 +495,38 @@ def plot_fix2cap_on_scene(
 
 
     
-    # Add caption below image if provided
+    # Add caption below image if provided.
+    # The circles show THIS subject's fixations, colored by whether the fixated target
+    # appears in this subject's OWN caption, so the caption printed below must be the same
+    # subject's caption. A subject never saw a scene twice, so subject + scene uniquely
+    # identifies the caption -- matching on scene alone (as before) could show a different
+    # subject's caption.
     if captions_df is not None and len(captions_df) > 0:
-        # Find caption for this scene
         scene_captions = captions_df[captions_df['scene_ID'] == scene_id]
 
-        if len(scene_captions) > 0:
-            # Get the first transcribed caption for this scene
+        # Restrict to the subject of the plotted fixations.
+        if 'subject' in scene_fixations.columns and 'subject' in scene_captions.columns:
+            fix_subjects = pd.unique(scene_fixations['subject'].dropna())
+            if len(fix_subjects) == 1:
+                scene_captions = scene_captions[scene_captions['subject'] == fix_subjects[0]]
+            else:
+                logger.warning(
+                    f"Scene {scene_id}: plotted fixations span multiple subjects "
+                    f"{fix_subjects.tolist()}; caption subject is ambiguous")
+        else:
+            logger.warning(
+                f"Scene {scene_id}: cannot verify caption subject ('subject' column "
+                f"missing); caption may not match the fixations")
+
+        if len(scene_captions) == 0:
+            logger.warning(
+                f"Scene {scene_id}: no caption matches the plotted fixations' subject; "
+                f"omitting caption to avoid showing a mismatched one")
+        else:
+            # subject + scene is unique, so this is the caption for this viewing
             caption_text = scene_captions.iloc[0]['transcribed_caption']
 
             if pd.notna(caption_text) and str(caption_text).strip():
-                # Add caption text below the image
                 # Position: centered below the image in figure coordinates
                 fig.text(0.5, 0.02, f'"{caption_text}"',
                         ha='center', va='bottom',
