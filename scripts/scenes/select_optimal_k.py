@@ -87,7 +87,7 @@ def select_optimal_k(
     max_clusters=100,
     stepsize=1,
     n_cvals=10,
-    test_size=0.5,
+    test_size=0.1,
     sample_reduction='median',
     minibatch=False,
     n_jobs=-1,
@@ -112,7 +112,8 @@ def select_optimal_k(
     n_cvals : int
         Number of repeated random train/test splits per k.
     test_size : float
-        Fraction of samples held out for the silhouette evaluation on each split.
+        Fraction of samples held out for the silhouette evaluation on each split. Default
+        0.1 mirrors the original 90/10 train/test splits that selected k=60.
     sample_reduction : {'median', 'min', 'mean'} or ('percentile', q)
         Reduction applied over samples to the split-averaged per-sample distribution.
         Default 'median'.
