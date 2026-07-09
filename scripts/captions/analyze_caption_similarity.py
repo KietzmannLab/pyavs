@@ -460,22 +460,28 @@ Examples:
     
     # Data path
     parser.add_argument('--data-path', type=str,
-                       help='Path to AVS data directory', default='/share/klab/datasets/avs/')
+                       help='Path to AVS data directory', default=None)
     
     # COCO annotations
-    parser.add_argument('--coco-annotations', type=str, default='/share/klab/datasets/avs/input/annotations/',
+    parser.add_argument('--coco-annotations', type=str, default=None,
                        help='Path to COCO annotations file (optional, will auto-search if not provided)')
     
     # Output options
     parser.add_argument('--output-dir', type=str,
-                       help='Directory to save results and plots (optional)', default='/share/klab/psulewski/psulewski/pyavs/captions/')
+                       help='Directory to save results and plots (optional)', default=None)
     
     # Processing options
     parser.add_argument('--verbose', '-v', action='store_true',
                        help='Enable verbose logging')
     
     args = parser.parse_args()
-    
+    if args.data_path is None:
+        from pyavs import get_data_path as _get_dp
+        args.data_path = _get_dp()
+    if args.data_path is None:
+        parser.error(
+            "No data path configured. Run: pyavs configure --data-path /path/to/data"
+        )
     # Set up logging
     import logging
     if args.verbose:

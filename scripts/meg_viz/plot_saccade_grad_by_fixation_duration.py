@@ -668,16 +668,22 @@ Examples:
 
     parser.add_argument('--data-path', type=str, required=False,
                         help='Path to AVS data directory',
-                        default='/share/klab/datasets/avs/')
+                        default=None)
     parser.add_argument('--output-dir', type=str, required=False,
                         help='Output directory for figures',
-                        default='/share/klab/psulewski/pyavs/meg_viz/')
+                        default=None)
 
     parser.add_argument('--verbose', '-v', action='store_true',
                         help='Enable verbose logging')
 
     args = parser.parse_args()
-
+    if args.data_path is None:
+        from pyavs import get_data_path as _get_dp
+        args.data_path = _get_dp()
+    if args.data_path is None:
+        parser.error(
+            "No data path configured. Run: pyavs configure --data-path /path/to/data"
+        )
     # Determine sessions
     if args.sessions is not None:
         sessions = args.sessions

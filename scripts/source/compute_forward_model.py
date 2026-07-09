@@ -262,13 +262,13 @@ def main():
     parser.add_argument(
         '--data-path', '-d',
         type=str,
-        default='/share/klab/datasets/avs/',
+        default=None,
         help='AVS BIDS data directory',
     )
     parser.add_argument(
         '--subjects-dir',
         type=str,
-        default='/share/klab/datasets/avs/rawdir/',
+        default=None,
         help='FreeSurfer subjects directory (contains as01/, as02/, ...)',
     )
     parser.add_argument(
@@ -304,6 +304,13 @@ def main():
 
     args = parser.parse_args()
 
+    if args.data_path is None:
+        from pyavs import get_data_path as _get_dp
+        args.data_path = _get_dp()
+    if args.data_path is None:
+        parser.error(
+            "No data path configured. Run: pyavs configure --data-path /path/to/data"
+        )
     log_level = logging.DEBUG if args.verbose else logging.INFO
     logging.basicConfig(level=log_level, format='%(levelname)s: %(message)s')
 

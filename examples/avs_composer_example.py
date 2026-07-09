@@ -29,20 +29,15 @@ def main():
     # Configuration
     subject_id = 4
     session = 2
-    data_path = "/share/klab/datasets/avs/"  # Update this path as needed
-    
+    data_path = pyavs.get_data_path()
+    if data_path is None:
+        logger.error("No data path configured. Run: pyavs configure --data-path /path/to/data")
+        return
+
     # NEW: ET event offset parameter for fringe feature
     # When True, uses time_in_trial + duration as epoch timing instead of event onset
     onset_offset = False  # Set to True to use event offset timing instead of onset
     recording = "scene"  # Use "caption" for captioned data, "scene" for scene data
-    # Set up pyAVS data path
-    try:
-        pyavs.set_data_path(data_path)
-        logger.info(f"Data path configured: {data_path}")
-    except FileNotFoundError:
-        logger.warning(f"Data path not found: {data_path}")
-        logger.info("Please update data_path variable or set PYAVS_DATA_PATH environment variable")
-        return
     
     # Initialize AVS Composer
     logger.info("\n1. Initializing AVS Composer...")

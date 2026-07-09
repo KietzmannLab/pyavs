@@ -296,7 +296,13 @@ Examples:
                        help='List available models and exit')
     
     args = parser.parse_args()
-    
+    if args.data_path is None:
+        from pyavs import get_data_path as _get_dp
+        args.data_path = _get_dp()
+    if args.data_path is None:
+        parser.error(
+            "No data path configured. Run: pyavs configure --data-path /path/to/data"
+        )
     # Set up logging
     if args.verbose:
         logging.getLogger('pyavs').setLevel(logging.DEBUG)

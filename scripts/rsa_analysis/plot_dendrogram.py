@@ -342,10 +342,10 @@ Examples:
     )
 
     parser.add_argument('--rsa-dir', type=str,
-                       default="/share/klab/psulewski/psulewski/pyavs/rsa",
+                       default=None,
                        help='Directory containing RSA results')
     parser.add_argument('--data-path', type=str,
-                       default="/share/klab/datasets/avs/",
+                       default=None,
                        help='Base data path')
     parser.add_argument('--subjects', type=int, nargs='+',
                        default=[1, 2, 3, 4, 5],
@@ -366,13 +366,19 @@ Examples:
                             'timepoint), "embedding" (network layer RDM), or "both" (cluster '
                             'based on MEG and apply same leaf order to embedding RDM)')
     parser.add_argument('--output-dir', type=str,
-                       default="/share/klab/psulewski/psulewski/pyavs/rsa",
+                       default=None,
                        help='Output directory for plots')
     parser.add_argument('--verbose', '-v', action='store_true',
                        help='Increase verbosity')
 
     args = parser.parse_args()
-
+    if args.data_path is None:
+        from pyavs import get_data_path as _get_dp
+        args.data_path = _get_dp()
+    if args.data_path is None:
+        parser.error(
+            "No data path configured. Run: pyavs configure --data-path /path/to/data"
+        )
     if args.verbose:
         logging.getLogger('pyavs').setLevel(logging.DEBUG)
 

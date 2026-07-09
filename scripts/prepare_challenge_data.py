@@ -370,9 +370,9 @@ def main():
         description='Prepare brain encoding challenge data package',
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument('--data-path', required=True,
+    parser.add_argument('--data-path', default=None,
                         help='Path to AVS dataset root (where derivatives/ lives)')
-    parser.add_argument('--output-path', default='/share/klab/psulewki/psulewski/brainencoding26v4',
+    parser.add_argument('--output-path', default=None,
                         help='Output directory for challenge package')
     parser.add_argument('--train-subjects', type=int, nargs='+', default=[1, 2, 3, 4, 5],
                         help='Subject IDs used for training (default: 1 2 3 4 5)')
@@ -391,6 +391,13 @@ def main():
     parser.add_argument('--verbose', '-v', action='store_true')
     args = parser.parse_args()
 
+    if args.data_path is None:
+    from pyavs import get_data_path as _get_dp
+    args.data_path = _get_dp()
+    if args.data_path is None:
+    parser.error(
+    "No data path configured. Run: pyavs configure --data-path /path/to/data"
+    )
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING,
                         format='%(levelname)s | %(name)s | %(message)s')
 

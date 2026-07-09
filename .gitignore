@@ -301,6 +301,9 @@ docs/api/generated/
 *.out
 *.err
 
+# Machine-specific data path symlink (created by pyavs.configure())
+pyavs/data
+
 # image files
 *.png
 *.jpg

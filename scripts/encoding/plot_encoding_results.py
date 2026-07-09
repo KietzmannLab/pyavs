@@ -431,11 +431,11 @@ def main():
     parser.add_argument('--results-file', help='Path to encoding results NPZ file (single subject mode)')
 
     # Multi-subject mode
-    parser.add_argument('--results-dir', help='Directory containing encoding results (multi-subject mode)', default="/share/klab/psulewski/psulewski/pyavs/encoding/")
+    parser.add_argument('--results-dir', help='Directory containing encoding results (multi-subject mode)', default=None)
     parser.add_argument('--subjects', type=int, nargs='+', help='Subject IDs to load (multi-subject mode)', default=[1, 2, 3, 4, 5])
 
     # Output options
-    parser.add_argument('--output-dir', help='Output directory for plots', default="/share/klab/psulewski/psulewski/pyavs/encoding")
+    parser.add_argument('--output-dir', help='Output directory for plots', default=None)
 
     args = parser.parse_args()
 

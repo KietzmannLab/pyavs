@@ -611,7 +611,7 @@ def main():
     parser = argparse.ArgumentParser(description="MEG RSA Pipeline with Multi-Model Support")
 
     # Required arguments
-    parser.add_argument('--data-path', required=False, help='Data directory path', default="/share/klab/datasets/avs/")
+    parser.add_argument('--data-path', required=False, help='Data directory path', default=None)
     parser.add_argument('--subjects', type=int, nargs='+', required=False, help='Subject IDs', default=[1])
     parser.add_argument('--sessions', type=int, nargs='+', help='Session numbers', default=[1,2,3,4,5,6,7,8,9,10])
 
@@ -624,11 +624,17 @@ def main():
                        help='Model layers (must match number of models)')
 
     # Optional parameters
-    parser.add_argument('--output-dir', help='Output directory' , default="/share/klab/psulewski/psulewski/pyavs/rsa")
+    parser.add_argument('--output-dir', help='Output directory' , default=None)
     parser.add_argument('--n-jobs', type=int, default=-2, help='Number of parallel jobs')
 
     args = parser.parse_args()
-
+    if args.data_path is None:
+        from pyavs import get_data_path as _get_dp
+        args.data_path = _get_dp()
+    if args.data_path is None:
+        parser.error(
+            "No data path configured. Run: pyavs configure --data-path /path/to/data"
+        )
     # Validate model/layer pairing
     if len(args.models) != len(args.layers):
         raise ValueError(f"Number of models ({len(args.models)}) must match number of layers ({len(args.layers)})")

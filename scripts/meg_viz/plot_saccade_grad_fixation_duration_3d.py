@@ -388,12 +388,27 @@ def plot_joy_division_3d(
     plt.close()
 
     # Save the processed plot data for offline re-rendering (e.g. mandala cover art).
-    # gfp_data is already smoothed, clipped, and baseline-subtracted (as plotted).
+    # All arrays reflect what was actually plotted:
+    #   gfp  — smoothed, scaled (fT/cm), clipped, baseline-zeroed; shape (n_quantiles, n_t)
+    #   t    — time axis in ms, already masked to tlims
+    #   onset_t_ms / duration_t_ms — time of each marker, per quantile
+    #   onset_gfp / duration_gfp   — GFP amplitude at each marker (fT/cm, as plotted)
+    onset_t_ms    = np.array([p[0] for p in onset_pts])        # all 0.0
+    onset_gfp     = np.array([np.interp(p[0], t, gfp[i])
+                               for i, p in enumerate(onset_pts)])
+    duration_t_ms = np.array([p[0] for p in duration_pts])     # median dur per quantile
+    duration_gfp  = np.array([np.interp(p[0], t, gfp[i])
+                               for i, p in enumerate(duration_pts)])
+
     np.savez(
         npz_path,
-        gfp_data=gfp_data,
-        times=times[time_mask] * 1000.0,          # ms, matching the plot x-axis
+        gfp_data=gfp,                                          # (n_quantiles, n_t), fT/cm
+        times=t,                                               # (n_t,) in ms
         quantile_median_durations_ms=quantile_median_durations * 1000.0,
+        onset_t_ms=onset_t_ms,
+        onset_gfp=onset_gfp,
+        duration_t_ms=duration_t_ms,
+        duration_gfp=duration_gfp,
         tlims_ms=np.array([tlims[0] * 1000.0, tlims[1] * 1000.0]),
         subject_id=np.array([subject_id]),
         sessions=np.array(sessions),
@@ -504,16 +519,22 @@ Examples:
                         help='Sessions to concatenate')
 
     parser.add_argument('--data-path', type=str,
-                        default='/share/klab/datasets/avs/',
+                        default=None,
                         help='Path to AVS data directory')
     parser.add_argument('--output-dir', type=str,
-                        default='/share/klab/psulewski/pyavs/meg_viz/',
+                        default=None,
                         help='Output directory for plots')
     parser.add_argument('--verbose', '-v', action='store_true',
                         help='Enable verbose logging')
 
     args = parser.parse_args()
-
+    if args.data_path is None:
+        from pyavs import get_data_path as _get_dp
+        args.data_path = _get_dp()
+    if args.data_path is None:
+        parser.error(
+            "No data path configured. Run: pyavs configure --data-path /path/to/data"
+        )
     # Resolve sessions
     if args.sessions is not None:
         sessions = args.sessions

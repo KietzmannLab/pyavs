@@ -231,10 +231,10 @@ def main():
 
     # Input/output paths
     parser.add_argument('--data-dir', type=str,
-                       default="/share/klab/psulewski/psulewski/pyavs/stabilizer",
+                       default=None,
                        help='Directory containing head position NPZ files')
     parser.add_argument('--output-dir', type=str,
-                       default="/share/klab/psulewski/psulewski/pyavs/stabilizer/analysis",
+                       default=None,
                        help='Output directory for metrics')
 
     # Subject/session selection

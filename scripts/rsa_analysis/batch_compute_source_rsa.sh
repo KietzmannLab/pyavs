@@ -23,7 +23,7 @@ script_path="/home/student/p/psulewski/pyAVS/scripts/rsa_analysis"
 data_path="/share/klab/datasets/avs/"
 rsa_results_dir="/share/klab/psulewski/psulewski/pyavs/rsa"
 output_dir="/share/klab/psulewski/psulewski/pyavs/source_rsa"
-layer="layer4"
+layer="layer3"
 # One subject per array task
 subject=${SLURM_ARRAY_TASK_ID}
 

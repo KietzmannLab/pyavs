@@ -721,7 +721,7 @@ def main():
 
     parser.add_argument(
         '--data-path',
-        type=str, default='/share/klab/datasets/avs/',
+        type=str, default=None,
         help='AVS data root',
     )
     parser.add_argument(
@@ -751,17 +751,17 @@ def main():
     )
     parser.add_argument(
         '--subjects-dir',
-        type=str, default='/share/klab/datasets/avs/rawdir/',
+        type=str, default=None,
         help='FreeSurfer subjects directory',
     )
     parser.add_argument(
         '--output-dir', '-o',
-        type=str, default='/share/klab/psulewski/psulewski/pyavs/source_rsa/',
+        type=str, default=None,
         help='Output directory for source RSA .stc files',
     )
     parser.add_argument(
         '--fwd-dir',
-        type=str, default='/share/klab/datasets/avs/AVS-UTILS',
+        type=str, default=None,
         help=(
             'Root of AVS-UTILS tree containing pre-computed forward models. '
             'When given, --fwd-session is ignored.'
@@ -790,6 +790,13 @@ def main():
     )
     args = parser.parse_args()
 
+    if args.data_path is None:
+        from pyavs import get_data_path as _get_dp
+        args.data_path = _get_dp()
+    if args.data_path is None:
+        parser.error(
+            "No data path configured. Run: pyavs configure --data-path /path/to/data"
+        )
     if len(args.models) != len(args.layers):
         raise ValueError(
             f"Number of models ({len(args.models)}) must match "

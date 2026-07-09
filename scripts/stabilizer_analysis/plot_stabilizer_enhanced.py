@@ -209,12 +209,12 @@ def main():
 
     parser.add_argument(
         '--metrics-dir', type=str,
-        default="/share/klab/psulewski/psulewski/pyavs/stabilizer/analysis",
+        default=None,
         help='Directory containing repositioning_metrics.csv'
     )
     parser.add_argument(
         '--output-dir', type=str,
-        default="/share/klab/psulewski/psulewski/pyavs/stabilizer/analysis/figures",
+        default=None,
         help='Output directory for figures'
     )
 

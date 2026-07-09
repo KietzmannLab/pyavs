@@ -125,7 +125,7 @@ def run_challenge2(data_path: Path, out_dir: Path, eval_meta_path: Path):
 
 def main():
     parser = argparse.ArgumentParser(description='Make example Ridge-on-duration submission')
-    parser.add_argument('--data-path', required=True,
+    parser.add_argument('--data-path', default=None,
                         help='Root of the challenge data (contains challenge1/, challenge2/)')
     parser.add_argument('--c1-eval-metadata', default=None,
                         help='Path to the Codabench challenge1 eval metadata CSV '
@@ -140,6 +140,13 @@ def main():
                         help='Which challenge to submit for (default: 1)')
     args = parser.parse_args()
 
+    if args.data_path is None:
+    from pyavs import get_data_path as _get_dp
+    args.data_path = _get_dp()
+    if args.data_path is None:
+    parser.error(
+    "No data path configured. Run: pyavs configure --data-path /path/to/data"
+    )
     data_path = Path(args.data_path)
     out_dir   = Path(args.output_path)
 

@@ -21,21 +21,61 @@ configure_logging(level='INFO', console=True, file_path=None, use_colors=True)
 
 # Main API functions
 from .config import get_config, set_config, load_config, save_config
+from .config.dirs import get_dirs as dirs
 # Backward compatibility
 from .config.manager import get_config as _get_global_config
-def set_data_path(path): 
+
+
+def set_data_path(path):
     config = _get_global_config()
     config.paths.data_path = path
     config.paths.setup_paths()
-def get_data_path(): 
+
+
+def get_data_path():
     config = _get_global_config()
     return config.paths.data_path
+
+
 def setup_data_directory(path=None):
     config = _get_global_config()
     if path:
         config.paths.data_path = path
     config.paths.setup_paths()
     return config.paths.data_path
+
+
+def configure(data_path: str) -> None:
+    """Configure pyavs data directory once per machine/environment.
+
+    Writes ~/.config/pyavs/config.json and creates a pyavs/data symlink
+    pointing to the given path. After calling this once, all scripts and
+    notebooks resolve the data path automatically without further configuration.
+
+    Parameters
+    ----------
+    data_path : str
+        Absolute path to the AVS data directory.
+    """
+    import json
+    from pathlib import Path
+
+    resolved = str(Path(data_path).resolve())
+
+    # Write user config
+    config_dir = Path.home() / '.config' / 'pyavs'
+    config_dir.mkdir(parents=True, exist_ok=True)
+    with open(config_dir / 'config.json', 'w') as f:
+        json.dump({'data_path': resolved}, f, indent=2)
+
+    # Create/refresh symlink inside package source tree
+    pkg_data = Path(__file__).parent / 'data'
+    if pkg_data.is_symlink() or pkg_data.exists():
+        pkg_data.unlink()
+    pkg_data.symlink_to(resolved)
+
+    # Update the live global config
+    set_data_path(resolved)
 from .dataloader.loaders import load_eye_events, load_experiment_log, load_anatomical, load_scenes
 from .dataloader.eye import load_and_enrich_eye_events, add_fixation_sequence_position, add_cross_event_information
 from .dataloader.meg import load_meg_raw, load_meg_preprocessed, load_meg_session, load_and_preprocess_meg_run

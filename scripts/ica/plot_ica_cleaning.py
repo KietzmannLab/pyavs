@@ -360,7 +360,7 @@ Examples:
         """,
     )
     parser.add_argument(
-        '--data-path', type=str, default='/share/klab/datasets/avs/',
+        '--data-path', type=str, default=None,
         help='BIDS root data directory containing derivatives/',
     )
     parser.add_argument(
@@ -381,6 +381,13 @@ Examples:
     )
     args = parser.parse_args()
 
+    if args.data_path is None:
+        from pyavs import get_data_path as _get_dp
+        args.data_path = _get_dp()
+    if args.data_path is None:
+        parser.error(
+            "No data path configured. Run: pyavs configure --data-path /path/to/data"
+        )
     if args.output_dir is None:
         args.output_dir = str(
             Path(args.data_path) / 'derivatives' / 'pyavs' / 'meg_quality'

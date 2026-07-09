@@ -193,7 +193,7 @@ Examples:
     parser.add_argument('--sessions', type=int, nargs='+', default=[1],
                         help='List of session numbers (default: [1])')
 
-    parser.add_argument('--data-path', type=str, default='/share/klab/datasets/avs/',
+    parser.add_argument('--data-path', type=str, default=None,
                         help='Path to AVS data directory')
     parser.add_argument('--n-jobs', type=int, default=-1,
                         help='Parallel jobs for batch processing (default: 1)')
@@ -209,7 +209,13 @@ Examples:
                         help='Enable verbose logging')
 
     args = parser.parse_args()
-
+    if args.data_path is None:
+        from pyavs import get_data_path as _get_dp
+        args.data_path = _get_dp()
+    if args.data_path is None:
+        parser.error(
+            "No data path configured. Run: pyavs configure --data-path /path/to/data"
+        )
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING)
 
     if args.subject is not None and args.session is None:

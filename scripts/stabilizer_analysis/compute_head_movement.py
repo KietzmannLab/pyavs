@@ -325,7 +325,7 @@ def main():
 
     # Data path configuration
     parser.add_argument('--data-path', type=str,
-                       default="/share/klab/datasets/avs/",
+                       default=None,
                        help='Base data directory')
 
     # Subject and session selection
@@ -338,7 +338,7 @@ def main():
 
     # Output configuration
     parser.add_argument('--output-dir', type=str,
-                       default="/share/klab/psulewski/psulewski/pyavs/stabilizer",
+                       default=None,
                        help='Output directory for results')
 
     # Processing options
@@ -349,7 +349,13 @@ def main():
                        help='Number of parallel jobs for processing runs within each session (default: 1)')
 
     args = parser.parse_args()
-
+    if args.data_path is None:
+        from pyavs import get_data_path as _get_dp
+        args.data_path = _get_dp()
+    if args.data_path is None:
+        parser.error(
+            "No data path configured. Run: pyavs configure --data-path /path/to/data"
+        )
     # Set up logging
     if args.verbose:
         logging.getLogger('pyavs').setLevel(logging.DEBUG)

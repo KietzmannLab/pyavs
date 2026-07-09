@@ -198,8 +198,8 @@ def check_session(rawdir: Path, subject: int, session: int) -> pd.DataFrame:
 
 def main():
     parser = argparse.ArgumentParser(description='Check MEG trigger sequences for all trials')
-    parser.add_argument('--rawdir', default='/share/klab/datasets/avs/rawdir')
-    parser.add_argument('--outdir', default='/share/klab/psulewski/psulewski/pyavs')
+    parser.add_argument('--rawdir', default=None)
+    parser.add_argument('--outdir', default=None)
     parser.add_argument('--subjects', nargs='+', type=int, default=[1])
     parser.add_argument('--sessions', nargs='+', type=int, default=list(range(1, 11)))
     args = parser.parse_args()

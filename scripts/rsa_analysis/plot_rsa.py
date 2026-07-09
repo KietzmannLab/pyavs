@@ -557,8 +557,8 @@ def main():
     parser = argparse.ArgumentParser(
         description="Plot RSA analysis results: multi-layer timeseries with noise ceiling"
     )
-    parser.add_argument("--rsa-dir", type=str, default="/share/klab/psulewski/psulewski/pyavs/rsa")
-    parser.add_argument("--output-dir", type=str, default="/share/klab/psulewski/psulewski/pyavs/rsa")
+    parser.add_argument("--rsa-dir", type=str, default=None)
+    parser.add_argument("--output-dir", type=str, default=None)
     parser.add_argument("--subjects", type=int, nargs="+", default=[1, 2, 3, 4, 5])
     parser.add_argument("--single-subject", type=int, default=None)
     parser.add_argument("--model", "--model-name", dest="model_name", default="resnet50_ecoset_crop")

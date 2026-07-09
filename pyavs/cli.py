@@ -98,8 +98,22 @@ Examples:
     batch_parser.add_argument('--parallel', action='store_true', help='Run in parallel')
     batch_parser.add_argument('--n-jobs', type=int, default=1, help='Number of parallel jobs')
     
-    # Setup
-    setup_parser = subparsers.add_parser('setup', help='Set up pyAVS configuration')
+    # Configure (one-time data path setup)
+    configure_parser = subparsers.add_parser(
+        'configure',
+        help='Configure the AVS data path (run once per machine)',
+    )
+    configure_parser.add_argument(
+        '--data-path', type=str,
+        help='Absolute path to the AVS data directory',
+    )
+    configure_parser.add_argument(
+        '--show', action='store_true',
+        help='Print the currently configured data path and exit',
+    )
+
+    # Setup (legacy, kept for backward compatibility)
+    setup_parser = subparsers.add_parser('setup', help='Set up pyAVS configuration (legacy; prefer configure)')
     setup_parser.add_argument('--data-path', type=str, required=True, help='Path to AVS dataset')
     setup_parser.add_argument('--freesurfer-dir', type=str, help='FreeSurfer subjects directory')
     setup_parser.add_argument('--create-config', action='store_true', help='Create configuration file')
@@ -131,7 +145,9 @@ Examples:
         logger.info(f"Data path set to: {args.data_path}")
     
     # Execute command
-    if args.command == 'check-data':
+    if args.command == 'configure':
+        configure_command(args)
+    elif args.command == 'check-data':
         check_data_command(args)
     elif args.command == 'preprocess':
         preprocess_command(args)
@@ -145,6 +161,24 @@ Examples:
         setup_command(args)
     else:
         parser.print_help()
+
+
+def configure_command(args):
+    """Configure the data path (one-time per machine)."""
+    if args.show:
+        path = pyavs.get_data_path()
+        if path is None:
+            logger.error('No data path configured.')
+            logger.error('Run: pyavs configure --data-path /path/to/data')
+            sys.exit(1)
+        print(path)
+    elif args.data_path is None:
+        logger.error('Provide --data-path or use --show to print the current path.')
+        sys.exit(1)
+    else:
+        pyavs.configure(args.data_path)
+        logger.info(f'Data path configured: {args.data_path}')
+        logger.info('Config written to: ~/.config/pyavs/config.json')
 
 
 def check_data_command(args):
@@ -354,37 +388,17 @@ def batch_command(args):
 
 
 def setup_command(args):
-    """Setup command."""
+    """Setup command (legacy — delegates to configure)."""
     logger.info("Setting up pyAVS configuration...")
-    
-    # Set data path
-    pyavs.set_data_path(args.data_path)
-    logger.info(f"Data path set to: {args.data_path}")
-    
-    # Set FreeSurfer directory if provided
+
+    # Persist via the canonical configure path
+    pyavs.configure(args.data_path)
+    logger.info(f"Data path configured: {args.data_path}")
+
     if args.freesurfer_dir:
         os.environ['SUBJECTS_DIR'] = args.freesurfer_dir
         logger.info(f"FreeSurfer subjects directory set to: {args.freesurfer_dir}")
-    
-    # Create configuration file if requested
-    if args.create_config:
-        config = {
-            'data_path': args.data_path,
-            'freesurfer_dir': args.freesurfer_dir,
-            'default_preprocessing': {
-                'apply_maxwell_filter': True,
-                'apply_bandpass_filter': False,
-                'filter_params': {'l_freq': 0.2, 'h_freq': 200.0},
-                'apply_ica': False
-            }
-        }
-        
-        config_path = Path.home() / '.pyavs_config.json'
-        with open(config_path, 'w') as f:
-            json.dump(config, f, indent=2)
-        
-        logger.info(f"Configuration file created: {config_path}")
-    
+
     logger.info("Setup completed!")
 
 

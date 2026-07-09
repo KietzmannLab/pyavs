@@ -402,25 +402,28 @@ def main():
     
     # Create configuration with standardized parameters
     config = PyAVSConfig()
-    config.data_path = "/share/klab/datasets/avs/"
-    plots_dir = "/share/klab/psulewski/psulewski/pyavs/object_detection"
-    
+    DATA_PATH = config.data_path
+    if DATA_PATH is None:
+        print("No data path configured. Run: pyavs configure --data-path /path/to/data")
+        return
+
+    plots_dir = None  # Set to a directory path to save output plots
+
     # Configuration
     SUBJECT_ID = 4
     SESSION_ID = 10
-    DATA_PATH = config.data_path
-    TRANSFORMED_ANNOTATIONS_DIR = "/share/klab/datasets/avs/AVS-UTILS/avs_scene_annotations/cocostuff/"
-    
+    TRANSFORMED_ANNOTATIONS_DIR = os.path.join(DATA_PATH, 'AVS-UTILS', 'avs_scene_annotations', 'cocostuff')
+
     print(f"Using standardized visual parameters:")
     print(f"  Screen size: {config.screen_size_pixels} pixels")
     print(f"  Screen usage: {config.screen_usage}")
     print(f"  Pixels per degree: {config.get_pixels_per_degree():.1f}")
     print(f"  Scene scaling factor: {config.get_scene_scaling_factor():.3f}\n")
-    
+
     # Check if paths exist
     if not os.path.exists(DATA_PATH):
         print(f"ERROR: Data path not found: {DATA_PATH}")
-        print("Please update DATA_PATH in the script to point to your AVS data directory")
+        print("Please run: pyavs configure --data-path /path/to/data")
         return
     
     if not os.path.exists(TRANSFORMED_ANNOTATIONS_DIR):

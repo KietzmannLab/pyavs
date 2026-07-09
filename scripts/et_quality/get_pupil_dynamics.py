@@ -128,7 +128,7 @@ def main():
     parser.add_argument(
         '--data-path', '-d',
         type=str,
-        default='/share/klab/datasets/avs/',
+        default=None,
         help='Path to AVS data directory (default: /share/klab/datasets/avs/)'
     )
     parser.add_argument(
@@ -159,6 +159,13 @@ def main():
 
     args = parser.parse_args()
 
+    if args.data_path is None:
+        from pyavs import get_data_path as _get_dp
+        args.data_path = _get_dp()
+    if args.data_path is None:
+        parser.error(
+            "No data path configured. Run: pyavs configure --data-path /path/to/data"
+        )
     # Discover all subject-session pairs, then filter by --subjects / --sessions
     all_pairs = discover_subject_sessions(args.data_path, args.prefix)
 

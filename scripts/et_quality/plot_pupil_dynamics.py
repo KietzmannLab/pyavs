@@ -360,7 +360,7 @@ def main():
     parser.add_argument(
         '--data-path', '-d',
         type=str,
-        default='/share/klab/datasets/avs/',
+        default=None,
         help='Path to AVS data directory (default: /share/klab/datasets/avs/)'
     )
     parser.add_argument(
@@ -380,7 +380,7 @@ def main():
     parser.add_argument(
         '--output-dir', '-o',
         type=str,
-        default='/share/klab/psulewski/psulewski/pyavs/et_quality/',
+        default=None,
         help='Output directory for figures'
     )
     parser.add_argument(
@@ -403,6 +403,13 @@ def main():
 
     args = parser.parse_args()
 
+    if args.data_path is None:
+        from pyavs import get_data_path as _get_dp
+        args.data_path = _get_dp()
+    if args.data_path is None:
+        parser.error(
+            "No data path configured. Run: pyavs configure --data-path /path/to/data"
+        )
     log_level = logging.DEBUG if args.verbose else logging.INFO
     logging.basicConfig(level=log_level, format='%(levelname)s: %(message)s')
 

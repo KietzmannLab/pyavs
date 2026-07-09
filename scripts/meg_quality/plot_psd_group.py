@@ -208,7 +208,7 @@ def main():
         description='Plot group-level PSD comparison with 95% CI'
     )
     parser.add_argument(
-        '--input-dir', type=str, default='/share/klab/psulewski/pyavs/meg_quality/',
+        '--input-dir', type=str, default=None,
         help='Directory containing per-subject PSD data files'
     )
     parser.add_argument(

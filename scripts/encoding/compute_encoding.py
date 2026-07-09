@@ -559,7 +559,7 @@ def main():
     parser = argparse.ArgumentParser(description="MEG Encoding Analysis Pipeline")
 
     # Required arguments
-    parser.add_argument('--data-path', required=True, help='Data directory path')
+    parser.add_argument('--data-path', default=None, help='Data directory path')
     parser.add_argument('--subjects', type=int, nargs='+', required=True, help='Subject IDs')
     parser.add_argument('--sessions', type=int, nargs='+', default=[1,2,3,4,5,6,7,8,9,10], help='Session numbers')
 
@@ -574,12 +574,18 @@ def main():
                        help='Decimation factor: keep every Nth timepoint (default: 1)')
 
     # Optional parameters
-    parser.add_argument('--output-dir', help='Output directory', default="/share/klab/psulewski/psulewski/pyavs/encoding")
+    parser.add_argument('--output-dir', help='Output directory', default=None)
     parser.add_argument('--n-jobs', type=int, default=-1, help='Number of parallel jobs')
     parser.add_argument('--clip-outliers', action='store_true', help='Enable point-wise outlier clipping (disabled by default)')
 
     args = parser.parse_args()
-
+    if args.data_path is None:
+        from pyavs import get_data_path as _get_dp
+        args.data_path = _get_dp()
+    if args.data_path is None:
+        parser.error(
+            "No data path configured. Run: pyavs configure --data-path /path/to/data"
+        )
     # Setup paths
     data_path = args.data_path
     output_dir = Path(args.output_dir) if args.output_dir else Path(data_path) / 'encoding_results'

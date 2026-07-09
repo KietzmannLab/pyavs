@@ -182,9 +182,9 @@ def audit_session(
 
 def main():
     parser = argparse.ArgumentParser(description="Export MEG trigger audit for all subjects/sessions")
-    parser.add_argument('--rawdir', default='/share/klab/datasets/avs/rawdir',
+    parser.add_argument('--rawdir', default=None,
                         help='Path to rawdir (default: /share/klab/datasets/avs/rawdir)')
-    parser.add_argument('--outdir', default='/share/klab/psulewski/psulewski/pyavs',
+    parser.add_argument('--outdir', default=None,
                         help='Output directory for audit files (default: /share/klab/psulewski/psulewski/pyavs)')
     parser.add_argument('--subjects', nargs='+', type=int, default=MAIN_SUBJECTS,
                         help=f'Subject numbers to process (default: {MAIN_SUBJECTS})')

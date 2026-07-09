@@ -48,8 +48,8 @@
     "save_filters": true
   },
   "paths": {
-    "data_path": "/share/klab/datasets/avs",
-    "server": "uos",
+    "data_path": null,
+    "server": "auto",
     "output_prefix": "as",
     "cache_dir": null,
     "raw_dir": null,

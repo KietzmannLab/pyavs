@@ -622,14 +622,14 @@ def main():
     parser.add_argument(
         '--data-path', '-d',
         type=str,
-        default='/share/klab/datasets/avs/',
+        default=None,
         help='Path to AVS data directory (default: /share/klab/datasets/avs/)'
     )
 
     parser.add_argument(
         '--output-dir', '-o',
         type=str,
-        default='/share/klab/psulewski/pyavs/meg_quality/',
+        default=None,
         help='Output directory for figures (default: /share/klab/psulewski/psulewski/pyavs/meg_quality/)'
     )
 
@@ -715,6 +715,13 @@ def main():
 
     args = parser.parse_args()
 
+    if args.data_path is None:
+        from pyavs import get_data_path as _get_dp
+        args.data_path = _get_dp()
+    if args.data_path is None:
+        parser.error(
+            "No data path configured. Run: pyavs configure --data-path /path/to/data"
+        )
     # Setup logging
     log_level = logging.DEBUG if args.verbose else logging.INFO
     logging.basicConfig(

@@ -978,7 +978,7 @@ def main():
     )
 
     # Required arguments
-    parser.add_argument('--data-path', required=True, help='Path to data directory')
+    parser.add_argument('--data-path', default=None, help='Path to data directory')
     parser.add_argument('--subjects-dir', required=True, help='FreeSurfer subjects directory')
     parser.add_argument('--subjects', type=int, nargs='+', required=True, help='Subject IDs')
 
@@ -1024,7 +1024,13 @@ def main():
     parser.add_argument('--verbose', action='store_true', help='Verbose output')
 
     args = parser.parse_args()
-
+    if args.data_path is None:
+        from pyavs import get_data_path as _get_dp
+        args.data_path = _get_dp()
+    if args.data_path is None:
+        parser.error(
+            "No data path configured. Run: pyavs configure --data-path /path/to/data"
+        )
     # Determine template raw file
     if args.template_raw is None:
         # Try to find default template

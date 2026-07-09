@@ -18,6 +18,7 @@ from typing import List, Optional, Dict, Tuple
 # Add pyavs to path if not installed
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import pyavs
 from pyavs.utils.logging import get_logger
 from pyavs.utils.config import get_config
 from pyavs.utils.paths import get_derivatives_path
@@ -292,7 +293,7 @@ def main():
     
     # Get configuration
     config = get_config()
-    data_path = config.get('data_path', '/share/klab/datasets/avs')
+    data_path = config.get('data_path') or pyavs.get_data_path()
     
     # Parse command line arguments (basic implementation)
     import argparse
@@ -307,6 +308,13 @@ def main():
     
     args = parser.parse_args()
     
+    if args.data_path is None:
+        from pyavs import get_data_path as _get_dp
+        args.data_path = _get_dp()
+    if args.data_path is None:
+        parser.error(
+            "No data path configured. Run: pyavs configure --data-path /path/to/data"
+        )
     try:
         # Compute covariance matrices
         combined_cov, session_covs = compute_empty_room_covariance(

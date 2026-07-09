@@ -51,12 +51,12 @@ def main():
     )
     parser.add_argument(
         '--subjects-dir',
-        type=str, default='/share/klab/datasets/avs/rawdir/',
+        type=str, default=None,
         help='FreeSurfer subjects directory',
     )
     parser.add_argument(
         '--output-dir', '-o',
-        type=str, default='/share/klab/psulewski/psulewski/pyavs/source_rsa/',
+        type=str, default=None,
         help='Output directory (same root used by compute_source_rsa.py)',
     )
     parser.add_argument(

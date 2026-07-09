@@ -26,8 +26,11 @@ def main():
     
     print("=== pyAVS Analysis Reproduction Example ===\n")
     
-    # Example data path (adjust as needed)
-    data_path = "/share/klab/datasets/avs"
+    from pyavs import get_data_path
+    data_path = get_data_path()
+    if data_path is None:
+        print("No data path configured. Run: pyavs configure --data-path /path/to/data")
+        return
     
     # 1. List all available configurations
     print("1. Listing all available configurations:")

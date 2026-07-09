@@ -324,21 +324,21 @@ def main():
     parser.add_argument(
         '--data-path', '-d',
         type=str,
-        default='/share/klab/datasets/avs/',
+        default=None,
         help='Path to AVS data directory (default: /share/klab/datasets/avs/)'
     )
 
     parser.add_argument(
         '--coco-annotations-dir',
         type=str,
-        default='/share/klab/datasets/avs/AVS-UTILS/avs_scene_annotations/coco_objects/',
+        default=None,
         help='Path to COCO annotations directory (default: coco_objects/)'
     )
 
     parser.add_argument(
         '--cocostuff-annotations-dir',
         type=str,
-        default='/share/klab/datasets/avs/AVS-UTILS/avs_scene_annotations/cocostuff/',
+        default=None,
         help='Path to COCO-Stuff annotations directory (default: cocostuff/)'
     )
 

@@ -6,8 +6,10 @@ all analysis, processing, source reconstruction, path, and data parameters.
 """
 
 import os
+import json
 import numpy as np
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import List, Optional, Dict, Any, Union, Tuple
 
 
@@ -210,49 +212,46 @@ class PyAVSConfig:
         if self.et_data_dir is None:
             self.et_data_dir = server_paths.get('et_data_dir')
     
-    def _detect_data_path(self) -> str:
-        """Auto-detect data path based on server environment."""
-        # Check for common server paths
-        server_paths = {
-            'uos': '/share/klab/datasets/avs/',
-        }
-        
-        for server, base_path in server_paths.items():
-            if os.path.exists(base_path):
-                raw_dir = os.path.join(base_path, 'rawdir')
-                if os.path.exists(raw_dir):
-                    self.server = server
-                    return base_path
-        
-        # Check environment variable
+    def _detect_data_path(self) -> Optional[str]:
+        """Auto-detect data path via cascade: env var → user config → package symlink."""
+        # 1. Environment variable
         env_path = os.environ.get('PYAVS_DATA_PATH')
         if env_path and os.path.exists(env_path):
             return env_path
-        
-        # Return None to allow manual setting
-        return "/share/klab/datasets/avs"  # Default fallback
+
+        # 2. User config file (~/.config/pyavs/config.json)
+        user_cfg = Path.home() / '.config' / 'pyavs' / 'config.json'
+        if user_cfg.exists():
+            try:
+                cfg = json.loads(user_cfg.read_text())
+                p = cfg.get('data_path')
+                if p and os.path.exists(p):
+                    return p
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        # 3. Symlink inside package (pyavs/pyavs/data → actual data dir)
+        pkg_data = Path(__file__).parent.parent / 'data'
+        if pkg_data.is_symlink() and pkg_data.exists():
+            return str(pkg_data.resolve())
+
+        # 4. Nothing found — return None, don't silently use a wrong server path
+        return None
     
     def _get_server_paths(self) -> Dict[str, str]:
-        """Get server-specific directory paths."""
-        if self.server == 'auto':
-            # Try to detect from data_path
-            if self.data_path and '/share/klab/' in str(self.data_path):
-                self.server = 'uos'
-            else:
-                self.server = 'uos'  # Default to uos
-        
-        if self.server == 'uos':
-            base_path = self.data_path or '/share/klab/datasets/avs/'
-            return {
-                'raw_dir': os.path.join(base_path, 'rawdir'),
-                'results_dir': os.path.join(base_path, 'results'),
-                'project_dir': base_path,
-                'input_dir': os.path.join(base_path, 'input'),
-                'meg_data_dir': os.path.join(base_path, 'rawdir'),
-                'et_data_dir': os.path.join(base_path, 'rawdir')
-            }
-        else:
-            raise ValueError(f'Server {self.server} not recognized. Use: uos, mpi, ikw')
+        """Get derived directory paths from data_path."""
+        if self.data_path is None:
+            return {}
+
+        base_path = self.data_path
+        return {
+            'raw_dir': os.path.join(base_path, 'rawdir'),
+            'results_dir': os.path.join(base_path, 'results'),
+            'project_dir': base_path,
+            'input_dir': os.path.join(base_path, 'input'),
+            'meg_data_dir': os.path.join(base_path, 'rawdir'),
+            'et_data_dir': os.path.join(base_path, 'rawdir')
+        }
     
     # === PARAMETER EXTRACTION METHODS ===
     
@@ -363,24 +362,24 @@ class PyAVSConfig:
     
     # === UTILITY METHODS ===
     
-    def get_derivatives_path(self) -> str:
+    def get_derivatives_path(self) -> Optional[str]:
         """Get derivatives directory path."""
+        if self.data_path is None:
+            return None
         return os.path.join(self.data_path, 'derivatives', 'pyavs')
     
-    def get_subjects_dir(self) -> str:
+    def get_subjects_dir(self) -> Optional[str]:
         """Get FreeSurfer subjects directory."""
-        # Check environment variable first
         subjects_dir = os.environ.get('SUBJECTS_DIR')
         if subjects_dir and os.path.exists(subjects_dir):
             return subjects_dir
-        
-        # Check shared AVS directory
-        avs_subjects_dir = os.path.join(self.data_path, 'AVS-UTILS', 'source')
-        if os.path.exists(avs_subjects_dir):
-            return avs_subjects_dir
-        
-        # Default FreeSurfer directory
-        return '/usr/local/freesurfer/subjects'
+
+        if self.data_path:
+            avs_subjects_dir = os.path.join(self.data_path, 'AVS-UTILS', 'source')
+            if os.path.exists(avs_subjects_dir):
+                return avs_subjects_dir
+
+        return None
     
     def get_filter_string(self) -> str:
         """Get string representation of filter parameters."""
