@@ -10,22 +10,24 @@ robustness-oriented criterion so the decision is reproducible.
 Criterion (highest median of the split-averaged per-sample silhouette distribution):
     For each candidate k, over ``n_cvals`` repeated random train/test splits, fit KMeans on
     the train split, assign the held-out test points to their nearest centroid, and compute
-    the *per-sample* silhouette values on the test set (one distribution per split). Average
-    those per-split distributions across splits (by quantile: sort each split, average at
-    each rank), giving one split-averaged distribution per k, and take its **median**. The
-    optimal k maximizes this median.
+    the *per-sample* silhouette values on the test set. Stack these into an array
+    ``silhouette_samples_over_k`` of shape ``(n_cvals, n_k, n_test)``, average across splits
+    element-wise, and take the median over samples::
 
-    Because the test samples differ across splits, quantile averaging is the well-defined
-    way to average the distributions, and the median of the quantile-averaged distribution
-    is identically ``mean_splits( median_samples(score) )`` -- the mean across splits of each
-    split's median. This code therefore computes the equivalent per-split reduction, then the
-    mean across splits. The inner reduction is exposed via ``sample_reduction`` (default
-    'median'); the same identity makes ``'min'`` recover ``mean_splits(min_silhouette)`` and
-    ``('percentile', q)`` recover the q-th percentile of the split-averaged distribution.
+        avg_distribution = np.nanmean(silhouette_samples_over_k, axis=0)  # (n_k, n_test)
+        criterion        = np.nanmedian(avg_distribution, axis=1)         # (n_k,)
+        optimal_k        = n_clusters_steps[np.argmax(criterion)]
+
+    The optimal k maximizes this median. The inner reduction is exposed via
+    ``sample_reduction`` (default 'median'; also 'min', 'mean', or ('percentile', q)).
 
     This deliberately replaces the earlier, non-robust ``min_splits(mean_silhouette(score))``,
     whose outer ``min`` over splits is an order statistic of the split draws and drifts
     downward as the number of splits grows.
+
+    Note: the split-average is element-wise by array position, so (like the original) it
+    depends on the ``train_test_split`` shuffle order; reproduced here via the same
+    ``random_state = seed + cval`` per split.
 
 Usage:
     import numpy as np
@@ -57,23 +59,24 @@ from pyavs.utils.logging import get_logger
 logger = get_logger('scripts.scenes.select_optimal_k')
 
 
-def _reduce_samples(sil_values: np.ndarray, sample_reduction) -> float:
-    """Reduce a 1D array of per-sample silhouette values to one number per split.
+def _reduce_distribution(avg_dist: np.ndarray, sample_reduction, axis: int) -> np.ndarray:
+    """Reduce the split-averaged per-sample distribution along ``axis`` (the sample axis).
 
-    ``sample_reduction`` is ``'min'`` (default criterion), ``'median'``, ``'mean'``, or a
-    ``('percentile', q)`` tuple for the robust low-percentile alternative to ``min``.
+    ``sample_reduction`` is ``'median'`` (default criterion), ``'min'``, ``'mean'``, or a
+    ``('percentile', q)`` tuple. Uses nan-aware reductions so degenerate splits (excluded
+    from the split-average) do not poison the statistic.
     """
-    if sample_reduction == 'min':
-        return float(np.min(sil_values))
     if sample_reduction == 'median':
-        return float(np.median(sil_values))
+        return np.nanmedian(avg_dist, axis=axis)
+    if sample_reduction == 'min':
+        return np.nanmin(avg_dist, axis=axis)
     if sample_reduction == 'mean':
-        return float(np.mean(sil_values))
+        return np.nanmean(avg_dist, axis=axis)
     if isinstance(sample_reduction, (tuple, list)) and len(sample_reduction) == 2 \
             and sample_reduction[0] == 'percentile':
-        return float(np.percentile(sil_values, sample_reduction[1]))
+        return np.nanpercentile(avg_dist, sample_reduction[1], axis=axis)
     raise ValueError(
-        "sample_reduction must be 'min', 'median', 'mean', or ('percentile', q); "
+        "sample_reduction must be 'median', 'min', 'mean', or ('percentile', q); "
         f"got {sample_reduction!r}"
     )
 
@@ -96,8 +99,8 @@ def select_optimal_k(
     """Select the number of clusters k that maximizes a robust test-set silhouette criterion.
 
     For each k the criterion is the median of the split-averaged per-sample silhouette
-    distribution on held-out test points (KMeans fit on train, predicted on test) -- computed
-    as the equivalent ``mean_splits( <sample_reduction>_samples(silhouette) )`` with
+    distribution on held-out test points (KMeans fit on train, predicted on test), i.e.
+    ``np.nanmedian(np.nanmean(silhouette_samples_over_k, axis=0), axis=1)`` with
     ``sample_reduction='median'`` by default.
 
     Parameters
@@ -111,8 +114,8 @@ def select_optimal_k(
     test_size : float
         Fraction of samples held out for the silhouette evaluation on each split.
     sample_reduction : {'median', 'min', 'mean'} or ('percentile', q)
-        Reduction of the split-averaged distribution, computed via the equivalent per-split
-        reduction then mean across splits. Default 'median'.
+        Reduction applied over samples to the split-averaged per-sample distribution.
+        Default 'median'.
     minibatch : bool
         Use ``MiniBatchKMeans`` instead of ``KMeans`` (for large n_samples).
     n_jobs : int
@@ -134,11 +137,10 @@ def select_optimal_k(
         The k maximizing the criterion.
     diagnostics : dict, optional
         Only if ``return_diagnostics`` is True. Keys: ``n_clusters_steps`` (list[int]),
-        ``criterion`` (ndarray, per-k statistic), ``per_split`` (ndarray, n_k x n_cvals of
-        per-split reduced values), ``silhouette_samples_over_k`` (ndarray,
-        n_cvals x n_k x n_sil of the full per-sample distributions), and
-        ``avg_distribution`` (ndarray, n_k x n_sil: the split-averaged per-sample
-        distribution, i.e. per-split distributions sorted and averaged across splits).
+        ``criterion`` (ndarray, per-k statistic), ``avg_distribution`` (ndarray, n_k x n_sil:
+        the split-averaged per-sample distribution, ``nanmean`` over splits), and
+        ``silhouette_samples_over_k`` (ndarray, n_cvals x n_k x n_sil: the full per-sample
+        distributions, matching the original array).
     """
     embeddings = np.asarray(embeddings, dtype=dtype)
     if embeddings.ndim != 2:
@@ -183,7 +185,7 @@ def select_optimal_k(
         )
 
     def _eval_cell(k, cval):
-        """Return (per_split_value, per_sample_silhouettes_or_None) for one (k, split)."""
+        """Return the per-sample test silhouettes for one (k, split), or None if degenerate."""
         km = _build_estimator(k, cval)
         X_train, X_test = train_test_split(
             embeddings, test_size=test_size, random_state=seed + cval
@@ -202,11 +204,8 @@ def select_optimal_k(
         # split is degenerate for this k (too many clusters for the held-out set).
         n_labels = np.unique(labels_sil).size
         if n_labels < 2 or n_labels > X_sil.shape[0] - 1:
-            return np.nan, None
-
-        sil = silhouette_samples(X_sil, labels_sil)
-        per_split = _reduce_samples(sil, sample_reduction)
-        return per_split, (sil if return_diagnostics else None)
+            return None
+        return silhouette_samples(X_sil, labels_sil)
 
     results = Parallel(n_jobs=n_jobs)(
         delayed(_eval_cell)(k, cval)
@@ -214,23 +213,23 @@ def select_optimal_k(
         for cval in range(n_cvals)
     )
 
-    per_split = np.full((len(n_clusters_steps), n_cvals), np.nan)
-    samples_over_k = (
-        np.full((n_cvals, len(n_clusters_steps), n_sil), np.nan)
-        if return_diagnostics else None
-    )
-    for flat_idx, (val, sil) in enumerate(results):
+    # Full per-sample distributions, shape (n_cvals, n_k, n_sil) -- matches the original
+    # silhouette_samples_over_k_test array.
+    samples_over_k = np.full((n_cvals, len(n_clusters_steps), n_sil), np.nan)
+    for flat_idx, sil in enumerate(results):
         k_idx, cval = divmod(flat_idx, n_cvals)
-        per_split[k_idx, cval] = val
-        if return_diagnostics and sil is not None:
+        if sil is not None:
             samples_over_k[cval, k_idx, :] = sil
 
-    # mean over splits; a k whose every split was degenerate can never be selected.
+    # Selection (matches: median(mean(silhouette_samples_over_k_test, axis=0), axis=1)):
+    # average the per-sample distributions across splits element-wise, then reduce over
+    # samples (median by default). nan-aware so degenerate splits are simply excluded.
     with np.errstate(invalid='ignore'):
+        avg_distribution = np.nanmean(samples_over_k, axis=0)               # (n_k, n_sil)
+        criterion = _reduce_distribution(avg_distribution, sample_reduction, axis=1)
+        # a k whose every split was degenerate can never be selected
         criterion = np.where(
-            np.all(np.isnan(per_split), axis=1),
-            -np.inf,
-            np.nanmean(per_split, axis=1),
+            np.all(np.isnan(avg_distribution), axis=1), -np.inf, criterion
         )
 
     best_idx = int(np.argmax(criterion))
@@ -238,16 +237,10 @@ def select_optimal_k(
     logger.info("optimal k = %d (criterion = %.4f)", optimal_k, criterion[best_idx])
 
     if return_diagnostics:
-        # Split-averaged per-sample distribution per k: sort each split's distribution
-        # (quantile alignment) and average across splits. Its median equals criterion when
-        # sample_reduction='median'.
-        with np.errstate(invalid='ignore'):
-            avg_distribution = np.nanmean(np.sort(samples_over_k, axis=2), axis=0)
         return optimal_k, {
             'n_clusters_steps': n_clusters_steps,
             'criterion': criterion,
-            'per_split': per_split,
-            'silhouette_samples_over_k': samples_over_k,
             'avg_distribution': avg_distribution,
+            'silhouette_samples_over_k': samples_over_k,
         }
     return optimal_k
