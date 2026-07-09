@@ -7,19 +7,25 @@ label column (``df_mean_embeddings_clustered_60.csv``, k=60) produced by an old 
 codebase. This module regenerates that choice of k directly from the embeddings, using a
 robustness-oriented criterion so the decision is reproducible.
 
-Criterion (``mean_splits( min_silhouette(score) )``):
+Criterion (highest median of the split-averaged per-sample silhouette distribution):
     For each candidate k, over ``n_cvals`` repeated random train/test splits, fit KMeans on
     the train split, assign the held-out test points to their nearest centroid, and compute
-    the *per-sample* silhouette values on the test set. Within each split take the ``min``
-    over samples (the worst-clustered test scene), then take the ``mean`` of those minima
-    across splits. The optimal k maximizes this statistic.
+    the *per-sample* silhouette values on the test set (one distribution per split). Average
+    those per-split distributions across splits (by quantile: sort each split, average at
+    each rank), giving one split-averaged distribution per k, and take its **median**. The
+    optimal k maximizes this median.
 
-    This deliberately replaces the earlier, non-robust ``min_splits(mean_silhouette(score))``:
-    the outer ``min`` over splits is an order statistic of the split draws and drifts
-    downward as the number of splits grows, so it is replaced by a split-count-stable
-    ``mean`` over splits; the inner ``mean`` over samples is replaced by ``min`` over samples
-    (worst case per split). The inner reduction is exposed via ``sample_reduction`` so the
-    outlier-sensitive literal ``min`` can be swapped for a robust low percentile / median.
+    Because the test samples differ across splits, quantile averaging is the well-defined
+    way to average the distributions, and the median of the quantile-averaged distribution
+    is identically ``mean_splits( median_samples(score) )`` -- the mean across splits of each
+    split's median. This code therefore computes the equivalent per-split reduction, then the
+    mean across splits. The inner reduction is exposed via ``sample_reduction`` (default
+    'median'); the same identity makes ``'min'`` recover ``mean_splits(min_silhouette)`` and
+    ``('percentile', q)`` recover the q-th percentile of the split-averaged distribution.
+
+    This deliberately replaces the earlier, non-robust ``min_splits(mean_silhouette(score))``,
+    whose outer ``min`` over splits is an order statistic of the split draws and drifts
+    downward as the number of splits grows.
 
 Usage:
     import numpy as np
@@ -79,7 +85,7 @@ def select_optimal_k(
     stepsize=1,
     n_cvals=10,
     test_size=0.5,
-    sample_reduction='min',
+    sample_reduction='median',
     minibatch=False,
     n_jobs=-1,
     silhouette_sample_size=None,
@@ -89,9 +95,10 @@ def select_optimal_k(
 ):
     """Select the number of clusters k that maximizes a robust test-set silhouette criterion.
 
-    For each k the criterion is ``mean_splits( <sample_reduction>_samples(silhouette) )``
-    evaluated on held-out test points (KMeans fit on train, predicted on test). By default
-    that is the mean across splits of the minimum per-sample silhouette (worst-case scene).
+    For each k the criterion is the median of the split-averaged per-sample silhouette
+    distribution on held-out test points (KMeans fit on train, predicted on test) -- computed
+    as the equivalent ``mean_splits( <sample_reduction>_samples(silhouette) )`` with
+    ``sample_reduction='median'`` by default.
 
     Parameters
     ----------
@@ -103,8 +110,9 @@ def select_optimal_k(
         Number of repeated random train/test splits per k.
     test_size : float
         Fraction of samples held out for the silhouette evaluation on each split.
-    sample_reduction : {'min', 'median', 'mean'} or ('percentile', q)
-        Inner reduction over test samples within a split. Default 'min'.
+    sample_reduction : {'median', 'min', 'mean'} or ('percentile', q)
+        Reduction of the split-averaged distribution, computed via the equivalent per-split
+        reduction then mean across splits. Default 'median'.
     minibatch : bool
         Use ``MiniBatchKMeans`` instead of ``KMeans`` (for large n_samples).
     n_jobs : int
@@ -128,7 +136,9 @@ def select_optimal_k(
         Only if ``return_diagnostics`` is True. Keys: ``n_clusters_steps`` (list[int]),
         ``criterion`` (ndarray, per-k statistic), ``per_split`` (ndarray, n_k x n_cvals of
         per-split reduced values), ``silhouette_samples_over_k`` (ndarray,
-        n_cvals x n_k x n_sil of the full per-sample distributions).
+        n_cvals x n_k x n_sil of the full per-sample distributions), and
+        ``avg_distribution`` (ndarray, n_k x n_sil: the split-averaged per-sample
+        distribution, i.e. per-split distributions sorted and averaged across splits).
     """
     embeddings = np.asarray(embeddings, dtype=dtype)
     if embeddings.ndim != 2:
@@ -228,10 +238,16 @@ def select_optimal_k(
     logger.info("optimal k = %d (criterion = %.4f)", optimal_k, criterion[best_idx])
 
     if return_diagnostics:
+        # Split-averaged per-sample distribution per k: sort each split's distribution
+        # (quantile alignment) and average across splits. Its median equals criterion when
+        # sample_reduction='median'.
+        with np.errstate(invalid='ignore'):
+            avg_distribution = np.nanmean(np.sort(samples_over_k, axis=2), axis=0)
         return optimal_k, {
             'n_clusters_steps': n_clusters_steps,
             'criterion': criterion,
             'per_split': per_split,
             'silhouette_samples_over_k': samples_over_k,
+            'avg_distribution': avg_distribution,
         }
     return optimal_k
