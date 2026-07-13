@@ -40,7 +40,7 @@ python ${script_path}/compute_decoding.py \
     --channels grad \
     --time-window 50 200 \
     --min-occurrences 200 \
-    --n-splits 5
+    --n-splits 3
 
 echo "==================================================="
 echo "Subject $subject decoding analysis complete"
