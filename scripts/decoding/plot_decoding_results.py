@@ -157,7 +157,7 @@ def plot_balanced_accuracy_per_category(df: pd.DataFrame, output_dir: Path,
     order = list(palette.keys())
 
     sns.set_context("poster")
-    plt.figure(figsize=(12, 7))
+    plt.figure(figsize=(12, 8))
     sns.pointplot(
         data=df,
         x='category',
@@ -207,7 +207,7 @@ def plot_performance_vs_frequency(df: pd.DataFrame, output_dir: Path,
         palette = category_color_map(df)
 
     sns.set_context("poster")
-    plt.figure(figsize=(5, 6))
+    plt.figure(figsize=(5, 5))
     sns.scatterplot(
         data=per_cat,
         x='n_occurrences',
@@ -216,9 +216,11 @@ def plot_performance_vs_frequency(df: pd.DataFrame, output_dir: Path,
         palette=palette,
         legend=False,
     )
+  
+    
     plt.xscale('log')
     plt.ylim(bottom=50)  # start at chance
-    plt.xlabel('number of fixations [count]')
+    plt.xlabel('number of fixations \n[count]')
     plt.ylabel('accuracy [%]')
     sns.despine()
     plt.tight_layout()
