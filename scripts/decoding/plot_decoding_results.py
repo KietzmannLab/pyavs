@@ -21,6 +21,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+from scipy.stats import spearmanr
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from pyavs.utils.logging import get_logger
@@ -113,6 +114,28 @@ def filter_significant_categories(df: pd.DataFrame, min_subjects: int = 4,
     logger.info(f"Kept {len(kept)}/{work['category'].nunique()} categories "
                 f"(>= {min_subjects} subjects and 95% CI excluding {chance:.0f}%)")
     return filtered, kept
+
+
+def write_accuracy_vs_frequency_spearman(df: pd.DataFrame, output_dir: Path) -> None:
+    """Report Spearman r of accuracy vs log10(n_fixations) across categories (reporting only).
+
+    Quantifies how strongly decodability tracks a category's fixation count on the FULL data
+    (the 'before' the size control; the learning-curve script provides the 'after'). Written to a
+    CSV, never drawn on a figure.
+    """
+    per_cat = df.groupby('category').agg(
+        balanced_accuracy=('balanced_accuracy', 'mean'),
+        n_occurrences=('n_occurrences', 'mean'),
+    ).reset_index()
+    if len(per_cat) < 3:
+        logger.warning(f"Only {len(per_cat)} categories; skipping Spearman accuracy-vs-frequency.")
+        return
+    r, p = spearmanr(per_cat['balanced_accuracy'], np.log10(per_cat['n_occurrences']))
+    out = output_dir / 'decoding_accuracy_vs_frequency_spearman.csv'
+    pd.DataFrame([{'phase': 'before', 'spearman_r': float(r), 'p_value': float(p),
+                   'n_categories': len(per_cat)}]).to_csv(out, index=False)
+    logger.info(f"Accuracy vs log10(n_fixations): Spearman r={r:.3f}, p={p:.3g}, "
+                f"n={len(per_cat)} categories -> {out}")
 
 
 def plot_balanced_accuracy_per_category(df: pd.DataFrame, output_dir: Path,
@@ -252,6 +275,8 @@ def main():
     df.sort_values(['category', 'subject']).to_csv(
         output_dir / 'decoding_balanced_accuracy_per_category.csv', index=False
     )
+    # Report the 'before' accuracy-vs-frequency Spearman (CSV only, not on any figure).
+    write_accuracy_vs_frequency_spearman(df, output_dir)
     logger.info("Done.")
     return 0
 

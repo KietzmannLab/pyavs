@@ -325,12 +325,19 @@ def load_session_features(subject_id: int, session: int, data_path: str,
     return X, y, groups, times_win
 
 
-def process_subject(subject_id: int, sessions: List[int], data_path: str, output_dir: Path,
-                    channels: str = 'grad', time_window: Tuple[float, float] = (50.0, 200.0),
-                    min_occurrences: int = 200, pca_variance: float = 0.98,
-                    n_splits: int = 5, n_jobs: int = 1) -> Dict[str, Any]:
-    """Load all sessions for a subject (in parallel), build features/labels, decode, and save."""
-    logger.info(f"Processing sub-{subject_id:02d} across {len(sessions)} sessions "
+def build_subject_features(subject_id: int, sessions: List[int], data_path: str,
+                           channels: str = 'grad', time_window: Tuple[float, float] = (50.0, 200.0),
+                           n_jobs: int = 1
+                           ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, int]:
+    """Load all sessions for a subject and build the cleaned decoding features.
+
+    Loads sessions in parallel, concatenates them, drops sentinel (non-object) fixations, and
+    removes extreme/artifact fixations. Shared by the main decoding pipeline and the learning-curve
+    script so both see identical inputs.
+
+    Returns (X, y, groups, times_win, n_outliers_rejected).
+    """
+    logger.info(f"Building features for sub-{subject_id:02d} across {len(sessions)} sessions "
                 f"(n_jobs={n_jobs} for session loading)")
 
     # Load sessions in parallel; each returns (X, y, groups, times_win) independently.
@@ -358,6 +365,19 @@ def process_subject(subject_id: int, sessions: List[int], data_path: str, output
     n_before_reject = X.shape[0]
     X, y, groups = reject_outlier_fixations(X, y, groups)
     n_rejected = n_before_reject - X.shape[0]
+
+    return X, y, groups, times_win, n_rejected
+
+
+def process_subject(subject_id: int, sessions: List[int], data_path: str, output_dir: Path,
+                    channels: str = 'grad', time_window: Tuple[float, float] = (50.0, 200.0),
+                    min_occurrences: int = 200, pca_variance: float = 0.98,
+                    n_splits: int = 5, n_jobs: int = 1) -> Dict[str, Any]:
+    """Load all sessions for a subject (in parallel), build features/labels, decode, and save."""
+    X, y, groups, times_win, n_rejected = build_subject_features(
+        subject_id, sessions, data_path, channels=channels,
+        time_window=time_window, n_jobs=n_jobs,
+    )
 
     # Keep categories with enough occurrences.
     counts = pd.Series(y).value_counts()
