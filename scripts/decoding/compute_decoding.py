@@ -18,6 +18,7 @@ Usage:
 """
 
 import argparse
+import inspect
 import os
 import sys
 from pathlib import Path
@@ -51,6 +52,17 @@ SENTINEL_LABELS = [-2, -1, '-2', '-1', 'None', 'outside', 'unknown']
 
 # Search space for the L2 regularization strength, tuned per fold by LogisticRegressionCV.
 DEFAULT_CS = np.logspace(-3, 3, 7)
+
+# Newer scikit-learn (>= ~1.7, the version that will change defaults in 1.10) emits two
+# FutureWarnings from LogisticRegressionCV:
+#   1. "The default value for l1_ratios will change from None to (0.0,) ..."
+#   2. "The fitted attributes of LogisticRegressionCV will be simplified ... use_legacy_attributes"
+# The sanctioned fixes are to pass l1_ratios=(0,) (pure L2) and set use_legacy_attributes=True
+# (we rely on the legacy `C_` attribute). Older sklearn lacks `use_legacy_attributes` and would
+# instead warn that l1_ratios is unused, so we only pass these kwargs when the running version
+# supports use_legacy_attributes (the same version that emits the FutureWarnings).
+_LRCV_HAS_LEGACY = 'use_legacy_attributes' in inspect.signature(LogisticRegressionCV).parameters
+_LRCV_EXTRA_KWARGS = {'l1_ratios': (0,), 'use_legacy_attributes': True} if _LRCV_HAS_LEGACY else {}
 
 
 def load_fixation_epochs(subject_id: int, session: int, data_path: str,
@@ -162,6 +174,44 @@ def select_window_and_flatten(epochs_data: np.ndarray, times: np.ndarray,
     return X, times_win
 
 
+def reject_outlier_fixations(X: np.ndarray, y: np.ndarray, groups: np.ndarray,
+                             amp_percentile: float = 99.0, corr_percentile: float = 1.0
+                             ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Reject extreme fixations before decoding (ported from the encoding pipeline).
+
+    Two label-independent criteria are applied to the flattened window features, so this is safe
+    to run once per subject (it uses neither the category labels nor the CV folds and therefore
+    cannot leak):
+      1. Max absolute amplitude above `amp_percentile` (default 99th) — high-amplitude artifacts.
+      2. Correlation to the median fixation pattern below `corr_percentile` (default 1st) — atypical
+         topographies.
+    """
+    n0 = X.shape[0]
+
+    # 1. Extreme-amplitude rejection.
+    max_per_fix = np.max(np.abs(X), axis=1)
+    amp_thresh = np.percentile(max_per_fix, amp_percentile)
+    keep = max_per_fix < amp_thresh
+    X, y, groups = X[keep], y[keep], groups[keep]
+
+    # 2. Low-correlation-to-median rejection.
+    median_pattern = np.median(X, axis=0)
+    # Pearson correlation of each fixation to the median pattern.
+    Xc = X - X.mean(axis=1, keepdims=True)
+    mc = median_pattern - median_pattern.mean()
+    denom = (np.linalg.norm(Xc, axis=1) * np.linalg.norm(mc))
+    denom[denom == 0] = np.nan
+    corrs = (Xc @ mc) / denom
+    corr_thresh = np.nanpercentile(corrs, corr_percentile)
+    keep2 = corrs > corr_thresh
+    X, y, groups = X[keep2], y[keep2], groups[keep2]
+
+    logger.info(f"Outlier rejection: kept {X.shape[0]}/{n0} fixations "
+                f"(dropped {n0 - X.shape[0]}: amplitude > p{amp_percentile:.0f} or "
+                f"corr-to-median < p{corr_percentile:.0f})")
+    return X, y, groups
+
+
 def decode_categories(X: np.ndarray, y: np.ndarray, groups: np.ndarray,
                       categories: List[str], pca_variance: float = 0.98,
                       n_splits: int = 5, Cs: np.ndarray = DEFAULT_CS,
@@ -180,10 +230,8 @@ def decode_categories(X: np.ndarray, y: np.ndarray, groups: np.ndarray,
     pca_components_per_fold: List[int] = []
 
     outer_cv = GroupKFold(n_splits=n_splits)
-    fold_iter = enumerate(outer_cv.split(X, y, groups=groups))
-
-    for fold, (train_idx, test_idx) in tqdm(
-        list(fold_iter), desc='Outer folds', unit='fold', ncols=90
+    for train_idx, test_idx in tqdm(
+        list(outer_cv.split(X, y, groups=groups)), desc='Outer folds', unit='fold', ncols=90
     ):
         # Leakage guard: no scene shared between train and test.
         assert not (set(groups[train_idx]) & set(groups[test_idx])), \
@@ -224,7 +272,8 @@ def decode_categories(X: np.ndarray, y: np.ndarray, groups: np.ndarray,
                 scoring='balanced_accuracy',
                 class_weight='balanced',
                 max_iter=1000,
-                n_jobs=1,
+                n_jobs=-1,
+                **_LRCV_EXTRA_KWARGS,
             )
             clf.fit(X_train_pca, y_train_c)
             y_pred = clf.predict(X_test_pca)
@@ -254,32 +303,46 @@ def decode_categories(X: np.ndarray, y: np.ndarray, groups: np.ndarray,
     }
 
 
+def load_session_features(subject_id: int, session: int, data_path: str,
+                          channels: str, time_window: Tuple[float, float]
+                          ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Load one session and build its decoding features/labels/groups.
+
+    Self-contained so it can be dispatched to a joblib worker. Returns
+    (X, y, groups, times_win) where X is (n_fix, n_ch * n_win), y is object_label per fixation,
+    and groups is sceneID per fixation.
+    """
+    epochs_data, metadata, times = load_fixation_epochs(
+        subject_id, session, data_path, channels=channels
+    )
+    metadata = attach_object_labels(metadata, data_path)
+    if 'sceneID' not in metadata.columns:
+        raise KeyError("metadata is missing 'sceneID' column needed for scene-aware CV")
+
+    X, times_win = select_window_and_flatten(epochs_data, times, time_window)
+    y = metadata['object_label'].to_numpy()
+    groups = metadata['sceneID'].to_numpy()
+    return X, y, groups, times_win
+
+
 def process_subject(subject_id: int, sessions: List[int], data_path: str, output_dir: Path,
                     channels: str = 'grad', time_window: Tuple[float, float] = (50.0, 200.0),
                     min_occurrences: int = 200, pca_variance: float = 0.98,
-                    n_splits: int = 5) -> Dict[str, Any]:
-    """Load all sessions for a subject, build features/labels, decode, and save results."""
-    logger.info(f"Processing sub-{subject_id:02d} across {len(sessions)} sessions")
+                    n_splits: int = 5, n_jobs: int = 1) -> Dict[str, Any]:
+    """Load all sessions for a subject (in parallel), build features/labels, decode, and save."""
+    logger.info(f"Processing sub-{subject_id:02d} across {len(sessions)} sessions "
+                f"(n_jobs={n_jobs} for session loading)")
 
-    all_X, all_y, all_groups = [], [], []
-    times_win = None
+    # Load sessions in parallel; each returns (X, y, groups, times_win) independently.
+    session_results = Parallel(n_jobs=n_jobs)(
+        delayed(load_session_features)(subject_id, s, data_path, channels, time_window)
+        for s in sessions
+    )
 
-    for session in sessions:
-        epochs_data, metadata, times = load_fixation_epochs(
-            subject_id, session, data_path, channels=channels
-        )
-        metadata = attach_object_labels(metadata, data_path)
-
-        if 'sceneID' not in metadata.columns:
-            raise KeyError("metadata is missing 'sceneID' column needed for scene-aware CV")
-
-        X, tw = select_window_and_flatten(epochs_data, times, time_window)
-        if times_win is None:
-            times_win = tw
-
-        all_X.append(X)
-        all_y.append(metadata['object_label'].to_numpy())
-        all_groups.append(metadata['sceneID'].to_numpy())
+    all_X = [r[0] for r in session_results]
+    all_y = [r[1] for r in session_results]
+    all_groups = [r[2] for r in session_results]
+    times_win = session_results[0][3]
 
     X = np.concatenate(all_X, axis=0)
     y = np.concatenate(all_y, axis=0)
@@ -290,6 +353,11 @@ def process_subject(subject_id: int, sessions: List[int], data_path: str, output
     X, y, groups = X[valid_mask], y[valid_mask], groups[valid_mask]
     logger.info(f"sub-{subject_id:02d}: {valid_mask.sum()} valid fixations "
                 f"({(~valid_mask).sum()} sentinels dropped)")
+
+    # Always remove extreme/artifact fixations before decoding.
+    n_before_reject = X.shape[0]
+    X, y, groups = reject_outlier_fixations(X, y, groups)
+    n_rejected = n_before_reject - X.shape[0]
 
     # Keep categories with enough occurrences.
     counts = pd.Series(y).value_counts()
@@ -323,6 +391,7 @@ def process_subject(subject_id: int, sessions: List[int], data_path: str, output
         n_occurrences=n_occurrences,
         n_pca_components=results['n_pca_components'],
         n_fixations_total=int(X.shape[0]),
+        n_outliers_rejected=int(n_rejected),
         n_features=int(X.shape[1]),
         times_window=times_win,
         subject_id=subject_id,
@@ -366,8 +435,9 @@ def main():
     parser.add_argument('--n-splits', type=int, default=5,
                         help='Number of GroupKFold folds (default: 5)')
     parser.add_argument('--output-dir', default=None, help='Output directory')
-    parser.add_argument('--n-jobs', type=int, default=1,
-                        help='Parallel jobs over subjects (default: 1)')
+    parser.add_argument('--n-jobs', type=int, default=-1,
+                        help='Parallel jobs for per-session loading within a subject '
+                             '(default: -1 = all cores). Subjects run sequentially.')
     args = parser.parse_args()
 
     if args.data_path is None:
@@ -390,18 +460,17 @@ def main():
     print(f"   - GroupKFold splits: {args.n_splits}")
     print(f"   - Output directory: {output_dir}")
 
-    def _run(subject_id):
-        return process_subject(
-            subject_id, args.sessions, data_path, output_dir,
+    # Subjects run sequentially; n_jobs parallelizes per-session loading within each subject
+    # (matches the encoding module and avoids nested joblib parallelism).
+    results = [
+        process_subject(
+            s, args.sessions, data_path, output_dir,
             channels=args.channels, time_window=tuple(args.time_window),
             min_occurrences=args.min_occurrences, pca_variance=args.pca_variance,
-            n_splits=args.n_splits,
+            n_splits=args.n_splits, n_jobs=args.n_jobs,
         )
-
-    if args.n_jobs == 1:
-        results = [_run(s) for s in tqdm(args.subjects, desc='Subjects', unit='subject')]
-    else:
-        results = Parallel(n_jobs=args.n_jobs)(delayed(_run)(s) for s in args.subjects)
+        for s in tqdm(args.subjects, desc='Subjects', unit='subject')
+    ]
 
     successful = [r for r in results if r['status'] == 'success']
     failed = [r for r in results if r['status'] == 'failed']
