@@ -646,7 +646,7 @@ def main(subject_id: Optional[int] = None):
         fix2cap_df,
         strategy="random",
         n_scenes=30,
-        random_seed=1337
+        random_seed=123
     )
     logger.info(f"Selected {len(selected_scenes)} scenes for visualization")
 

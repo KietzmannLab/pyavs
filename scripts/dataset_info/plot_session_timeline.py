@@ -448,14 +448,14 @@ def main():
     parser.add_argument(
         '--data-path', '-d',
         type=str,
-        default=None,
+        default="/share/klab/datasets/avs/",
         help='Path to AVS data directory (default: /share/klab/datasets/avs/)'
     )
 
     parser.add_argument(
         '--output-dir', '-o',
         type=str,
-        default=None,
+        default="/share/klab/psulewski/psulewski/pyavs/dataset_info/",
         help='Output directory for figures and cache (default: /share/klab/psulewski/psulewski/pyavs/dataset_info/)'
     )
 
