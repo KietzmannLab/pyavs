@@ -66,21 +66,35 @@ def load_decoding_results(results_dir: Path, subjects: List[int] = None) -> pd.D
     return df
 
 
+def category_color_map(df: pd.DataFrame) -> dict:
+    """Shared category -> HSV color mapping, ordered by mean balanced accuracy (descending).
+
+    Built once and reused across the bar chart and the scatter so a category has the same color in
+    both figures.
+    """
+    order = (df.groupby('category')['balanced_accuracy']
+               .mean().sort_values(ascending=False).index.tolist())
+    colors = sns.color_palette('hsv', len(order))
+    return dict(zip(order, colors))
+
+
 def plot_balanced_accuracy_per_category(df: pd.DataFrame, output_dir: Path,
-                                        filename: str = "decoding_balanced_accuracy_per_category"
-                                        ) -> None:
+                                        filename: str = "decoding_balanced_accuracy_per_category",
+                                        palette: dict = None) -> None:
     """Vertical bar chart of balanced accuracy per category (categories on the x axis).
 
     The y axis starts at 50% (chance for a balanced binary decoder) and goes up from there, so bar
-    height reads directly as decodability. Bars show the across-subject mean; error bars are a
-    bootstrapped 95% CI. Styled after scripts/et_viz/plot_object_fixation_frequency.py.
+    height reads directly as decodability. Bars are colored by an HSV palette (one color per
+    category). Bars show the across-subject mean; error bars are a bootstrapped 95% CI. Styled
+    after scripts/et_viz/plot_object_fixation_frequency.py.
     """
     df = df.copy()
     df['balanced_accuracy_pct'] = df['balanced_accuracy'] * 100.0
 
-    # Order categories by mean balanced accuracy (most decodable first).
-    order = (df.groupby('category')['balanced_accuracy_pct']
-               .mean().sort_values(ascending=False).index.tolist())
+    if palette is None:
+        palette = category_color_map(df)
+    # Palette is ordered by mean balanced accuracy (most decodable first).
+    order = list(palette.keys())
 
     sns.set_context("poster")
     plt.figure(figsize=(12, 7))
@@ -89,13 +103,61 @@ def plot_balanced_accuracy_per_category(df: pd.DataFrame, output_dir: Path,
         x='category',
         y='balanced_accuracy_pct',
         order=order,
-        color='cornflowerblue',
+        hue='category',
+        palette=palette,
+        legend=False,
         errorbar=('ci', 95),
     )
     plt.xticks(range(len(order)), order, rotation=45, ha='right')
     plt.ylim(bottom=50)  # start at chance and go up
     plt.ylabel('balanced accuracy [%]')
     plt.xlabel(None)
+    sns.despine()
+    plt.tight_layout()
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    png_file = output_dir / f"{filename}.png"
+    pdf_file = output_dir / f"{filename}.pdf"
+    plt.savefig(png_file, dpi=300, bbox_inches='tight', facecolor='white')
+    plt.savefig(pdf_file, format='pdf', bbox_inches='tight', facecolor='white')
+    plt.close()
+    logger.info(f"Saved figure to {png_file} and {pdf_file}")
+
+
+def plot_performance_vs_frequency(df: pd.DataFrame, output_dir: Path,
+                                  filename: str = "decoding_performance_vs_frequency",
+                                  palette: dict = None) -> None:
+    """Essentialised scatter of fixation count vs decoding performance, one point per category.
+
+    Checks whether decodability simply tracks how often a category was fixated. x is the number of
+    fixations (mean across subjects, log scale since counts span orders of magnitude); y is
+    balanced accuracy, starting at 50% (chance). Points use the same per-category HSV colors as the
+    bar chart.
+    """
+    df = df.copy()
+    df['balanced_accuracy_pct'] = df['balanced_accuracy'] * 100.0
+    per_cat = df.groupby('category').agg(
+        n_occurrences=('n_occurrences', 'mean'),
+        balanced_accuracy_pct=('balanced_accuracy_pct', 'mean'),
+    ).reset_index()
+
+    if palette is None:
+        palette = category_color_map(df)
+
+    sns.set_context("poster")
+    plt.figure(figsize=(8, 6))
+    sns.scatterplot(
+        data=per_cat,
+        x='n_occurrences',
+        y='balanced_accuracy_pct',
+        hue='category',
+        palette=palette,
+        legend=False,
+    )
+    plt.xscale('log')
+    plt.ylim(bottom=50)  # start at chance
+    plt.xlabel('number of fixations [count]')
+    plt.ylabel('balanced accuracy [%]')
     sns.despine()
     plt.tight_layout()
 
@@ -131,7 +193,10 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     df = load_decoding_results(results_dir, subjects=args.subjects)
-    plot_balanced_accuracy_per_category(df, output_dir)
+    # One HSV color per category, shared across both figures.
+    palette = category_color_map(df)
+    plot_balanced_accuracy_per_category(df, output_dir, palette=palette)
+    plot_performance_vs_frequency(df, output_dir, palette=palette)
 
     # Also write the source data behind the figure.
     df.sort_values(['category', 'subject']).to_csv(

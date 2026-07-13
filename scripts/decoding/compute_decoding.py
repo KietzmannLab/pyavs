@@ -428,8 +428,8 @@ def main():
                         help='Sensor types to decode from (default: grad)')
     parser.add_argument('--time-window', nargs=2, type=float, metavar=('TMIN', 'TMAX'),
                         default=(50.0, 200.0), help='Decoding window in ms (default: 50 200)')
-    parser.add_argument('--min-occurrences', type=int, default=200,
-                        help='Minimum fixations per category to include it (default: 200)')
+    parser.add_argument('--min-occurrences', type=int, default=400,
+                        help='Minimum fixations per category to include it (default: 400)')
     parser.add_argument('--pca-variance', type=float, default=0.98,
                         help='PCA explained-variance fraction (default: 0.98)')
     parser.add_argument('--n-splits', type=int, default=5,
