@@ -66,31 +66,46 @@ def load_decoding_results(results_dir: Path, subjects: List[int] = None) -> pd.D
     return df
 
 
-def plot_above_chance_per_category(df: pd.DataFrame, output_file: Path) -> None:
-    """Single horizontal bar plot: % above chance per category, 95% bootstrap CI across subjects."""
-    # Order categories by mean % above chance (descending).
-    order = (df.groupby('category')['accuracy_above_chance']
+def plot_balanced_accuracy_per_category(df: pd.DataFrame, output_dir: Path,
+                                        filename: str = "decoding_balanced_accuracy_per_category"
+                                        ) -> None:
+    """Vertical bar chart of balanced accuracy per category (categories on the x axis).
+
+    The y axis starts at 50% (chance for a balanced binary decoder) and goes up from there, so bar
+    height reads directly as decodability. Bars show the across-subject mean; error bars are a
+    bootstrapped 95% CI. Styled after scripts/et_viz/plot_object_fixation_frequency.py.
+    """
+    df = df.copy()
+    df['balanced_accuracy_pct'] = df['balanced_accuracy'] * 100.0
+
+    # Order categories by mean balanced accuracy (most decodable first).
+    order = (df.groupby('category')['balanced_accuracy_pct']
                .mean().sort_values(ascending=False).index.tolist())
 
     sns.set_context("poster")
-    height = max(6, 0.4 * len(order))
-    plt.figure(figsize=(8, height))
+    plt.figure(figsize=(12, 7))
     sns.barplot(
         data=df,
-        y='category',
-        x='accuracy_above_chance',
+        x='category',
+        y='balanced_accuracy_pct',
         order=order,
         color='cornflowerblue',
         errorbar=('ci', 95),
     )
-    plt.axvline(0, color='0.5')
-    plt.xlabel('balanced accuracy above chance [%]')
-    plt.ylabel('object category')
+    plt.xticks(range(len(order)), order, rotation=45, ha='right')
+    plt.ylim(bottom=50)  # start at chance and go up
+    plt.ylabel('balanced accuracy [%]')
+    plt.xlabel(None)
     sns.despine()
     plt.tight_layout()
-    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    png_file = output_dir / f"{filename}.png"
+    pdf_file = output_dir / f"{filename}.pdf"
+    plt.savefig(png_file, dpi=300, bbox_inches='tight', facecolor='white')
+    plt.savefig(pdf_file, format='pdf', bbox_inches='tight', facecolor='white')
     plt.close()
-    logger.info(f"Saved figure to {output_file}")
+    logger.info(f"Saved figure to {png_file} and {pdf_file}")
 
 
 def main():
@@ -116,11 +131,11 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     df = load_decoding_results(results_dir, subjects=args.subjects)
-    plot_above_chance_per_category(df, output_dir / 'decoding_above_chance_per_category.pdf')
+    plot_balanced_accuracy_per_category(df, output_dir)
 
     # Also write the source data behind the figure.
     df.sort_values(['category', 'subject']).to_csv(
-        output_dir / 'decoding_above_chance_per_category.csv', index=False
+        output_dir / 'decoding_balanced_accuracy_per_category.csv', index=False
     )
     logger.info("Done.")
     return 0
