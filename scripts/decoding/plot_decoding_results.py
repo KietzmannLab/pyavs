@@ -15,7 +15,7 @@ import argparse
 import os
 import sys
 from pathlib import Path
-from typing import List
+from typing import List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -67,15 +67,52 @@ def load_decoding_results(results_dir: Path, subjects: List[int] = None) -> pd.D
 
 
 def category_color_map(df: pd.DataFrame) -> dict:
-    """Shared category -> HSV color mapping, ordered by mean balanced accuracy (descending).
+    """Shared category -> husl color mapping, ordered by mean balanced accuracy (descending).
 
     Built once and reused across the bar chart and the scatter so a category has the same color in
     both figures.
     """
     order = (df.groupby('category')['balanced_accuracy']
                .mean().sort_values(ascending=False).index.tolist())
-    colors = sns.color_palette('hsv', len(order))
+    colors = sns.color_palette('husl', len(order))
     return dict(zip(order, colors))
+
+
+def _bootstrap_ci(values: np.ndarray, ci: float = 95.0, n_boot: int = 1000,
+                  seed: int = 42) -> Tuple[float, float]:
+    """Percentile bootstrap CI of the mean (matches seaborn's errorbar=('ci', 95) approach)."""
+    values = np.asarray(values, dtype=float)
+    rng = np.random.default_rng(seed)
+    boot_means = rng.choice(values, size=(n_boot, values.size), replace=True).mean(axis=1)
+    lo = np.percentile(boot_means, (100 - ci) / 2)
+    hi = np.percentile(boot_means, 100 - (100 - ci) / 2)
+    return float(lo), float(hi)
+
+
+def filter_significant_categories(df: pd.DataFrame, min_subjects: int = 4,
+                                  chance: float = 50.0) -> Tuple[pd.DataFrame, List[str]]:
+    """Keep categories with >= min_subjects results whose bootstrapped 95% CI excludes chance.
+
+    The CI is over the per-subject balanced accuracies (in %), computed the same way as the bars'
+    error bars. Returns the filtered DataFrame and the kept category list.
+    """
+    work = df.copy()
+    work['balanced_accuracy_pct'] = work['balanced_accuracy'] * 100.0
+
+    kept = []
+    for cat, g in work.groupby('category'):
+        n_subjects = g['subject'].nunique()
+        if n_subjects < min_subjects:
+            continue
+        lo, hi = _bootstrap_ci(g['balanced_accuracy_pct'].to_numpy())
+        if lo <= chance <= hi:  # CI includes chance -> not reliably different from chance
+            continue
+        kept.append(cat)
+
+    filtered = df[df['category'].isin(kept)].copy()
+    logger.info(f"Kept {len(kept)}/{work['category'].nunique()} categories "
+                f"(>= {min_subjects} subjects and 95% CI excluding {chance:.0f}%)")
+    return filtered, kept
 
 
 def plot_balanced_accuracy_per_category(df: pd.DataFrame, output_dir: Path,
@@ -98,7 +135,7 @@ def plot_balanced_accuracy_per_category(df: pd.DataFrame, output_dir: Path,
 
     sns.set_context("poster")
     plt.figure(figsize=(12, 7))
-    sns.barplot(
+    sns.pointplot(
         data=df,
         x='category',
         y='balanced_accuracy_pct',
@@ -109,8 +146,10 @@ def plot_balanced_accuracy_per_category(df: pd.DataFrame, output_dir: Path,
         errorbar=('ci', 95),
     )
     plt.xticks(range(len(order)), order, rotation=45, ha='right')
-    plt.ylim(bottom=50)  # start at chance and go up
-    plt.ylabel('balanced accuracy [%]')
+    # add chance line at 50% (balanced accuracy for a binary decoder)
+    plt.axhline(50, color='darkgrey', linestyle='-')
+    plt.ylim(bottom=48)  # start at chance and go up
+    plt.ylabel('balanced decoding accuracy [%]')
     plt.xlabel(None)
     sns.despine()
     plt.tight_layout()
@@ -131,7 +170,7 @@ def plot_performance_vs_frequency(df: pd.DataFrame, output_dir: Path,
 
     Checks whether decodability simply tracks how often a category was fixated. x is the number of
     fixations (mean across subjects, log scale since counts span orders of magnitude); y is
-    balanced accuracy, starting at 50% (chance). Points use the same per-category HSV colors as the
+    balanced accuracy, starting at 50% (chance). Points use the same per-category husl colors as the
     bar chart.
     """
     df = df.copy()
@@ -145,7 +184,7 @@ def plot_performance_vs_frequency(df: pd.DataFrame, output_dir: Path,
         palette = category_color_map(df)
 
     sns.set_context("poster")
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(5, 6))
     sns.scatterplot(
         data=per_cat,
         x='n_occurrences',
@@ -157,7 +196,7 @@ def plot_performance_vs_frequency(df: pd.DataFrame, output_dir: Path,
     plt.xscale('log')
     plt.ylim(bottom=50)  # start at chance
     plt.xlabel('number of fixations [count]')
-    plt.ylabel('balanced accuracy [%]')
+    plt.ylabel('accuracy [%]')
     sns.despine()
     plt.tight_layout()
 
@@ -178,6 +217,9 @@ def main():
                         help='Subset of subjects to include (default: all found)')
     parser.add_argument('--output-dir', default=None,
                         help='Where to save the figure (default: <results-dir>/plots)')
+    parser.add_argument('--min-subjects', type=int, default=4,
+                        help='Only plot categories with results from at least this many subjects '
+                             '(default: 4)')
     args = parser.parse_args()
 
     if args.results_dir is None:
@@ -193,7 +235,15 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     df = load_decoding_results(results_dir, subjects=args.subjects)
-    # One HSV color per category, shared across both figures.
+
+    # Restrict to categories decoded reliably above chance: >= min_subjects results and a
+    # bootstrapped 95% CI that excludes 50%.
+    df, kept = filter_significant_categories(df, min_subjects=args.min_subjects)
+    if not kept:
+        logger.warning("No categories passed the CI/min-subjects filter; nothing to plot.")
+        return 1
+
+    # One husl color per (kept) category, shared across both figures.
     palette = category_color_map(df)
     plot_balanced_accuracy_per_category(df, output_dir, palette=palette)
     plot_performance_vs_frequency(df, output_dir, palette=palette)
