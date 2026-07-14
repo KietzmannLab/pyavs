@@ -1,5 +1,7 @@
 #!/bin/bash
-#SBATCH --time=5:00:00
+# NOTE: --time raised from 5h to 12h for the RDM-permutation (shuffle) control,
+# which adds an N-times searchlight sweep per subject (--n-permutations below).
+#SBATCH --time=12:00:00
 #SBATCH --nodes=1
 #SBATCH --mem=500G
 #SBATCH --cpus-per-task=50
@@ -34,6 +36,7 @@ echo "Model: resnet50_ecoset_crop"
 echo "Layer: ${layer}"
 echo "Sessions: 1-10"
 echo "Noise ceiling: skipped (run separately)"
+echo "Permutations: 1000 (RDM shuffle control)"
 echo "==================================================="
 
 python ${script_path}/compute_source_rsa.py \
@@ -45,6 +48,8 @@ python ${script_path}/compute_source_rsa.py \
     --rsa-results-dir ${rsa_results_dir} \
     --output-dir ${output_dir} \
     --n-jobs 50 \
+    --n-permutations 1000 \
+    --perm-seed 0 \
     --skip-noise-ceiling
 
 echo "==================================================="

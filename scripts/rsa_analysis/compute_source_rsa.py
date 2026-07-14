@@ -407,6 +407,8 @@ def process_subject(
     morph_to: str,
     n_jobs: int,
     all_subjects: List[int],
+    n_permutations: int = 0,
+    perm_seed: int = 0,
 ) -> None:
     """
     Run source-space RSA for one subject across all model/layer combinations.
@@ -441,6 +443,11 @@ def process_subject(
         Parallel jobs (used inside stc_rsa).
     all_subjects : list of int
         All subjects (used for group RSA peak finding).
+    n_permutations : int
+        Number of RDM-permutation (shuffle) draws for the searchlight null.
+        0 (default) skips the shuffle control entirely.
+    perm_seed : int
+        Seed for the permutation RNG (default: 0).
     """
     logger.info(f"\n{'='*60}")
     logger.info(f"Source RSA: subject {subject}")
@@ -581,6 +588,36 @@ def process_subject(
         rsa_stc.save(out_path, overwrite=True)
         logger.info(f"  Saved: {fname_stem}-lh.stc / -rh.stc")
 
+        # --- 10. RDM-permutation (shuffle) control ---
+        if n_permutations > 0:
+            try:
+                obs_null, perm_null = searchlight_rsa_null(
+                    stcs_morphed=stcs_morphed,
+                    rdm_matrix=rdm_matrix,
+                    src=src_fsaverage,
+                    spatial_radius=0.02,
+                    n_permutations=n_permutations,
+                    seed=perm_seed,
+                    n_jobs=n_jobs,
+                )
+            except Exception as e:
+                logger.error(f"  searchlight_rsa_null failed: {e}")
+                continue
+
+            null_fname = (
+                f"sub-{subject:02d}_model-{model_name}_layer-{layer}_rsa_null.npz"
+            )
+            np.savez_compressed(
+                subject_out_dir / null_fname,
+                observed=obs_null.astype(np.float32),
+                null=perm_null.astype(np.float32),
+                vertices_lh=stcs_morphed[0].vertices[0],
+                vertices_rh=stcs_morphed[0].vertices[1],
+            )
+            logger.info(
+                f"  Saved shuffle control ({n_permutations} perms): {null_fname}"
+            )
+
 
 # ============================================================================
 # Noise ceiling
@@ -711,6 +748,170 @@ def compute_noise_ceiling_stc(
 
 
 # ============================================================================
+# RDM permutation (shuffle) control
+# ============================================================================
+
+def _rank_model_rdms(
+    rdm_matrix: np.ndarray,
+    n_permutations: int,
+    seed: int,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Build the observed + permuted model-RDM rank matrix for the shuffle control.
+
+    Permuting the rows *and* columns of the square model RDM by the same
+    permutation is identical to permuting the underlying category labels
+    (i.e. permuting embeddings and recomputing the RDM), so no embeddings are
+    needed here.
+
+    Ranking each condensed RDM vector once lets the second-level Spearman
+    correlation be computed as a Pearson correlation on ranks inside the
+    vertex loop.
+
+    Parameters
+    ----------
+    rdm_matrix : np.ndarray, shape (n_valid, n_valid)
+        Square model RDM over valid categories.
+    n_permutations : int
+        Number of label permutations (null draws).
+    seed : int
+        Seed for the permutation RNG.
+
+    Returns
+    -------
+    model_ranks : np.ndarray, shape (n_permutations + 1, n_valid_pairs)
+        Rank-transformed condensed RDMs. Row 0 is the observed (identity)
+        model RDM; rows 1..N are permuted nulls. NaN pairs (per the observed
+        RDM) are dropped from every row so the columns stay aligned.
+    valid_pair_mask : np.ndarray of bool, shape (n_pairs_full,)
+        Mask over the full upper-triangle pair index selecting the kept
+        (non-NaN) pairs, so brain RDMs can be subset the same way.
+    """
+    rng = np.random.default_rng(seed)
+    n_valid = rdm_matrix.shape[0]
+    triu = np.triu_indices(n_valid, k=1)
+
+    observed_vec = rdm_matrix[triu]
+    valid_pair_mask = ~np.isnan(observed_vec)
+
+    rows = [observed_vec]
+    for _ in range(n_permutations):
+        p = rng.permutation(n_valid)
+        rows.append(rdm_matrix[np.ix_(p, p)][triu])
+
+    model_vecs = np.stack(rows, axis=0)[:, valid_pair_mask]  # (N+1, n_pairs)
+    # Rank each row (Pearson on ranks == Spearman)
+    from scipy.stats import rankdata
+    model_ranks = np.apply_along_axis(rankdata, 1, model_vecs)
+    return model_ranks, valid_pair_mask
+
+
+def searchlight_rsa_null(
+    stcs_morphed: List[mne.SourceEstimate],
+    rdm_matrix: np.ndarray,
+    src: mne.SourceSpaces,
+    spatial_radius: float = 0.02,
+    n_permutations: int = 1000,
+    seed: int = 0,
+    n_jobs: int = 1,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Searchlight RSA with an RDM-permutation (shuffle) null distribution.
+
+    Computes each vertex's brain RDM **once** (geodesic-patch searchlight, the
+    same construction used by :func:`compute_noise_ceiling_stc`) and correlates
+    it against the observed model RDM plus ``n_permutations`` label-permuted
+    model RDMs. This is N-times cheaper than re-running a full searchlight per
+    permutation.
+
+    Brain RDMs use correlation distance and the second-level model-vs-brain
+    comparison is Spearman (matching ``rsa_metric='spearman'`` in
+    :func:`process_subject`), computed as Pearson on ranks.
+
+    Parameters
+    ----------
+    stcs_morphed : list of mne.SourceEstimate
+        Category-averaged STCs in the common (fsaverage) space; one per valid
+        category, single timepoint. Must share the same vertex space as ``src``.
+    rdm_matrix : np.ndarray, shape (n_valid, n_valid)
+        Square model RDM over the same valid categories.
+    src : mne.SourceSpaces
+        Common-space source space (fsaverage) used for geodesic distances.
+    spatial_radius : float
+        Searchlight radius in metres (default: 0.02, matching the observed run).
+    n_permutations : int
+        Number of label permutations (null draws).
+    seed : int
+        Seed for the permutation RNG.
+    n_jobs : int
+        Parallel jobs for the per-vertex loop.
+
+    Returns
+    -------
+    observed : np.ndarray, shape (n_vertices,)
+        Observed searchlight RSA (identity model RDM), NaN where undefined.
+    null : np.ndarray, shape (n_permutations, n_vertices)
+        Null searchlight RSA maps, one row per permutation.
+    """
+    data = np.stack([s.data[:, 0] for s in stcs_morphed], axis=0)  # (n_valid, n_vertices)
+
+    model_ranks, valid_pair_mask = _rank_model_rdms(rdm_matrix, n_permutations, seed)
+    # Centre + normalise model ranks once so correlation is a single dot product.
+    mr = model_ranks - model_ranks.mean(axis=1, keepdims=True)
+    mr_norm = np.linalg.norm(mr, axis=1)  # (N+1,)
+
+    # Geodesic distances in the common space (same as the noise ceiling).
+    mne.add_source_space_distances(src, dist_limit=spatial_radius + 0.01)
+    dist_lh = src[0]['dist'].tocsr()
+    dist_rh = src[1]['dist'].tocsr()
+
+    vertices_lh = stcs_morphed[0].vertices[0]
+    n_lh = len(vertices_lh)
+    n_vertices = data.shape[1]
+
+    from scipy.stats import rankdata
+
+    def _rsa_at_vertex(v):
+        if v < n_lh:
+            row_sp = dist_lh[[v]]
+            nearby = row_sp.indices[row_sp.data <= spatial_radius]
+            patch = np.union1d([v], nearby)
+        else:
+            row_sp = dist_rh[[v - n_lh]]
+            nearby = row_sp.indices[row_sp.data <= spatial_radius]
+            patch = np.union1d([v], nearby + n_lh)
+
+        if len(patch) < 2:
+            return np.full(model_ranks.shape[0], np.nan)
+
+        # Brain RDM for this patch (condensed), subset to the kept pairs.
+        brain_rdm = pdist(data[:, patch], metric='correlation')[valid_pair_mask]
+        if not np.all(np.isfinite(brain_rdm)) or np.ptp(brain_rdm) == 0:
+            return np.full(model_ranks.shape[0], np.nan)
+
+        br = rankdata(brain_rdm)
+        br = br - br.mean()
+        br_norm = np.linalg.norm(br)
+        if br_norm == 0:
+            return np.full(model_ranks.shape[0], np.nan)
+
+        # Pearson-on-ranks == Spearman, for observed + all permutations at once.
+        corr = (mr @ br) / (mr_norm * br_norm)
+        return corr
+
+    logger.info(
+        f"  Shuffle control: {n_permutations} permutations over {n_vertices} vertices ..."
+    )
+    results = Parallel(n_jobs=n_jobs)(
+        delayed(_rsa_at_vertex)(v) for v in range(n_vertices)
+    )
+    all_rsa = np.stack(results, axis=1)  # (N+1, n_vertices)
+    observed = all_rsa[0]
+    null = all_rsa[1:]
+    return observed, null
+
+
+# ============================================================================
 # Main
 # ============================================================================
 
@@ -788,6 +989,19 @@ def main():
         default=False,
         help='Skip group noise ceiling computation (e.g. when running per-subject jobs)',
     )
+    parser.add_argument(
+        '--n-permutations',
+        type=int, default=0,
+        help=(
+            'Number of RDM-permutation (shuffle) draws for the searchlight null. '
+            '0 (default) skips the shuffle control.'
+        ),
+    )
+    parser.add_argument(
+        '--perm-seed',
+        type=int, default=0,
+        help='Seed for the permutation RNG (default: 0)',
+    )
     args = parser.parse_args()
 
     if args.data_path is None:
@@ -816,6 +1030,7 @@ def main():
     logger.info(f"Models:     {model_specs}")
     logger.info(f"RSA dir:    {args.rsa_results_dir}")
     logger.info(f"Output:     {args.output_dir}")
+    logger.info(f"Perms:      {args.n_permutations} (seed {args.perm_seed})")
 
     # Process subjects sequentially (stc_rsa is already parallelized internally)
     for subject in args.subjects:
@@ -832,6 +1047,8 @@ def main():
             morph_to=args.morph_to,
             n_jobs=args.n_jobs,
             all_subjects=args.subjects,
+            n_permutations=args.n_permutations,
+            perm_seed=args.perm_seed,
         )
 
     # Compute noise ceiling after all subjects have been processed

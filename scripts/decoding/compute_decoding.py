@@ -174,38 +174,46 @@ def select_window_and_flatten(epochs_data: np.ndarray, times: np.ndarray,
     return X, times_win
 
 
-def reject_outlier_fixations(X: np.ndarray, y: np.ndarray, groups: np.ndarray,
-                             amp_percentile: float = 99.0, corr_percentile: float = 1.0
-                             ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Reject extreme fixations before decoding (ported from the encoding pipeline).
+def outlier_mask(X: np.ndarray, amp_percentile: float = 99.0,
+                 corr_percentile: float = 1.0) -> np.ndarray:
+    """Boolean keep-mask over the rows of the flattened window features `X`.
 
-    Two label-independent criteria are applied to the flattened window features, so this is safe
-    to run once per subject (it uses neither the category labels nor the CV folds and therefore
-    cannot leak):
+    Two label-independent criteria (ported from the encoding pipeline), so this is safe to run once
+    per subject — it uses neither labels/targets nor the CV folds and therefore cannot leak:
       1. Max absolute amplitude above `amp_percentile` (default 99th) — high-amplitude artifacts.
       2. Correlation to the median fixation pattern below `corr_percentile` (default 1st) — atypical
-         topographies.
+         topographies (evaluated among the amplitude-passing fixations).
+    Returning a mask lets callers apply the identical selection to X, groups, and (for the
+    regression pipeline) every layer's embedding matrix.
     """
-    n0 = X.shape[0]
+    keep = np.ones(X.shape[0], dtype=bool)
 
-    # 1. Extreme-amplitude rejection.
+    # 1. Extreme-amplitude rejection (over all rows).
     max_per_fix = np.max(np.abs(X), axis=1)
     amp_thresh = np.percentile(max_per_fix, amp_percentile)
-    keep = max_per_fix < amp_thresh
-    X, y, groups = X[keep], y[keep], groups[keep]
+    keep &= max_per_fix < amp_thresh
 
-    # 2. Low-correlation-to-median rejection.
-    median_pattern = np.median(X, axis=0)
-    # Pearson correlation of each fixation to the median pattern.
-    Xc = X - X.mean(axis=1, keepdims=True)
+    # 2. Low-correlation-to-median rejection, evaluated among the amplitude-passing rows so the
+    #    threshold matches the original two-stage implementation.
+    Xk = X[keep]
+    median_pattern = np.median(Xk, axis=0)
+    Xc = Xk - Xk.mean(axis=1, keepdims=True)
     mc = median_pattern - median_pattern.mean()
-    denom = (np.linalg.norm(Xc, axis=1) * np.linalg.norm(mc))
+    denom = np.linalg.norm(Xc, axis=1) * np.linalg.norm(mc)
     denom[denom == 0] = np.nan
     corrs = (Xc @ mc) / denom
     corr_thresh = np.nanpercentile(corrs, corr_percentile)
-    keep2 = corrs > corr_thresh
-    X, y, groups = X[keep2], y[keep2], groups[keep2]
+    keep[np.where(keep)[0]] = corrs > corr_thresh
+    return keep
 
+
+def reject_outlier_fixations(X: np.ndarray, y: np.ndarray, groups: np.ndarray,
+                             amp_percentile: float = 99.0, corr_percentile: float = 1.0
+                             ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Reject extreme fixations before decoding; convenience wrapper around `outlier_mask`."""
+    n0 = X.shape[0]
+    keep = outlier_mask(X, amp_percentile=amp_percentile, corr_percentile=corr_percentile)
+    X, y, groups = X[keep], y[keep], groups[keep]
     logger.info(f"Outlier rejection: kept {X.shape[0]}/{n0} fixations "
                 f"(dropped {n0 - X.shape[0]}: amplitude > p{amp_percentile:.0f} or "
                 f"corr-to-median < p{corr_percentile:.0f})")
