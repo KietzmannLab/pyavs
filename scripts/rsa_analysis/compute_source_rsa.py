@@ -380,9 +380,10 @@ def _load_fsaverage_src(
     subject: str = 'fsaverage',
 ) -> mne.SourceSpaces:
     """Load fsaverage ico-5 source space, falling back to MNE built-in."""
-    src_path = Path(subjects_dir) / subject / 'bem' / f'{subject}-ico-5-src.fif'
-    if src_path.exists():
-        return mne.read_source_spaces(str(src_path), verbose=False)
+    if subjects_dir is not None:
+        src_path = Path(subjects_dir) / subject / 'bem' / f'{subject}-ico-5-src.fif'
+        if src_path.exists():
+            return mne.read_source_spaces(str(src_path), verbose=False)
     # Fallback: fetch from MNE's built-in fsaverage
     fs_dir = mne.datasets.fetch_fsaverage(verbose=False)
     return mne.read_source_spaces(

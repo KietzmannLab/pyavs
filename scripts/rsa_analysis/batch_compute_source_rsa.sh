@@ -27,6 +27,10 @@ data_path="/share/klab/datasets/avs/"
 # ({fwd_dir}/source/as{id}/src/as{id}-fwd.fif). Without --fwd-dir the script
 # falls back to the (empty) BIDS derivatives path and fails to find the forward.
 fwd_dir="/share/klab/datasets/avs/AVS-UTILS"
+# FreeSurfer SUBJECTS_DIR (individual anatomies as{id} + fsaverage). Needed for
+# morphing to fsaverage and loading the ico-5 source space. Without it,
+# subjects_dir is None and the run crashes in _load_fsaverage_src / morphing.
+subjects_dir="/share/klab/datasets/avs/rawdir"
 rsa_results_dir="/share/klab/psulewski/psulewski/pyavs/rsa"
 output_dir="/share/klab/psulewski/psulewski/pyavs/source_rsa"
 layer="layer3"
@@ -52,6 +56,7 @@ python ${script_path}/compute_source_rsa.py \
     --rsa-results-dir ${rsa_results_dir} \
     --output-dir ${output_dir} \
     --fwd-dir ${fwd_dir} \
+    --subjects-dir ${subjects_dir} \
     --n-jobs 50 \
     --n-permutations 100 \
     --perm-seed 0 \
