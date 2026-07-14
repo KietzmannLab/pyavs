@@ -23,6 +23,10 @@ conda activate avs
 # Base paths
 script_path="/home/student/p/psulewski/pyAVS/scripts/rsa_analysis"
 data_path="/share/klab/datasets/avs/"
+# Pre-computed forward models live under the AVS-UTILS tree
+# ({fwd_dir}/source/as{id}/src/as{id}-fwd.fif). Without --fwd-dir the script
+# falls back to the (empty) BIDS derivatives path and fails to find the forward.
+fwd_dir="/share/klab/datasets/avs/AVS-UTILS"
 rsa_results_dir="/share/klab/psulewski/psulewski/pyavs/rsa"
 output_dir="/share/klab/psulewski/psulewski/pyavs/source_rsa"
 layer="layer3"
@@ -47,6 +51,7 @@ python ${script_path}/compute_source_rsa.py \
     --layers ${layer} \
     --rsa-results-dir ${rsa_results_dir} \
     --output-dir ${output_dir} \
+    --fwd-dir ${fwd_dir} \
     --n-jobs 50 \
     --n-permutations 1000 \
     --perm-seed 0 \
