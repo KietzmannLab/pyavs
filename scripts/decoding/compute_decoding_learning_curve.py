@@ -49,7 +49,7 @@ logger = get_logger('scripts.decoding.compute_decoding_learning_curve')
 # Spans the observed per-category range (~200 up to a few thousand). Each category's curve runs
 # only as far as its own count allows; higher grid points are skipped for less frequent categories,
 # so curves legitimately have different lengths.
-DEFAULT_N_GRID = [200, 300, 450, 650, 1000, 1600, 2400]
+DEFAULT_N_GRID = [100, 200, 300, 450, 650, 1000, 1600, 2400]
 
 
 def select_default_subset(y: np.ndarray, n_grid: List[int], n_splits: int = 5,
@@ -268,10 +268,10 @@ def main():
     parser.add_argument('--categories', nargs='+', default=None,
                         help='Category subset to sweep (default: span the frequency range)')
     parser.add_argument('--n-grid', type=int, nargs='+', default=DEFAULT_N_GRID,
-                        help='Training sizes per class to sweep (default: 200 400 800 1600 3200)')
+                        help='Training sizes per class to sweep (default: 100 200 400 800 1600 3200)')
     parser.add_argument('--n-repeats', type=int, default=5, help='Subsamples per (fold, N)')
-    parser.add_argument('--n-splits', type=int, default=5, help='Outer GroupKFold folds')
-    parser.add_argument('--pca-variance', type=float, default=0.98)
+    parser.add_argument('--n-splits', type=int, default=3, help='Outer GroupKFold folds')
+    parser.add_argument('--pca-variance', type=float, default=0.90)
     parser.add_argument('--decoding-results-dir', default=None,
                         help="Main decoding results dir for the 'before' correlation "
                              "(default: <data>/decoding_results)")

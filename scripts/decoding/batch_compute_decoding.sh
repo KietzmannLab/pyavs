@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-task=50
 
 #SBATCH -p klab-cpu
-#SBATCH --job-name=decoding
+#SBATCH --job-name=curve_decoding
 #SBATCH --error=error_decoding_%A_%a.err
 #SBATCH --output=output_decoding_%A_%a.out
 #SBATCH --array=1-5  # One task per subject (subjects 1-5); adjust if more subjects
@@ -32,14 +32,12 @@ echo "Array task ID: $SLURM_ARRAY_TASK_ID"
 echo "Channels: grad, window: 50-200 ms, min occurrences: 200"
 echo "Sessions: 1-10 (all sessions combined)"
 echo "==================================================="
-
-python ${script_path}/compute_decoding.py \
+python ${script_path}/compute_decoding_learning_curve.py \
     --data-path $data_path \
     --subjects $subject \
     --sessions 1 2 3 4 5 6 7 8 9 10 \
     --channels grad \
     --time-window 50 200 \
-    --min-occurrences 200 \
     --n-splits 3
 
 echo "==================================================="
