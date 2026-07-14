@@ -53,7 +53,7 @@ python ${script_path}/compute_source_rsa.py \
     --output-dir ${output_dir} \
     --fwd-dir ${fwd_dir} \
     --n-jobs 50 \
-    --n-permutations 1000 \
+    --n-permutations 100 \
     --perm-seed 0 \
     --skip-noise-ceiling
 
