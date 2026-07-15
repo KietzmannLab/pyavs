@@ -557,8 +557,10 @@ def main():
     parser = argparse.ArgumentParser(
         description="Plot RSA analysis results: multi-layer timeseries with noise ceiling"
     )
-    parser.add_argument("--rsa-dir", type=str, default=None)
-    parser.add_argument("--output-dir", type=str, default=None)
+    parser.add_argument("--rsa-dir", type=str, required=True,
+                        help="Directory with per-subject sub-*/*_rsa_results.npz files")
+    parser.add_argument("--output-dir", type=str, default=None,
+                        help="Where to save plots (default: --rsa-dir)")
     parser.add_argument("--subjects", type=int, nargs="+", default=[1, 2, 3, 4, 5])
     parser.add_argument("--single-subject", type=int, default=None)
     parser.add_argument("--model", "--model-name", dest="model_name", default="resnet50_ecoset_crop")
@@ -575,7 +577,7 @@ def main():
     if not rsa_dir.exists():
         raise FileNotFoundError(f"RSA directory does not exist: {rsa_dir}")
 
-    output_dir = Path(args.output_dir)
+    output_dir = Path(args.output_dir) if args.output_dir else rsa_dir
     output_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"Saving plots to: {output_dir}")
 

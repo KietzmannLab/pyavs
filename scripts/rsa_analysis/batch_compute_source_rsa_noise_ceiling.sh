@@ -24,6 +24,11 @@ conda activate avs
 # Base paths
 script_path="/home/student/p/psulewski/pyAVS/scripts/rsa_analysis"
 output_dir="/share/klab/psulewski/psulewski/pyavs/source_rsa"
+# FreeSurfer SUBJECTS_DIR (for the fsaverage ico-5 source space used by the
+# searchlight). Without it, subjects_dir is None and the script would fall back
+# to mne.datasets.fetch_fsaverage(), which needs internet — klab-cpu compute
+# nodes are offline, so pass it explicitly.
+subjects_dir="/share/klab/datasets/avs/rawdir"
 
 echo "==================================================="
 echo "Source-space RSA — group noise ceiling"
@@ -37,6 +42,7 @@ python ${script_path}/compute_source_rsa_noise_ceiling.py \
     --models resnet50_ecoset_crop \
     --layers layer3 \
     --output-dir ${output_dir} \
+    --subjects-dir ${subjects_dir} \
     --n-jobs 200
 
 echo "==================================================="

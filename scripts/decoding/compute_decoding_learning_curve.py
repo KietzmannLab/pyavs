@@ -78,17 +78,93 @@ def select_default_subset(y: np.ndarray, n_grid: List[int], n_splits: int = 5,
     return sorted([cats[i] for i in idx])
 
 
+def _water_fill(n: int, caps: np.ndarray) -> np.ndarray:
+    """Distribute `n` items across bins as evenly as possible without exceeding per-bin `caps`.
+
+    Returns an integer allocation summing to min(n, caps.sum()).
+    """
+    caps = np.asarray(caps, dtype=int)
+    alloc = np.zeros(len(caps), dtype=int)
+    remaining = int(min(n, caps.sum()))
+    while remaining > 0:
+        active = np.where(alloc < caps)[0]
+        if active.size == 0:
+            break
+        give = remaining // active.size
+        if give == 0:
+            # Fewer items left than active bins: hand out one each to the first `remaining`.
+            for i in active[:remaining]:
+                alloc[i] += 1
+            break
+        add = np.minimum(give, caps[active] - alloc[active])
+        alloc[active] += add
+        remaining -= int(add.sum())
+    return alloc
+
+
+def stratified_negative_indices(labels: np.ndarray, exclude: str, n: int,
+                                rng: np.random.Generator) -> np.ndarray:
+    """Draw ~`n` indices into `labels` spread as evenly as possible across categories != exclude.
+
+    This keeps the negative class from being dominated by the most frequent category (e.g. person),
+    making the one-vs-rest task "target vs a uniform-over-categories background".
+    """
+    others = [cat for cat in np.unique(labels) if cat != exclude]
+    pools = {cat: rng.permutation(np.where(labels == cat)[0]) for cat in others}
+    caps = np.array([len(pools[cat]) for cat in others])
+    alloc = _water_fill(n, caps)
+    picked = [pools[cat][:a] for cat, a in zip(others, alloc) if a > 0]
+    return np.concatenate(picked) if picked else np.array([], dtype=int)
+
+
+def _macro_balanced_accuracy(y_test: np.ndarray, y_pred: np.ndarray, c: str,
+                             test_cat_counts: pd.Series, min_neg_count: int) -> float:
+    """Balanced accuracy against a category-balanced negative set.
+
+    0.5 * (sensitivity + macro_specificity), where sensitivity is TPR on the target's test
+    positives and macro_specificity averages the per-category TNR over the other categories (each
+    with >= min_neg_count test fixations), weighting every negative category equally instead of by
+    frequency. Chance stays 0.5.
+    """
+    pos_mask = (y_test == c)
+    tpr = float(np.mean(y_pred[pos_mask])) if pos_mask.any() else np.nan
+
+    tnrs = []
+    for c2, cnt in test_cat_counts.items():
+        if c2 == c or cnt < min_neg_count:
+            continue
+        m = (y_test == c2)
+        tnrs.append(float(np.mean(~y_pred[m])))  # fraction predicted negative within c2
+    if not tnrs or np.isnan(tpr):
+        # Fall back to specificity over all negatives if no category qualifies.
+        neg_mask = ~pos_mask
+        spec = float(np.mean(~y_pred[neg_mask])) if neg_mask.any() else np.nan
+    else:
+        spec = float(np.mean(tnrs))
+    return 0.5 * (tpr + spec)
+
+
 def decode_learning_curve(X: np.ndarray, y: np.ndarray, groups: np.ndarray,
                           categories: List[str], n_grid: List[int], n_repeats: int = 5,
                           n_splits: int = 5, pca_variance: float = 0.98,
+                          neg_sampling: str = 'stratified', min_neg_count: int = 10,
                           random_state: int = 42) -> pd.DataFrame:
     """Sweep matched training size N per category; return per-(category, N) balanced accuracy.
 
     For each outer GroupKFold fold, the scaler+PCA is fit once on the full training rows (shared
     across categories and N). Then, for each category and each feasible N, the positive and negative
     training rows are each subsampled to N (balanced 2N set), a LogisticRegressionCV is fit with a
-    scene-grouped inner CV over C, and balanced accuracy is scored on the full test fold. Results
-    are averaged over the n_splits folds x n_repeats subsamples.
+    scene-grouped inner CV over C, and accuracy is scored on the test fold. Results are averaged
+    over the n_splits folds x n_repeats subsamples.
+
+    `neg_sampling`:
+      - 'stratified' (default): training negatives are drawn evenly across the other categories and
+        the test metric is a category-balanced balanced accuracy (macro-averaged specificity), so
+        the task is "target vs a uniform-over-categories background". NOT directly comparable to the
+        main per-category decoder, whose negatives follow the natural (frequency-weighted)
+        distribution.
+      - 'proportional': legacy behavior — training negatives drawn uniformly over all non-target
+        fixations (frequency-weighted) and plain `balanced_accuracy_score` on the test fold.
     """
     rng = np.random.default_rng(random_state)
     counts = pd.Series(y).value_counts()
@@ -111,6 +187,7 @@ def decode_learning_curve(X: np.ndarray, y: np.ndarray, groups: np.ndarray,
 
         y_train, y_test = y[train_idx], y[test_idx]
         groups_train = groups[train_idx]
+        test_cat_counts = pd.Series(y_test).value_counts()  # precomputed once per fold
 
         for c in categories:
             pos_idx = np.where(y_train == c)[0]
@@ -122,10 +199,16 @@ def decode_learning_curve(X: np.ndarray, y: np.ndarray, groups: np.ndarray,
                     continue  # not enough data at this N for this category/fold
                 for _ in range(n_repeats):
                     sp = rng.choice(pos_idx, size=N, replace=False)
-                    sn = rng.choice(neg_idx, size=N, replace=False)
+                    if neg_sampling == 'stratified':
+                        sn = stratified_negative_indices(y_train, c, N, rng)
+                    else:
+                        sn = rng.choice(neg_idx, size=N, replace=False)
+                    if len(sn) < 2:
+                        continue
                     sub = np.concatenate([sp, sn])
                     X_sub = X_train_pca[sub]
-                    y_sub = np.concatenate([np.ones(N, dtype=bool), np.zeros(N, dtype=bool)])
+                    y_sub = np.concatenate([np.ones(len(sp), dtype=bool),
+                                            np.zeros(len(sn), dtype=bool)])
                     g_sub = groups_train[sub]
 
                     n_inner = min(5, np.unique(g_sub).size)
@@ -144,7 +227,12 @@ def decode_learning_curve(X: np.ndarray, y: np.ndarray, groups: np.ndarray,
                     )
                     clf.fit(X_sub, y_sub)
                     y_pred = clf.predict(X_test_pca)
-                    accum[c][N].append(balanced_accuracy_score(y_test_c, y_pred))
+                    if neg_sampling == 'stratified':
+                        acc = _macro_balanced_accuracy(y_test, y_pred, c,
+                                                       test_cat_counts, min_neg_count)
+                    else:
+                        acc = balanced_accuracy_score(y_test_c, y_pred)
+                    accum[c][N].append(acc)
 
     rows = []
     for c in categories:
@@ -233,7 +321,8 @@ def plot_learning_curve(df: pd.DataFrame, output_dir: Path,
 def process_subject(subject_id: int, sessions: List[int], data_path: str,
                     categories: List[str], n_grid: List[int], channels: str,
                     time_window: Tuple[float, float], n_repeats: int, n_splits: int,
-                    pca_variance: float, n_jobs: int) -> pd.DataFrame:
+                    pca_variance: float, n_jobs: int, neg_sampling: str = 'stratified',
+                    min_neg_count: int = 10) -> pd.DataFrame:
     """Build features for one subject and run the learning-curve sweep."""
     X, y, groups, _, _ = build_subject_features(
         subject_id, sessions, data_path, channels=channels,
@@ -251,6 +340,7 @@ def process_subject(subject_id: int, sessions: List[int], data_path: str,
     df = decode_learning_curve(
         X, y, groups, subset, n_grid,
         n_repeats=n_repeats, n_splits=n_splits, pca_variance=pca_variance,
+        neg_sampling=neg_sampling, min_neg_count=min_neg_count,
     )
     df.insert(0, 'subject', subject_id)
     return df
@@ -272,6 +362,15 @@ def main():
     parser.add_argument('--n-repeats', type=int, default=5, help='Subsamples per (fold, N)')
     parser.add_argument('--n-splits', type=int, default=3, help='Outer GroupKFold folds')
     parser.add_argument('--pca-variance', type=float, default=0.90)
+    parser.add_argument('--neg-sampling', choices=['stratified', 'proportional'],
+                        default='stratified',
+                        help="Negative-class composition: 'stratified' = uniform over other "
+                             "categories (target vs balanced background, train+test); "
+                             "'proportional' = legacy frequency-weighted negatives + plain "
+                             "balanced accuracy (default: stratified)")
+    parser.add_argument('--min-neg-count', type=int, default=10,
+                        help='Min test fixations for a category to count toward macro specificity '
+                             '(stratified only; default: 10)')
     parser.add_argument('--decoding-results-dir', default=None,
                         help="Main decoding results dir for the 'before' correlation "
                              "(default: <data>/decoding_results)")
@@ -305,6 +404,7 @@ def main():
             s, args.sessions, args.data_path, args.categories, args.n_grid,
             args.channels, tuple(args.time_window), args.n_repeats, args.n_splits,
             args.pca_variance, args.n_jobs,
+            neg_sampling=args.neg_sampling, min_neg_count=args.min_neg_count,
         ))
     df = pd.concat([d for d in all_df if not d.empty], ignore_index=True)
     if df.empty:

@@ -179,6 +179,7 @@ Desktop.ini
 *.mat
 *.edf
 *.bdf
+*.csv
 
 # Configuration files with sensitive data
 config.ini
