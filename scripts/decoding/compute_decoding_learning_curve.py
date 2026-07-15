@@ -49,7 +49,7 @@ logger = get_logger('scripts.decoding.compute_decoding_learning_curve')
 # Spans the observed per-category range (~200 up to a few thousand). Each category's curve runs
 # only as far as its own count allows; higher grid points are skipped for less frequent categories,
 # so curves legitimately have different lengths.
-DEFAULT_N_GRID = [100, 200, 300, 450, 650, 1000, 1600, 2400]
+DEFAULT_N_GRID = [10, 30, 50, 100, 200, 300, 450, 650, 1000, 1600, 2400]
 
 
 def select_default_subset(y: np.ndarray, n_grid: List[int], n_splits: int = 5,
