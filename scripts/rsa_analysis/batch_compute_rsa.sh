@@ -21,7 +21,7 @@ conda activate avs
 
 # Base paths
 script_path="/home/student/p/psulewski/pyAVS/scripts/rsa_analysis"
-data_path="/share/klab/datasets/avs/"
+data_path="$(pyavs configure --show)"
 
 # Subjects and layers to process
 subjects=(1 2 3 4 5)

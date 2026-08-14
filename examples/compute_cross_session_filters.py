@@ -21,7 +21,6 @@ from typing import List, Optional
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from pyavs.utils.logging import get_logger
-from pyavs.utils.config import get_config
 from pyavs.source.filters import (
     compute_cross_session_data_covariance,
     compute_per_session_lcmv_filters

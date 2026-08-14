@@ -11,7 +11,7 @@ Features:
 - Example images saved to cluster subfolders (AVS-sized images)
 - License + Flickr metadata saved as JSON per cluster for paper-safe attribution
 
-Usage (with defaults on UOS server):
+Usage (with defaults, requires `pyavs configure --data-path /path/to/data` to have been run once):
     python -m scripts.scene_clustering.plot_scene_clusters
 
 Usage (with custom paths):
@@ -23,12 +23,12 @@ Usage (with custom paths):
         --flickr-metadata-csv /path/to/avs_permissive_images_with_flickr.csv \\
         --output-dir /path/to/output
 
-Default paths (UOS server):
-    embeddings-csv: /share/klab/datasets/avs/input/scene_sampling_MEG/df_mean_embeddings_clustered_60.csv
-    avs-scenes: /share/klab/datasets/avs/input/scene_sampling_MEG/experiment_cocoIDs.csv
-    avs-scenes-dir: /share/klab/datasets/avs/AVS-UTILS/avs_scenes
-    permissive-csv: /share/klab/datasets/avs/AVS-UTILS/avs_scene_annotations/ms_coco_permissive_images.csv
-    flickr-metadata-csv: /share/klab/datasets/avs/AVS-UTILS/avs_scene_annotations/avs_permissive_images_with_flickr.csv
+Default paths (derived from the auto-detected pyavs data root, see pyavs.get_data_path()):
+    embeddings-csv: <data-root>/input/scene_sampling_MEG/df_mean_embeddings_clustered_60.csv
+    avs-scenes: <data-root>/input/scene_sampling_MEG/experiment_cocoIDs.csv
+    avs-scenes-dir: <data-root>/AVS-UTILS/avs_scenes
+    permissive-csv: <data-root>/AVS-UTILS/avs_scene_annotations/ms_coco_permissive_images.csv
+    flickr-metadata-csv: <data-root>/AVS-UTILS/avs_scene_annotations/avs_permissive_images_with_flickr.csv
     output-dir: /share/klab/psulewski/psulewski/pyavs/scene_clustering
 
 Output structure:
@@ -64,6 +64,7 @@ import seaborn as sns
 from scipy.stats import chi2_contingency
 from sklearn.manifold import TSNE
 
+from pyavs import get_data_path
 from pyavs.utils.logging import get_logger
 
 logger = get_logger('scripts.scene_clustering')
@@ -720,11 +721,20 @@ def plot_individual_cluster_tsne(
     logger.info(f"Saved: {png_path}")
 
 
-# Default paths (UOS server)
-DEFAULT_INPUT_DIR = '/share/klab/datasets/avs/input'
-DEFAULT_AVS_UTILS_DIR = '/share/klab/datasets/avs/AVS-UTILS'
+def _default_under(root: Optional[str], *parts: str) -> Optional[str]:
+    """Join path parts under an auto-detected data root, or None if unconfigured
+    (explicit --flags on the CLI still work without pyavs being configured)."""
+    return os.path.join(root, *parts) if root else None
+
+
+# Default paths, derived from the auto-detected pyavs data root (see pyavs.configure())
+_DATA_ROOT = get_data_path()
+DEFAULT_INPUT_DIR = _default_under(_DATA_ROOT, 'input')
+DEFAULT_AVS_UTILS_DIR = _default_under(_DATA_ROOT, 'AVS-UTILS')
 DEFAULT_OUTPUT_DIR = '/share/klab/psulewski/psulewski/pyavs/scene_clustering'
-DEFAULT_FLICKR_METADATA_PATH = '/share/klab/datasets/avs/AVS-UTILS/avs_scene_annotations/avs_permissive_images_with_flickr.csv'
+DEFAULT_FLICKR_METADATA_PATH = _default_under(
+    _DATA_ROOT, 'AVS-UTILS', 'avs_scene_annotations', 'avs_permissive_images_with_flickr.csv'
+)
 
 # Required Flickr metadata fields for attribution
 FLICKR_REQUIRED_FIELDS = ['flickr_nsid', 'flickr_username', 'flickr_title',
@@ -742,28 +752,28 @@ def main():
     parser.add_argument(
         '--embeddings-csv',
         type=str,
-        default=os.path.join(DEFAULT_INPUT_DIR, 'scene_sampling_MEG', 'df_mean_embeddings_clustered_60.csv'),
+        default=_default_under(DEFAULT_INPUT_DIR, 'scene_sampling_MEG', 'df_mean_embeddings_clustered_60.csv'),
         help='Path to CSV with scene embeddings and cluster assignments'
     )
 
     parser.add_argument(
         '--avs-scenes',
         type=str,
-        default=os.path.join(DEFAULT_INPUT_DIR, 'scene_sampling_MEG', 'experiment_cocoIDs.csv'),
+        default=_default_under(DEFAULT_INPUT_DIR, 'scene_sampling_MEG', 'experiment_cocoIDs.csv'),
         help='Path to CSV with AVS experiment COCO IDs'
     )
 
     parser.add_argument(
         '--avs-scenes-dir',
         type=str,
-        default=os.path.join(DEFAULT_AVS_UTILS_DIR, 'avs_scenes'),
+        default=_default_under(DEFAULT_AVS_UTILS_DIR, 'avs_scenes'),
         help='Directory containing AVS-sized scene images'
     )
 
     parser.add_argument(
         '--permissive-csv',
         type=str,
-        default=os.path.join(DEFAULT_AVS_UTILS_DIR, 'avs_scene_annotations', 'avs_permissive_images_with_flickr.csv'),
+        default=_default_under(DEFAULT_AVS_UTILS_DIR, 'avs_scene_annotations', 'avs_permissive_images_with_flickr.csv'),
         help='Path to CSV with COCO image license info'
     )
 

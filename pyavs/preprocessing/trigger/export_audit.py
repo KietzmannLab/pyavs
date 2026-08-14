@@ -36,6 +36,7 @@ from pyavs.preprocessing.trigger.tools import (
     get_avs_blocks,
     repair_meg_trigger_events,
 )
+from pyavs.utils.config import get_data_path
 
 mne.set_log_level('WARNING')
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
@@ -183,7 +184,7 @@ def audit_session(
 def main():
     parser = argparse.ArgumentParser(description="Export MEG trigger audit for all subjects/sessions")
     parser.add_argument('--rawdir', default=None,
-                        help='Path to rawdir (default: /share/klab/datasets/avs/rawdir)')
+                        help='Path to rawdir (default: <configured pyavs data path>/rawdir)')
     parser.add_argument('--outdir', default=None,
                         help='Output directory for audit files (default: /share/klab/psulewski/psulewski/pyavs)')
     parser.add_argument('--subjects', nargs='+', type=int, default=MAIN_SUBJECTS,
@@ -191,6 +192,15 @@ def main():
     parser.add_argument('--sessions', nargs='+', type=int, default=list(range(1, N_SESSIONS + 1)),
                         help='Session numbers to process (default: 1-10)')
     args = parser.parse_args()
+
+    if args.rawdir is None:
+        _data_path = get_data_path()
+        if _data_path is None:
+            parser.error(
+                "No data path configured. Pass --rawdir or run: "
+                "pyavs configure --data-path /path/to/data"
+            )
+        args.rawdir = os.path.join(_data_path, 'rawdir')
 
     rawdir = Path(args.rawdir)
     outdir = Path(args.outdir)

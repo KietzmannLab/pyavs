@@ -553,16 +553,19 @@ def main():
     """
     logger.info("=== Fixation Event Object Detection Visualization ===\n")
 
-    # Create configuration with standardized parameters
+    # Create configuration with standardized parameters (data_path auto-detected via pyavs config cascade)
     config = PyAVSConfig()
-    config.data_path = "/share/klab/datasets/avs/"
+    if config.data_path is None:
+        raise FileNotFoundError(
+            "No data path configured. Run: pyavs configure --data-path /path/to/data"
+        )
     plots_dir = "/share/klab/psulewski/psulewski/pyavs/object_detection"
 
     # Configuration
     SUBJECT_ID = 4
     SESSION_ID = 10
     DATA_PATH = config.data_path
-    TRANSFORMED_ANNOTATIONS_DIR = "/share/klab/datasets/avs/AVS-UTILS/avs_scene_annotations/cocostuff/"
+    TRANSFORMED_ANNOTATIONS_DIR = os.path.join(DATA_PATH, "AVS-UTILS", "avs_scene_annotations", "cocostuff")
 
     logger.info(f"Using standardized visual parameters:")
     logger.info(f"  Screen size: {config.screen_size_pixels} pixels")

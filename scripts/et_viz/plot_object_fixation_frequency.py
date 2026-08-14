@@ -349,9 +349,12 @@ def main():
     """Main entry point."""
     logger.info("=== Object Fixation Frequency Analysis ===\n")
 
-    # Configuration
+    # Configuration (data_path auto-detected via pyavs config cascade)
     config = PyAVSConfig()
-    config.data_path = "/share/klab/datasets/avs/"
+    if config.data_path is None:
+        raise FileNotFoundError(
+            "No data path configured. Run: pyavs configure --data-path /path/to/data"
+        )
 
     DATA_PATH = config.data_path
     TRANSFORMED_ANNOTATIONS_DIR = os.path.join(

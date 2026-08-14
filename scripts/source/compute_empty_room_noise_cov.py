@@ -4,7 +4,11 @@ Compute and save noise covariance matrices for MEG source reconstruction.
 
 This script computes noise covariance matrices from empty room recordings
 across all sessions for each subject and saves them for use in source
-reconstruction pipelines.
+reconstruction pipelines (LCMV beamformer filters via compute_beamformer_filters.py).
+
+For the scene-onset-baseline-derived alternative used by the source-projection
+scripts (compute_source_rsa.py, compute_source_erp.py, source_project_encoding.py),
+see the sibling compute_scene_onset_noise_cov.py.
 """
 
 import os
@@ -12,15 +16,13 @@ import sys
 import logging
 import numpy as np
 import mne
-from pathlib import Path
 from typing import List, Optional, Dict, Tuple
 
 # Add pyavs to path if not installed
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 import pyavs
 from pyavs.utils.logging import get_logger
-from pyavs.utils.config import get_config
 from pyavs.utils.paths import get_derivatives_path
 from pyavs.dataloader.meg import load_raw_meg
 
@@ -291,10 +293,8 @@ def main():
     # Set up logging
     logger = get_logger(__name__)
     
-    # Get configuration
-    config = get_config()
-    data_path = config.get('data_path') or pyavs.get_data_path()
-    
+    data_path = pyavs.get_data_path()
+
     # Parse command line arguments (basic implementation)
     import argparse
     parser = argparse.ArgumentParser(description='Compute noise covariance matrices')

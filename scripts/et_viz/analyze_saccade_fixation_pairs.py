@@ -17,6 +17,7 @@ from typing import List
 from scipy.stats import bootstrap as scipy_bootstrap
 
 # pyAVS imports
+from pyavs import get_data_path
 from pyavs.dataloader.eye import load_and_enrich_eye_events
 from pyavs.config.config import PyAVSConfig
 from pyavs.utils.logging import get_logger
@@ -27,7 +28,7 @@ logger = get_logger('scripts.saccade_fixation_duration')
 # Configuration
 SUBJECTS = [1,2,3,4,5] #TODO: add more subjects
 SESSIONS = list(range(1, 11)) #TODO: add more sessions
-DATA_PATH = "/share/klab/datasets/avs/"
+DATA_PATH = get_data_path()  # auto-detected via pyavs config cascade
 OUTPUT_DIR = "/share/klab/psulewski/psulewski/pyavs/saccade_fixation_output/"
 
 
@@ -348,6 +349,11 @@ def main():
     Main analysis function.
     """
     logger.info("=== Saccade-Fixation Duration Analysis ===\n")
+
+    if DATA_PATH is None:
+        raise FileNotFoundError(
+            "No data path configured. Run: pyavs configure --data-path /path/to/data"
+        )
 
     # Configuration
     config = PyAVSConfig()

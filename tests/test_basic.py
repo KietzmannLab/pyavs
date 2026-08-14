@@ -19,6 +19,23 @@ def test_main_functions_exist():
     assert hasattr(pyavs, 'check_data_availability')
 
 
+def test_set_data_path_visible_to_internal_utils_config(tmp_path):
+    """pyavs.set_data_path() and pyavs.utils.config.get_data_path() must agree.
+
+    Regression test: these used to read from two independent global config
+    stores (pyavs.config vs pyavs.utils.config), so calling the documented
+    top-level pyavs.set_data_path() never updated what ~20 internal call
+    sites (io/, source/, preprocessing/, dataloader/, scenes/, ...) actually
+    read via pyavs.utils.config.get_data_path().
+    """
+    import pyavs.utils.config
+
+    pyavs.set_data_path(str(tmp_path))
+
+    assert pyavs.get_data_path() == str(tmp_path)
+    assert pyavs.utils.config.get_data_path() == str(tmp_path)
+
+
 def test_modules_importable():
     """Test that all main modules can be imported."""
     import pyavs.dataloader

@@ -436,6 +436,8 @@ def main():
 
     # Output options
     parser.add_argument('--output-dir', help='Output directory for plots', default=None)
+    parser.add_argument('--data-path', help='AVS BIDS data root, used to load a template raw for sensor '
+                                             'layout info (default: pyavs.get_data_path())', default=None)
 
     args = parser.parse_args()
 
@@ -444,6 +446,12 @@ def main():
         parser.error("Cannot specify both --results-file and --results-dir/--subjects")
     if not args.results_file and not (args.results_dir and args.subjects):
         parser.error("Must specify either --results-file OR both --results-dir and --subjects")
+
+    if args.data_path is None:
+        from pyavs import get_data_path
+        args.data_path = get_data_path()
+    if args.data_path is None:
+        parser.error("No data path configured. Pass --data-path or run: pyavs configure --data-path /path/to/data")
 
     # Setup paths
     output_dir = Path(args.output_dir)
@@ -483,7 +491,7 @@ def main():
 
             # Load raw info for MNE plotting
             print("\nLoading MEG sensor info...")
-            rawdir = Path("/share/klab/datasets/avs/rawdir/as01a/as01ad.fif")
+            rawdir = Path(args.data_path) / "rawdir" / "as01a" / "as01ad.fif"
             raw = mne.io.read_raw_fif(rawdir, preload=False)
             raw = raw.crop(tmin=20, tmax=30)
             raw.resample(sfreq_inferred, npad="auto")
@@ -536,7 +544,7 @@ def main():
 
             # Create MNE Evoked object
             print("Creating MNE Evoked object...")
-            rawdir = Path("/share/klab/datasets/avs/rawdir/as01a/as01ad.fif")
+            rawdir = Path(args.data_path) / "rawdir" / "as01a" / "as01ad.fif"
             raw = mne.io.read_raw_fif(rawdir, preload=False)
             raw = raw.crop(tmin=20, tmax=30)
             raw.resample(sfreq_inferred, npad="auto")

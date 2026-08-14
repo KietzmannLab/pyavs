@@ -18,8 +18,8 @@ conda activate avs
 
 # Paths
 repo_path="/home/student/p/psulewski/pyAVS"
-coco_dir="/share/klab/datasets/avs/input/annotations"
-#avs_scenes_dir="/share/klab/datasets/avs/AVS-UTILS/avs_scenes"
+coco_dir="$(pyavs configure --show)/input/annotations"
+#avs_scenes_dir="$(pyavs configure --show)/AVS-UTILS/avs_scenes"
 output_dir="/share/klab/psulewski/psulewski/pyavs/coco_licenses"
 output_file="${output_dir}/permissive_images.csv"
 

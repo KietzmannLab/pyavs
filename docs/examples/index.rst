@@ -56,9 +56,8 @@ Complete Example Scripts
 You can find all working example scripts in the ``examples/`` directory:
 
 - ``avs_composer_example.py`` - Comprehensive AVSComposer demonstration
-- ``meg_et_workflow.py`` - Complete MEG-ET analysis pipeline  
+- ``meg_et_workflow.py`` - Complete MEG-ET analysis pipeline
 - ``meg_et_workflow_simple.py`` - Minimal working example
-- ``source_reconstruction_example.py`` - Source space analysis
-- ``batch_preprocessing.py`` - Batch processing multiple subjects
+- ``scripts/batch_preprocessing.py`` - Batch processing multiple subjects (moved out of ``examples/``, it's a production CLI tool)
 
 **Getting Started**: We recommend starting with ``avs_composer_example.py`` to understand the core pyAVS workflow.

@@ -355,9 +355,12 @@ def main(plot_captions: bool = True):
     """
     logger.info("=== Eye Tracking Sample Visualization ===\n")
 
-    # Create configuration with standardized parameters
+    # Create configuration with standardized parameters (data_path auto-detected via pyavs config cascade)
     config = PyAVSConfig()
-    config.data_path = "/share/klab/datasets/avs/"
+    if config.data_path is None:
+        raise FileNotFoundError(
+            "No data path configured. Run: pyavs configure --data-path /path/to/data"
+        )
     plots_dir = "/share/klab/psulewski/psulewski/pyavs/et_viz_output"
 
     # Configuration

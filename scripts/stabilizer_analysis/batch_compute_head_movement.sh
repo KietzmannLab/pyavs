@@ -21,7 +21,7 @@ conda activate avs
 
 # Base paths
 script_path="/home/student/p/psulewski/pyAVS/scripts/stabilizer_analysis/"
-data_path="/share/klab/datasets/avs/"
+data_path="$(pyavs configure --show)"
 output_dir="/share/klab/psulewski/psulewski/pyavs/stabilizer"
 
 # Calculate subject_id and session from array task ID

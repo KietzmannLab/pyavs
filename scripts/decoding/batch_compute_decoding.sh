@@ -21,7 +21,7 @@ conda activate avs
 
 # Base paths
 script_path="/home/student/p/psulewski/pyAVS/scripts/decoding"
-data_path="/share/klab/datasets/avs/"
+data_path="$(pyavs configure --show)"
 
 # Get subject ID from array task ID
 subject=$SLURM_ARRAY_TASK_ID

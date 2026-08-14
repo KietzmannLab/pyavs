@@ -575,9 +575,12 @@ def main(subject_id: Optional[int] = None):
     """
     logger.info("=== Fix2cap Visualization ===\n")
 
-    # Create configuration with standardized parameters
+    # Create configuration with standardized parameters (data_path auto-detected via pyavs config cascade)
     config = PyAVSConfig()
-    config.data_path = "/share/klab/datasets/avs/"
+    if config.data_path is None:
+        raise FileNotFoundError(
+            "No data path configured. Run: pyavs configure --data-path /path/to/data"
+        )
     plots_dir = "/share/klab/psulewski/psulewski/pyavs/fix2cap_output"
 
     # Use default subject if not provided

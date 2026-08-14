@@ -11,11 +11,18 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 
+from pyavs import get_data_path
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-EMBEDDINGS_CSV = '/share/klab/datasets/avs/input/scene_sampling_MEG/df_mean_embeddings_clustered_60.csv'
-AVS_SCENES_CSV = '/share/klab/datasets/avs/input/scene_sampling_MEG/experiment_cocoIDs.csv'
+_DATA_ROOT = get_data_path()
+if _DATA_ROOT is None:
+    raise FileNotFoundError(
+        "No data path configured. Run: pyavs configure --data-path /path/to/data"
+    )
+EMBEDDINGS_CSV = os.path.join(_DATA_ROOT, 'input', 'scene_sampling_MEG', 'df_mean_embeddings_clustered_60.csv')
+AVS_SCENES_CSV = os.path.join(_DATA_ROOT, 'input', 'scene_sampling_MEG', 'experiment_cocoIDs.csv')
 
 OUTPUT_DIR = os.path.dirname(__file__)
 

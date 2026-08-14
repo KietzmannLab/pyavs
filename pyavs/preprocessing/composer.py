@@ -1159,39 +1159,93 @@ class AVSComposer:
     
     def add_scene_metadata_to_epochs(self, metadata_colnames: Optional[List[str]] = None):
         """
-        This method transforms the et events dataframe into a summary dataframe that has one row per scene.
-        It deals with columns like duration, where there are multiple different fixation durations per scene.
-        These durations are stored in a list in the respective cell. The method then adds this dataframe to the scene epochs metadata.
+        Adds trial-level metadata to scene-onset epochs.
+
+        Scene epochs are trial-level (one epoch per scene), not event-level, so this
+        builds one metadata row per trial with scalar columns merged from the experiment
+        log (same block/trial_per_block join used by `make_trigger_locked_epochs`),
+        rather than treating trial-constant values (sceneID, condition, ...) as
+        single-element lists. The underlying fixation/saccade/blink sequence for each
+        trial is still attached, as list-valued `fixseq_*` columns, for callers that
+        want the full gaze sequence alongside the scene epoch.
 
         Parameters
         ----------
         metadata_colnames : list, optional
-            A list of column names to include in the summary dataframe. If None, all columns will be included.
+            Columns from `self.et_events` to include as `fixseq_*` list columns (one
+            list per trial, in chronological within-trial order). If None, all
+            non-identity columns are included.
         """
-        
+
         if not hasattr(self, "et_events"):
             raise ValueError("You need to run get_et_annotations first")
         if not hasattr(self, "et_epochs"):
             raise ValueError("You need to run make_et_event_epochs first")
 
-        # Check get the fixation events
-        events_df_for_metadata = self.et_events
-        events_df_for_metadata = events_df_for_metadata[events_df_for_metadata["block"].isin(self.blocks_this_session)]
-        
-        # Now we will transform the et events dataframe into a summary dataframe that has one row per scene
-        # We have to keep the order of scenes as stated e.g. by "trial" column
-        events_df_for_metadata_grouped = events_df_for_metadata.groupby("trial").agg(lambda x: list(x))
-        # Sort by trial
-        logger.debug(f"Grouped metadata: {events_df_for_metadata_grouped}")
-        
-        # Now we will add the metadata to the epochs object
-        self.et_epochs.metadata = events_df_for_metadata_grouped
-        
-        # Add column - time to first event
-        self.et_epochs.metadata["time_to_first_event"] = self.et_epochs.metadata["time_in_trial"].apply(lambda x: x[0])
-        self.et_epochs.metadata["type_of_first_event"] = self.et_epochs.metadata["type"].apply(lambda x: x[0])
-        
-        logger.info("Scene metadata added to epochs object")
+        events_df = self.et_events[self.et_events["block"].isin(self.blocks_this_session)].copy()
+        events_df = events_df.sort_values(by=["block", "trial_per_block", "time_in_trial"])
+
+        # One row per (block, trial_per_block). This is the same trial set and
+        # chronological ordering `add_fix_event_trigger` used to create the 'scene'
+        # annotations (block-ascending, then trial_per_block-ascending), which lines
+        # up with the epoch order produced by `mne.events_from_annotations` (sorted
+        # by onset sample).
+        identity_cols = [c for c in ["sceneID", "recording"] if c in events_df.columns]
+        trial_metadata = events_df.groupby(
+            ["block", "trial_per_block"], as_index=False
+        ).agg({c: "first" for c in identity_cols})
+        trial_metadata = trial_metadata.sort_values(by=["block", "trial_per_block"]).reset_index(drop=True)
+        trial_metadata.insert(0, "session", self.session_num)
+        trial_metadata.insert(0, "subject", self.subject)
+
+        # Merge in the full experiment log (condition/caption_task/etc.) - same join
+        # used for trigger-locked epochs.
+        if self.explog is not None and not self.explog.empty:
+            merge_cols = ["block", "trial_per_block"]
+            extra_cols = [c for c in self.explog.columns if c not in trial_metadata.columns]
+            if extra_cols:
+                explog_subset = self.explog[merge_cols + extra_cols].drop_duplicates(subset=merge_cols)
+                trial_metadata = trial_metadata.merge(explog_subset, on=merge_cols, how="left")
+        else:
+            logger.warning("No experiment log available - scene metadata will only contain ET-derived columns")
+
+        if len(trial_metadata) != len(self.et_epochs):
+            logger.error(f"len trial_metadata: {len(trial_metadata)}")
+            logger.error(f"len epochs: {len(self.et_epochs)}")
+            raise ValueError(
+                "The number of trials found in the eye tracking events does not match "
+                "the number of scene epochs. This should not happen. Please check your data."
+            )
+
+        # Attach the per-trial fixation/saccade/blink sequence as fixseq_* list
+        # columns, aligned to the same (block, trial_per_block) trial order above.
+        if metadata_colnames is None:
+            metadata_colnames = events_df.columns
+        exclude_cols = {"block", "trial_per_block", "subject", "session", "trial", "sceneID", "recording"}
+        sequence_cols = [c for c in metadata_colnames if c in events_df.columns and c not in exclude_cols]
+
+        if sequence_cols:
+            sequence_metadata = events_df.groupby(
+                ["block", "trial_per_block"], as_index=False
+            ).agg({c: list for c in sequence_cols})
+            sequence_metadata = sequence_metadata.rename(columns={c: f"fixseq_{c}" for c in sequence_cols})
+            trial_metadata = trial_metadata.merge(sequence_metadata, on=["block", "trial_per_block"], how="left")
+
+            if "fixseq_time_in_trial" in trial_metadata.columns:
+                trial_metadata["time_to_first_event"] = trial_metadata["fixseq_time_in_trial"].apply(
+                    lambda x: x[0] if isinstance(x, list) and len(x) > 0 else np.nan
+                )
+            if "fixseq_type" in trial_metadata.columns:
+                trial_metadata["type_of_first_event"] = trial_metadata["fixseq_type"].apply(
+                    lambda x: x[0] if isinstance(x, list) and len(x) > 0 else None
+                )
+
+        self.et_epochs.metadata = trial_metadata
+
+        logger.info(
+            f"Scene metadata added to epochs object "
+            f"({len(trial_metadata)} trials, columns: {list(trial_metadata.columns)})"
+        )
 
     def get_data_summary(self) -> Dict[str, Any]:
         """

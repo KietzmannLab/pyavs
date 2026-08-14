@@ -31,7 +31,7 @@ for SESSION in {1..10}; do
     echo "Time: $(date)"
     
     # Run the save annotated raw data script
-    python /home/student/p/psulewski/pyAVS/examples/save_annotated_raw_data.py \
+    python /home/student/p/psulewski/pyAVS/scripts/save_annotated_raw_data.py \
         --subject $SUBJECT_ID \
         --session $SESSION \
         --resample_freq 500 \

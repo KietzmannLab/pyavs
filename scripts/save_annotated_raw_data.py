@@ -398,7 +398,7 @@ Examples:
         event_types=args.event_types,
         min_block=args.min_block,
         max_block=args.max_block,
-        overwrite=True, #TODO
+        overwrite=args.overwrite,
         ignore_existing_filter=args.ignore_existing_filter,
         verbose=not args.quiet
     )

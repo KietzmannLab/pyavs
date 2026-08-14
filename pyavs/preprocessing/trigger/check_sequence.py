@@ -34,6 +34,7 @@ from pyavs.preprocessing.trigger.tools import (
     get_avs_blocks,
     repair_meg_trigger_events,
 )
+from pyavs.utils.config import get_data_path
 
 mne.set_log_level('WARNING')
 
@@ -198,11 +199,21 @@ def check_session(rawdir: Path, subject: int, session: int) -> pd.DataFrame:
 
 def main():
     parser = argparse.ArgumentParser(description='Check MEG trigger sequences for all trials')
-    parser.add_argument('--rawdir', default=None)
+    parser.add_argument('--rawdir', default=None,
+                        help='Path to rawdir (default: <configured pyavs data path>/rawdir)')
     parser.add_argument('--outdir', default=None)
     parser.add_argument('--subjects', nargs='+', type=int, default=[1])
     parser.add_argument('--sessions', nargs='+', type=int, default=list(range(1, 11)))
     args = parser.parse_args()
+
+    if args.rawdir is None:
+        _data_path = get_data_path()
+        if _data_path is None:
+            parser.error(
+                "No data path configured. Pass --rawdir or run: "
+                "pyavs configure --data-path /path/to/data"
+            )
+        args.rawdir = os.path.join(_data_path, 'rawdir')
 
     rawdir = Path(args.rawdir)
     outdir = Path(args.outdir)

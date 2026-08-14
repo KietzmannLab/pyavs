@@ -1773,10 +1773,10 @@ def apply_ica_to_raws(raws_dict: Dict[Any, mne.io.Raw],
 
         # --- 2. Legacy AVS-UTILS ICA (fallback) ---
         if ica_solutions_dir is None or ica_exclusions_file is None:
-            shared_ica_dir = '/share/klab/datasets/avs/AVS-UTILS/ica'
+            shared_ica_dir = os.path.join(_data_path, 'AVS-UTILS', 'ica') if _data_path else None
 
             if ica_solutions_dir is None:
-                if os.path.exists(shared_ica_dir):
+                if shared_ica_dir and os.path.exists(shared_ica_dir):
                     ica_solutions_dir = os.path.join(shared_ica_dir, 'ica_solutions')
                 else:
                     import pyavs
@@ -1786,7 +1786,7 @@ def apply_ica_to_raws(raws_dict: Dict[Any, mne.io.Raw],
                     )
 
             if ica_exclusions_file is None:
-                if os.path.exists(shared_ica_dir):
+                if shared_ica_dir and os.path.exists(shared_ica_dir):
                     ica_exclusions_file = os.path.join(
                         shared_ica_dir, 'ica_exclusions', 'ex_components.json'
                     )

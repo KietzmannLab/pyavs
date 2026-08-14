@@ -91,13 +91,9 @@ def main():
         
     # Apply ICA artifact removal to raw data blocks
     logger.info("\n4. Applying ICA artifact removal...")
-    #try:
     composer.apply_ica_to_blocks()
     logger.info("   ICA artifact removal completed for all blocks")
-    #except Exception as e:
-        # Continue without ICA if it fails
-    
-    
+
     # Concatenate MEG blocks
     logger.info("\n5. Concatenating MEG blocks...")
     try:
@@ -216,10 +212,14 @@ def main():
     logger.info("\n   Reporting time in trial for each event type...")
     for event_type, epochs in epochs_results.items():
         if hasattr(epochs, 'metadata') and 'time_in_trial' in epochs.metadata.columns:
-            #TypeError: complex() first argument must be a string or a number, not 'list'
             time_in_trial = np.nanmean(epochs.metadata['time_in_trial'].values)
-            print(time_in_trial)
             logger.info(f"   Average time in trial for {event_type}: {time_in_trial:.2f} seconds")
+        elif hasattr(epochs, 'metadata') and 'time_to_first_event' in epochs.metadata.columns:
+            # Scene epochs are trial-level; there's no single 'time_in_trial',
+            # but 'time_to_first_event' gives the onset of the first fixation/
+            # saccade/blink in the trial.
+            time_to_first_event = np.nanmean(epochs.metadata['time_to_first_event'].values)
+            logger.info(f"   Average time to first event for {event_type}: {time_to_first_event:.2f} seconds")
         else:
             logger.warning(f"   No 'time_in_trial' metadata found for {event_type} epochs")
     

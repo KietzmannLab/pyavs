@@ -28,7 +28,7 @@ output_dir="/share/klab/psulewski/psulewski/pyavs/source_rsa"
 # searchlight). Without it, subjects_dir is None and the script would fall back
 # to mne.datasets.fetch_fsaverage(), which needs internet — klab-cpu compute
 # nodes are offline, so pass it explicitly.
-subjects_dir="/share/klab/datasets/avs/rawdir"
+subjects_dir="$(pyavs configure --show)/rawdir"
 
 echo "==================================================="
 echo "Source-space RSA — group noise ceiling"

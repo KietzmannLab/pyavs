@@ -92,8 +92,12 @@ class EyeTrackingPlotter:
         possible_paths = [
             self.data_path / 'scenes' / f"{int(scene_id):012d}_MEG_size.jpg",
             self.data_path / 'input' / 'avs_scenes' / f"{int(scene_id):012d}_MEG_size.jpg",
-            Path('/share/klab/datasets/avs/input/avs_scenes') / f"{int(scene_id):012d}_MEG_size.jpg"
         ]
+        configured_data_path = get_data_path()
+        if configured_data_path is not None:
+            possible_paths.append(
+                Path(configured_data_path) / 'input' / 'avs_scenes' / f"{int(scene_id):012d}_MEG_size.jpg"
+            )
         
         scene_file = None
         for path in possible_paths:

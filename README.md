@@ -248,7 +248,6 @@ pyavs/
 └── examples/                # Usage examples
     ├── avs_composer_example.py
     ├── samples_scene_assignment_example.py
-    ├── source_reconstruction_example.py
     └── basic_eye_tracking_workflow.py
 ```
 

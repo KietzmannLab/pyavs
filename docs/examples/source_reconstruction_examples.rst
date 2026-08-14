@@ -468,4 +468,5 @@ See Also
 - :doc:`../tutorials/meg_eye_workflow` - Complete MEG-ET workflow tutorial
 - :doc:`../api/source` - Full API documentation for source reconstruction
 - :doc:`composer_usage` - AVSComposer integration examples
-- Example scripts: ``examples/source_reconstruction_example.py``
+- Example scripts: ``examples/simple_source_reconstruction.py`` (synthetic-data quickstart),
+  ``examples/compute_population_codes_example.py`` (real-data, config-driven workflow)

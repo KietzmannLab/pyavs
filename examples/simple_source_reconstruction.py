@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """
-Simple pyAVS Source Reconstruction Example
+Simple pyAVS Source Reconstruction Example (synthetic-data quickstart)
 
 A minimal example showing how to:
 1. Create synthetic MEG data
-2. Perform source reconstruction 
+2. Perform source reconstruction
 3. Save data using pyAVS I/O system
 
-This example works without requiring actual AVS data files.
+This is the quickstart to reach for when you don't have (or don't yet want to
+configure) real AVS data - it runs standalone against synthetic MEG/forward-model
+data. For a complete, real-data, config-driven workflow, see
+compute_population_codes_example.py instead.
 """
 
 import numpy as np

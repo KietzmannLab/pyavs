@@ -448,8 +448,8 @@ def main():
     parser.add_argument(
         '--data-path', '-d',
         type=str,
-        default="/share/klab/datasets/avs/",
-        help='Path to AVS data directory (default: /share/klab/datasets/avs/)'
+        default=None,
+        help='Path to AVS data directory (default: auto-detected via pyavs.get_data_path())'
     )
 
     parser.add_argument(

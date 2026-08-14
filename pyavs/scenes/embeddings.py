@@ -12,6 +12,7 @@ import torch
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 
+from ..utils.config import get_data_path
 from ..utils.logging import get_logger
 
 logger = get_logger('scenes.embeddings')
@@ -215,10 +216,14 @@ def get_default_ecoset_path() -> Optional[str]:
     str or None
         Path to EcoSet weights if available, None otherwise
     """
-    default_paths = [
-        '/share/klab/datasets/avs/AVS-UTILS/models/ecoset_patches_trained/resnet50/checkpoint_last.pth'
-    ]
-    
+    default_paths = []
+    data_path = get_data_path()
+    if data_path is not None:
+        default_paths.append(
+            os.path.join(data_path, 'AVS-UTILS', 'models', 'ecoset_patches_trained',
+                         'resnet50', 'checkpoint_last.pth')
+        )
+
     for path in default_paths:
         if os.path.exists(path):
             return path

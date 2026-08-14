@@ -21,7 +21,7 @@ conda activate avs
 
 # Base paths
 script_path="/home/student/p/psulewski/pyAVS/scripts/ica"
-data_path="/share/klab/datasets/avs/"
+data_path="$(pyavs configure --show)"
 
 # Decode subject (1-5) and session (1-10) from array task ID (1-50)
 # task 1-10 -> subject 1, task 11-20 -> subject 2, ..., task 41-50 -> subject 5

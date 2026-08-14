@@ -271,26 +271,29 @@ def get_default_subjects_dir() -> str:
     
     Checks in order:
     1. Environment variable SUBJECTS_DIR
-    2. Shared AVS directory: /share/klab/datasets/avs/AVS-UTILS/source
+    2. Configured AVS data root's AVS-UTILS/source directory (see pyavs.configure())
     3. Standard FreeSurfer directory: /usr/local/freesurfer/subjects
-    
+
     Returns
     -------
     str
         Path to subjects directory
     """
     import os
-    
+    from .config import get_data_path
+
     # Check environment variable first
     subjects_dir = os.environ.get('SUBJECTS_DIR')
     if subjects_dir and os.path.exists(subjects_dir):
         return subjects_dir
-    
-    # Check shared AVS directory
-    avs_subjects_dir = '/share/klab/datasets/avs/AVS-UTILS/source'
-    if os.path.exists(avs_subjects_dir):
-        return avs_subjects_dir
-    
+
+    # Check configured AVS data root
+    data_path = get_data_path()
+    if data_path is not None:
+        avs_subjects_dir = os.path.join(data_path, 'AVS-UTILS', 'source')
+        if os.path.exists(avs_subjects_dir):
+            return avs_subjects_dir
+
     # Default FreeSurfer directory
     return '/usr/local/freesurfer/subjects'
 

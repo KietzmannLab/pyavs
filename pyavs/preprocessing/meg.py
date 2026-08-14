@@ -740,22 +740,22 @@ def apply_precomputed_ica(raw: mne.io.Raw,
     """
     import json
     
-    # Get default paths - prefer shared directory, fallback to package directory
+    # Get default paths - prefer the configured AVS data root, fallback to package directory
     if ica_solutions_dir is None or ica_exclusions_file is None:
-        # Try shared directory first
-        shared_ica_dir = '/share/klab/datasets/avs/AVS-UTILS/ica'
-        
+        _data_path = get_data_path()
+        shared_ica_dir = os.path.join(_data_path, 'AVS-UTILS', 'ica') if _data_path else None
+
         if ica_solutions_dir is None:
-            if os.path.exists(shared_ica_dir):
+            if shared_ica_dir and os.path.exists(shared_ica_dir):
                 ica_solutions_dir = os.path.join(shared_ica_dir, 'ica_solutions')
             else:
                 # Fallback to package directory
                 import pyavs
                 package_dir = os.path.dirname(pyavs.__file__)
                 ica_solutions_dir = os.path.join(package_dir, 'preprocessing', 'ica', 'ica_solutions')
-        
+
         if ica_exclusions_file is None:
-            if os.path.exists(shared_ica_dir):
+            if shared_ica_dir and os.path.exists(shared_ica_dir):
                 ica_exclusions_file = os.path.join(shared_ica_dir, 'ica_exclusions', 'ex_components.json')
             else:
                 # Fallback to package directory
