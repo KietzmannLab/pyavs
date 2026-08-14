@@ -848,10 +848,13 @@ def main():
     logger.info(f"  Parallel jobs: {N_JOBS} (all CPUs)" if N_JOBS == -1 else f"  Parallel jobs: {N_JOBS}")
     logger.info(f"  Recompute UMAP: {RECOMPUTE_UMAP}\n")
 
-    # Output directory for multi-session results
+    # Output directory for multi-session results (derived UMAP data: .npz/.csv)
     session_str = f"{SESSIONS[0]:02d}-{SESSIONS[-1]:02d}" if len(SESSIONS) > 1 else f"{SESSIONS[0]:02d}"
     output_dir = os.path.join(config.data_path, 'derivatives', 'pyavs',
                              f'sub-{SUBJECT_ID:02d}', f'ses-{session_str}', 'umap')
+    # Separate plots directory - derivatives/ is for BIDS-compliant data products,
+    # not visualization figures.
+    plots_dir = "/share/klab/psulewski/psulewski/pyavs/fixation_umap_output"
 
     # Check if we should load existing results or recompute
     if not RECOMPUTE_UMAP:
@@ -1031,7 +1034,7 @@ def main():
     logger.info("\nStep 7: Creating UMAP visualization...")
     plot_umap_with_crops(
         umap_coords_to_plot, crop_images, metadata_to_load,
-        output_dir, SUBJECT_ID, session_str
+        plots_dir, SUBJECT_ID, session_str
     )
 
     # Summary
@@ -1046,7 +1049,8 @@ def main():
     logger.info(f"  (n_sensors × n_times = {n_sensors} × {n_times})")
     logger.info(f"PCA-reduced dimensionality: {features_pca.shape[1]} components")
     logger.info(f"  Variance explained: {pca_obj.explained_variance_ratio_.sum():.3f}")
-    logger.info(f"Results saved to: {output_dir}")
+    logger.info(f"UMAP data saved to: {output_dir}")
+    logger.info(f"Visualization saved to: {plots_dir}")
 
 
 if __name__ == "__main__":

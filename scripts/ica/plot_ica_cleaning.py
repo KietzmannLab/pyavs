@@ -377,7 +377,7 @@ Examples:
     )
     parser.add_argument(
         '--output-dir', type=str, default=None,
-        help='Output directory (default: <data-path>/derivatives/pyavs/meg_quality/)',
+        help='Output directory (default: /share/klab/psulewski/psulewski/pyavs/meg_quality/)',
     )
     args = parser.parse_args()
 
@@ -389,9 +389,9 @@ Examples:
             "No data path configured. Run: pyavs configure --data-path /path/to/data"
         )
     if args.output_dir is None:
-        args.output_dir = str(
-            Path(args.data_path) / 'derivatives' / 'pyavs' / 'meg_quality'
-        )
+        # derivatives/ is for BIDS-compliant data products (read above), not
+        # visualization figures - default plots elsewhere.
+        args.output_dir = '/share/klab/psulewski/psulewski/pyavs/meg_quality'
     os.makedirs(args.output_dir, exist_ok=True)
 
     print(f'Output directory: {args.output_dir}')

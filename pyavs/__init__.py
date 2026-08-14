@@ -48,9 +48,10 @@ def setup_data_directory(path=None):
 def configure(data_path: str) -> None:
     """Configure pyavs data directory once per machine/environment.
 
-    Writes ~/.config/pyavs/config.json and creates a pyavs/data symlink
-    pointing to the given path. After calling this once, all scripts and
-    notebooks resolve the data path automatically without further configuration.
+    Writes ~/.config/pyavs/config.json with the resolved data path. After
+    calling this once, all scripts and notebooks resolve the data path
+    automatically without further configuration (see get_data_path()'s
+    cascade: PYAVS_DATA_PATH env var, then this config file).
 
     Parameters
     ----------
@@ -60,7 +61,10 @@ def configure(data_path: str) -> None:
     import json
     from pathlib import Path
 
-    resolved = str(Path(data_path).resolve())
+    resolved_path = Path(data_path).expanduser().resolve()
+    if not resolved_path.is_dir():
+        raise FileNotFoundError(f"Data path does not exist or is not a directory: {resolved_path}")
+    resolved = str(resolved_path)
 
     # Write user config
     config_dir = Path.home() / '.config' / 'pyavs'
@@ -68,11 +72,16 @@ def configure(data_path: str) -> None:
     with open(config_dir / 'config.json', 'w') as f:
         json.dump({'data_path': resolved}, f, indent=2)
 
-    # Create/refresh symlink inside package source tree
-    pkg_data = Path(__file__).parent / 'data'
-    if pkg_data.is_symlink() or pkg_data.exists():
-        pkg_data.unlink()
-    pkg_data.symlink_to(resolved)
+    # Migration: remove a legacy pyavs/data symlink written by older versions of
+    # this function (pre-dating the config.json-only cascade). Guarded on
+    # is_symlink() so a real bundled-resource pyavs/data directory (package CSVs/
+    # JSON, see pyproject.toml package-data) is never touched.
+    legacy_link = Path(__file__).parent / 'data'
+    if legacy_link.is_symlink():
+        try:
+            legacy_link.unlink()
+        except OSError as exc:
+            get_logger('pyavs').warning(f"Could not remove legacy data symlink {legacy_link}: {exc}")
 
     # Update the live global config
     set_data_path(resolved)

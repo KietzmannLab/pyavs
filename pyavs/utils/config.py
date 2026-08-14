@@ -72,8 +72,7 @@ def setup_data_directory(path: Optional[str] = None) -> str:
     ----------
     path : str, optional
         Data path. If None, uses the unified config's auto-detect cascade
-        (PYAVS_DATA_PATH env var -> ~/.config/pyavs/config.json -> package
-        data symlink).
+        (PYAVS_DATA_PATH env var -> ~/.config/pyavs/config.json).
 
     Returns
     -------

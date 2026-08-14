@@ -32,10 +32,12 @@ from pyavs.utils.logging import get_logger
 logger = get_logger('scripts.test_ica_et_coords')
 
 
-def setup_output_dir(data_path: str, subject_id: int, session: int) -> Path:
+def setup_output_dir(subject_id: int, session: int) -> Path:
+    # Diagnostic plots only - derivatives/ is for BIDS-compliant data products
+    # (this script saves no ICA solution/scores, only the two test plots below).
     output_dir = (
-        Path(data_path) / 'derivatives' / 'pyavs'
-        / f'sub-{subject_id:02d}' / f'ses-{session:02d}' / 'meg'
+        Path('/share/klab/psulewski/psulewski/pyavs/ica_diag_output')
+        / f'sub-{subject_id:02d}' / f'ses-{session:02d}'
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
@@ -170,7 +172,7 @@ Examples:
     print(f"Cardiac components:       {len(cardiac_exclusions)} {cardiac_exclusions}")
     print(f"Total exclusions:         {len(ica.exclude)} {ica.exclude}")
 
-    output_dir = setup_output_dir(args.data_path, args.subject, args.session)
+    output_dir = setup_output_dir(args.subject, args.session)
     prefix = f"sub-{args.subject:02d}_ses-{args.session:02d}"
 
     plot_scatter(

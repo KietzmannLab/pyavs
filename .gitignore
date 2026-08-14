@@ -302,9 +302,6 @@ docs/api/generated/
 *.out
 *.err
 
-# Machine-specific data path symlink (created by pyavs.configure())
-pyavs/data
-
 # image files
 *.png
 *.jpg
@@ -315,3 +312,10 @@ pyavs/data
 
 *source_data.csv
 *stats.txt
+
+# Bundled package reference data: small CSV/JSON files shipped inside pyavs/pyavs/data/
+# (see pyproject.toml package-data / MANIFEST.in). Distinct from the external AVS dataset,
+# which is never stored in-repo and is configured via pyavs.configure() / PYAVS_DATA_PATH.
+!pyavs/data/
+!pyavs/data/*.csv
+!pyavs/data/*.json

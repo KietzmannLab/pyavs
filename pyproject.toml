@@ -76,11 +76,13 @@ Changelog = "https://github.com/your-org/pyavs/blob/main/CHANGELOG.md"
 pyavs = "pyavs.cli:main"
 
 [tool.setuptools]
-packages = ["pyavs"]
 include-package-data = true
 
+[tool.setuptools.packages.find]
+include = ["pyavs*"]
+
 [tool.setuptools.package-data]
-pyavs = ["examples/*.py", "data/*.csv"]
+pyavs = ["examples/*.py", "data/*.csv", "data/*.json"]
 
 [tool.setuptools_scm]
 write_to = "pyavs/_version.py"

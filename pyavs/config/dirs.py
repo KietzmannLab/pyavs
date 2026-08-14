@@ -20,7 +20,7 @@ def get_dirs() -> SimpleNamespace:
     --------
     >>> import pyavs
     >>> pyavs.configure('/path/to/avs')
-    >>> d = pyavs.dirs
+    >>> d = pyavs.dirs()
     >>> d.raw
     '/path/to/avs/rawdir'
     >>> d.results

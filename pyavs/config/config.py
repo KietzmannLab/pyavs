@@ -192,34 +192,36 @@ class PyAVSConfig:
         self.setup_paths()
     
     def setup_paths(self) -> None:
-        """Set up and validate all paths."""
+        """Set up and validate all paths.
+
+        The derived directories below are always recomputed from the current
+        data_path (rather than only filled in when None) so that calling this
+        again after data_path changes — e.g. via a second pyavs.configure()/
+        set_data_path() call — doesn't leave them stale, pointing at the old
+        root. Nothing in the codebase pins these individually as overrides
+        independent of data_path, so this is safe.
+        """
         if self.data_path is None:
             self.data_path = self._detect_data_path()
-        
+
         # Set up server-specific paths
         server_paths = self._get_server_paths()
-        
-        if self.raw_dir is None:
-            self.raw_dir = server_paths.get('raw_dir')
-        if self.results_dir is None:
-            self.results_dir = server_paths.get('results_dir')
-        if self.project_dir is None:
-            self.project_dir = server_paths.get('project_dir')
-        if self.input_dir is None:
-            self.input_dir = server_paths.get('input_dir')
-        if self.meg_data_dir is None:
-            self.meg_data_dir = server_paths.get('meg_data_dir')
-        if self.et_data_dir is None:
-            self.et_data_dir = server_paths.get('et_data_dir')
+
+        self.raw_dir = server_paths.get('raw_dir')
+        self.results_dir = server_paths.get('results_dir')
+        self.project_dir = server_paths.get('project_dir')
+        self.input_dir = server_paths.get('input_dir')
+        self.meg_data_dir = server_paths.get('meg_data_dir')
+        self.et_data_dir = server_paths.get('et_data_dir')
     
     def _detect_data_path(self) -> Optional[str]:
-        """Auto-detect data path via cascade: env var → user config → package symlink."""
+        """Auto-detect data path via cascade: env var → user config."""
         # 1. Environment variable
         env_path = os.environ.get('PYAVS_DATA_PATH')
         if env_path and os.path.exists(env_path):
             return env_path
 
-        # 2. User config file (~/.config/pyavs/config.json)
+        # 2. User config file (~/.config/pyavs/config.json, written by pyavs.configure())
         user_cfg = Path.home() / '.config' / 'pyavs' / 'config.json'
         if user_cfg.exists():
             try:
@@ -230,12 +232,7 @@ class PyAVSConfig:
             except (json.JSONDecodeError, OSError):
                 pass
 
-        # 3. Symlink inside package (pyavs/pyavs/data → actual data dir)
-        pkg_data = Path(__file__).parent.parent / 'data'
-        if pkg_data.is_symlink() and pkg_data.exists():
-            return str(pkg_data.resolve())
-
-        # 4. Nothing found — return None, don't silently use a wrong server path
+        # 3. Nothing found — return None, don't silently use a wrong server path
         return None
     
     def _get_server_paths(self) -> Dict[str, str]:
