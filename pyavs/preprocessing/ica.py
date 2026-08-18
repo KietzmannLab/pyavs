@@ -566,7 +566,8 @@ def build_et_gaze_epochs_per_scene(
     ``time_in_trial`` column already expresses time relative to the MEG
     scene_on trigger (trigger code 100).
 
-    Derivation of the offset:
+    Derivation of the offset::
+
       T_et_scene = T_meg_trigger + 0.060  (ET scene fires 60 ms after MEG)
       time_in_trial = smpl_time - T_et_scene + 0.060
                     = smpl_time - T_meg_trigger
@@ -836,8 +837,8 @@ def find_eye_components_xy_correlation(ica: ICA,
 
     IC sources are epoched with the same scene_on events as ``et_gaze_epochs``
     and then both are flattened across epochs before computing Pearson r.
-    The top ``top_fraction`` of components ranked by max(|r_gx|, |r_gy|) are
-    flagged as eye components.
+    The top ``top_fraction`` of components ranked by ``max(abs(r_gx), abs(r_gy))``
+    are flagged as eye components.
 
     Parameters
     ----------

@@ -42,6 +42,7 @@ dependencies = [
     "h5py>=3.1.0",
     "pillow>=8.0.0",
     "scikit-image>=0.18.0",
+    "scikit-learn>=1.0.0",
     "pycocotools>=2.0.0",
     "mne>=1.0.0",
     "tqdm>=4.60.0",
@@ -66,7 +67,6 @@ docs = [
     "myst-parser>=2.0.0",
 ]
 full = [
-    "scikit-learn>=1.0.0",
     "jupyter>=1.0.0",
 ]
 

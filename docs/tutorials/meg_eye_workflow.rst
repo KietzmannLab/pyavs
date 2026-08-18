@@ -125,38 +125,39 @@ Now integrate eye tracking data and create epochs for different event types:
 Alternative Method 2: Functional API Approach
 ----------------------------------------------
 
-For users requiring fine-grained control, pyAVS also provides individual functions:
+For users requiring fine-grained control, pyAVS also provides individual functions. Note
+that ``pyavs.MEGETComposer`` is a backward-compatibility alias for ``AVSComposer`` itself
+(not a separate, simpler class) -- it's shown here only because it appears with this name in
+older code; new code should just use ``pyavs.AVSComposer`` directly, as in Method 1 above.
 
 .. code-block:: python
 
    # This approach gives you more control but requires more setup
-   
-   # Load MEG data
-   meg_raw = pyavs.load_meg_raw(subject_id=1, session=1)
-   
+
+   # Load MEG data for one run/block
+   meg_raw = pyavs.load_meg_raw(subject_id=1, session=1, run=1)
+
    # Load eye tracking data
    explog, eye_events = pyavs.load_and_enrich_eye_events([1], [1])
-   
-   # Apply MEG preprocessing
+
+   # Apply MEG preprocessing (subject_id/session/block identify where cached
+   # intermediate outputs are read from/written to)
    meg_clean = pyavs.preprocess_meg_block(
-       meg_raw, 
+       meg_raw,
+       subject_id=1, session=1, block=1,
        l_freq=0.2, h_freq=200.0,
-       apply_ica=True
    )
-   
-   # Create MEG-ET composer for alignment
-   meg_et_composer = pyavs.MEGETComposer(1, 1, data_path, data_path)
-   
-   # Create epochs from eye tracking events
-   epochs = pyavs.create_et_event_epochs(
+
+   # Create epochs from eye tracking events -- returns (epochs, epochs_dataframe)
+   epochs, epochs_df = pyavs.create_et_event_epochs(
        meg_clean, eye_events,
        event_type='fixation',
        tmin=-0.2, tmax=0.5
    )
-   
+
    print(f"Created {len(epochs)} fixation epochs")
 
-**Note**: The AVSComposer approach is recommended for most users as it handles edge cases, 
+**Note**: The AVSComposer approach is recommended for most users as it handles edge cases,
 provides better error handling, and ensures compatibility with the AVS dataset structure.
 
 Source Reconstruction with Composer
@@ -181,37 +182,21 @@ Transform sensor data to source space using the composer epochs:
        # In practice, you need to create this using FreeSurfer and coregistration
        forward_model = create_demo_forward_model(fixation_epochs.info)
    
-   # Setup source reconstruction
-   source_setup = pyavs.setup_source_reconstruction(
-       subject_id=1,
-       session=1,
-       method='beamformer',
-       reg=0.05,
-       weight_norm='unit-noise-gain'
-   )
-   
-   # Compute beamformer filters
-   print("Computing LCMV beamformer filters...")
-   filters = pyavs.compute_beamformer_filters(
-       epochs=fixation_epochs,
-       forward=forward_model,
-       reg=0.05,                    # Regularization parameter
-       weight_norm='unit-noise-gain', # Normalization method
-       pick_ori='max-power',        # Orientation selection
-       verbose=True
-   )
-   
-   # Apply source reconstruction
-   print("Applying beamformer to epochs...")
-   source_estimates = pyavs.apply_source_reconstruction(
+   # Apply source reconstruction. method_kwargs (reg, weight_norm, pick_ori, ...)
+   # are forwarded to compute_beamformer_filters internally -- do not pass a
+   # pre-computed `filters` object here, apply_source_reconstruction builds its
+   # own.
+   print("Computing beamformer filters and reconstructing source activity...")
+   source_data = pyavs.apply_source_reconstruction(
        fixation_epochs,
        forward_model,
        method='beamformer',
-       filters=filters
+       reg=0.05,                      # Regularization parameter
+       weight_norm='unit-noise-gain', # Normalization method
+       pick_ori='max-power',          # Orientation selection
    )
-   
-   print(f"✓ Created {len(source_estimates)} source estimates")
-   print(f"Source space: {source_estimates[0].data.shape} (sources × timepoints)")
+
+   print(f"✓ Source data: {source_data.shape} (epochs, sources, timepoints)")
 
 ROI Analysis and Population Codes
 ----------------------------------
@@ -220,34 +205,33 @@ Extract activity from regions of interest:
 
 .. code-block:: python
 
-   # Define regions of interest
-   visual_rois = ['V1', 'V2', 'V4', 'MT', 'LOC']
-   
+   # Define regions of interest (Glasser atlas area category, or explicit ROI names)
+   visual_rois = pyavs.get_glasser_roi_labels(area='early_visual')
+
    # Extract ROI data
    print("Extracting ROI data...")
    roi_data = pyavs.extract_roi_data(
-       source_estimates,
+       source_data,
        forward_model['src'],
        roi_labels=visual_rois,
        method='mean',  # Average within each ROI
        verbose=True
    )
-   
+
    print(f"✓ Extracted data from {len(roi_data)} ROIs")
    for roi_name, data in roi_data.items():
        print(f"  {roi_name}: {data.shape} (epochs × timepoints)")
-   
+
    # Compute population codes for experimental conditions
    print("Computing population codes...")
    population_codes = pyavs.compute_population_codes(
-       source_estimates,
+       source_data,
        events_metadata=fixation_epochs.metadata,
-       time_window=(0.0, 0.3),  # Analysis window: 0-300ms post-fixation
-       method='mean_amplitude',
-       conditions=['scene_id', 'trial_type'],
-       verbose=True
+       conditions=['scene_id'],  # column(s) in metadata defining conditions
+       time_window=(0.0, 0.3),   # analysis window: 0-300ms post-fixation
+       times=fixation_epochs.times,
    )
-   
+
    print(f"✓ Population codes computed")
    print(f"Available data: {list(population_codes.keys())}")
    
@@ -274,133 +258,30 @@ For comparison, here's the functional API approach:
 .. code-block:: python
 
    # Load MEG and eye tracking data separately
-   meg_raw = pyavs.load_meg_raw(subject_id=1, session=1)
+   meg_raw = pyavs.load_meg_raw(subject_id=1, session=1, run=1)
    explog, eye_events = pyavs.load_and_enrich_eye_events([1], [1])
-   
+
    # Apply MEG preprocessing
    meg_clean = pyavs.preprocess_meg_block(
-       meg_raw, 
+       meg_raw,
+       subject_id=1, session=1, block=1,
        l_freq=0.2, h_freq=200.0,
-       apply_ica=True
    )
-   
-   # Create epochs from eye tracking events
-   epochs = pyavs.create_et_event_epochs(
+
+   # Create epochs from eye tracking events -- returns (epochs, epochs_dataframe)
+   epochs, epochs_df = pyavs.create_et_event_epochs(
        meg_clean, eye_events,
        event_type='fixation',
        tmin=-0.2, tmax=0.5
    )
-   
+
    # Load forward model and apply source reconstruction
    forward_model = pyavs.load_forward_model(subject_id=1, session=1)
-   source_estimates = pyavs.apply_source_reconstruction(
+   source_data = pyavs.apply_source_reconstruction(
        epochs, forward_model, method='beamformer'
    )
-   
-   print(f"Functional API: {len(source_estimates)} source estimates")
 
-Step 7: Analysis
-----------------
-
-Perform analysis on source-reconstructed data:
-
-.. code-block:: python
-
-   from pyavs.source import filters
-   
-   # Extract data for specific ROIs
-   roi_labels = ['V1', 'V4', 'IT', 'PFC']  # Example ROIs
-   roi_data = filters.extract_roi_data(
-       stc,
-       roi_labels,
-       atlas='glasser'
-   )
-   
-   # Compute population codes
-   pop_codes = filters.compute_population_codes(
-       roi_data,
-       events=fixation_events,
-       time_window=(0.0, 0.3),  # Analysis window
-       method='mean_amplitude'
-   )
-   
-   print(f"Population codes shape: {pop_codes.shape}")
-   print(f"ROIs analyzed: {list(roi_data.keys())}")
-
-Complete Workflow Function
---------------------------
-
-Here's a complete function that runs the entire workflow:
-
-.. code-block:: python
-
-   def meg_eye_workflow(subject_id, session, data_path):
-       """
-       Complete MEG + eye tracking analysis workflow.
-       
-       Parameters
-       ----------
-       subject_id : int
-           Subject identifier
-       session : int
-           Session number
-       data_path : str
-           Path to AVS dataset
-           
-       Returns
-       -------
-       results : dict
-           Dictionary containing all analysis results
-       """
-       import pyavs
-       
-       # Set up
-       pyavs.set_data_path(data_path)
-       
-       # Load data
-       meg_raw = pyavs.dataloader.load_meg_raw(subject_id, session)
-       eye_data = pyavs.dataloader.load_eye_data(subject_id, session)
-       
-       # Preprocess MEG
-       meg_clean = pyavs.preprocessing.meg.preprocess_meg(
-           meg_raw,
-           apply_maxwell=True,
-           bandpass=(0.1, 40),
-           apply_ica=True
-       )
-       
-       # Preprocess eye tracking
-       eye_clean, events = pyavs.preprocessing.eye.preprocess_eye(
-           eye_data,
-           detect_events=True
-       )
-       
-       # Synchronize
-       meg_eye_sync = pyavs.preprocessing.alignment.synchronize_meg_eye(
-           meg_clean, eye_clean
-       )
-       
-       # Create epochs
-       epochs = pyavs.preprocessing.create_epochs_from_eye_events(
-           meg_eye_sync['meg'], events, 
-           event_type='fixation',
-           tmin=-0.2, tmax=0.5
-       )
-       
-       # Source reconstruction
-       stc = pyavs.source.reconstruction.apply_source_reconstruction(
-           epochs, subject_id, session, method='beamformer'
-       )
-       
-       # Analysis
-       results = {
-           'epochs': epochs,
-           'source_data': stc,
-           'eye_events': events,
-           'sync_info': meg_eye_sync
-       }
-       
-       return results
+   print(f"Functional API: {len(source_data)} epochs of source data")
 
 Next Steps
 ----------
@@ -434,4 +315,4 @@ Common issues and solutions:
    - Use lower source space resolution
    - Apply decimation to reduce sampling rate
 
-For more help, see the :doc:`../troubleshooting` guide.
+For more help, see the :doc:`../reference/faq` guide.

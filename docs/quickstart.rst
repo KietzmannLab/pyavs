@@ -108,9 +108,10 @@ Perform source-level analysis:
        # Compute population codes for different conditions
        pop_codes = pyavs.compute_population_codes(
            source_data,
-           events,
-           conditions=['object_category', 'scene_category'],
-           time_window=(0.1, 0.3)
+           events_metadata=events,
+           conditions=['object_category'],
+           time_window=(0.1, 0.3),
+           times=epochs.times,
        )
        
        print(f"Population codes computed for {len(pop_codes)} conditions")
@@ -138,9 +139,6 @@ Preprocessing
 
    # Preprocess MEG + eye tracking data
    pyavs preprocess --subject 1 --session 1 --blocks 1 2 3 --apply-ica
-   
-   # Eye tracking only
-   pyavs preprocess --subject 1 --session 1 --include-meg false
 
 Epoch Creation
 ~~~~~~~~~~~~~~
@@ -241,17 +239,14 @@ Advanced MEG-ET Integration
 
 .. code-block:: python
 
-   # Use MEG-ET composer for advanced synchronization
-   composer = pyavs.MEGETComposer()
-   
-   # Load raw MEG data
-   meg_raw = pyavs.load_meg_raw(subject_id=1, session=1, block=1)
-   
+   # Load raw MEG data for one run/block
+   meg_raw = pyavs.load_meg_raw(subject_id=1, session=1, run=1)
+
    # Load eye tracking events
    eye_events = subject_data['eye_events']
-   
-   # Create precisely time-locked epochs
-   aligned_epochs = pyavs.create_et_event_epochs(
+
+   # Create precisely time-locked epochs -- returns (epochs, epochs_dataframe)
+   aligned_epochs, aligned_epochs_df = pyavs.create_et_event_epochs(
        meg_raw,
        eye_events,
        event_type='fixation',
@@ -259,7 +254,7 @@ Advanced MEG-ET Integration
        tmax=0.8,
        baseline=(-0.2, 0)
    )
-   
+
    print(f"Created {len(aligned_epochs)} precisely aligned epochs")
 
 Visualization
@@ -293,13 +288,13 @@ Next Steps
 ----------
 
 - Explore the :doc:`tutorials/index` for detailed walkthroughs
-- Check out :doc:`examples/index` for complete analysis scripts  
+- Check out :doc:`examples/index` for complete analysis scripts
 - Read the :doc:`api/index` for detailed function documentation
-- Learn about :doc:`advanced_topics` for specialized analyses
+- See :doc:`reference/faq` for answers to common questions
 
 Getting Help
 ------------
 
 - **Documentation**: https://pyavs.readthedocs.io/
-- **GitHub Issues**: https://github.com/your-org/pyavs/issues
-- **Email Support**: psulewski@uos.de
+- **GitHub Issues**: https://github.com/KietzmannLab/pyavs/issues
+- **Email Support**: psulewski@uni-osnabrueck.de

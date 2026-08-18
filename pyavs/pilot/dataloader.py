@@ -1,7 +1,7 @@
 """Loading, enrichment, and coordinate conversion for AVS pilot eye-tracking data.
 
 Ported from pilot-data-manager/dataloader.py into the pyavs package.
-Author: P. Sulewski (psulewski@uos.de)
+Author: P. Sulewski (psulewski@uni-osnabrueck.de)
 """
 
 import os
@@ -48,7 +48,7 @@ def load_pilot_events(subjects, data_path, preprocessed=True):
     data_path : str
         Root results directory (contains Sub1/, Sub2/, …).
     preprocessed : bool
-        If True use preprocessed/ subfolder and *_el_events / *_el_msgs files.
+        If True use preprocessed/ subfolder and ``*_el_events`` / ``*_el_msgs`` files.
 
     Returns
     -------
@@ -159,7 +159,7 @@ def load_pilot_samples(subjects, data_path, preprocessed=True):
     data_path : str
         Root results directory (contains Sub1/, Sub2/, …).
     preprocessed : bool
-        If True use preprocessed/ subfolder and *_el_samples / *_el_msgs files.
+        If True use preprocessed/ subfolder and ``*_el_samples`` / ``*_el_msgs`` files.
 
     Returns
     -------

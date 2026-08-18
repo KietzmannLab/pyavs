@@ -29,7 +29,7 @@ For the latest development version:
 
 .. code-block:: bash
 
-   git clone https://github.com/your-org/pyavs.git
+   git clone https://github.com/KietzmannLab/pyavs.git
    cd pyavs
    pip install -e .
 
@@ -40,7 +40,7 @@ For development with all optional dependencies:
 
 .. code-block:: bash
 
-   git clone https://github.com/your-org/pyavs.git
+   git clone https://github.com/KietzmannLab/pyavs.git
    cd pyavs
    pip install -e ".[dev,full]"
 
@@ -51,23 +51,26 @@ Required Dependencies
 ~~~~~~~~~~~~~~~~~~~~~
 
 - numpy >= 1.19.0
-- pandas >= 1.3.0  
+- pandas >= 1.3.0
 - scipy >= 1.7.0
 - matplotlib >= 3.3.0
+- seaborn >= 0.11.0
 - h5py >= 3.1.0
 - pillow >= 8.0.0
 - scikit-image >= 0.18.0
+- scikit-learn >= 1.0.0
 - pycocotools >= 2.0.0
 - mne >= 1.0.0
+- tqdm >= 4.60.0
+- joblib >= 1.0.0
+- requests >= 2.25.0
 
 Optional Dependencies
 ~~~~~~~~~~~~~~~~~~~~~
 
 For full functionality:
 
-- **scikit-learn >= 1.0.0**: Machine learning algorithms
-- **seaborn >= 0.11.0**: Statistical visualization
-- **jupyter >= 1.0.0**: Interactive notebooks
+- **jupyter >= 1.0.0**: Interactive notebooks (``pip install pyavs[full]``)
 
 Development Dependencies
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -79,8 +82,10 @@ For development and testing:
 - black >= 21.0
 - flake8 >= 3.8
 - isort >= 5.0
-- sphinx >= 4.0
-- sphinx-rtd-theme >= 1.0
+- sphinx >= 7.0
+- furo >= 2024.8.6
+- sphinx-design >= 0.6.0
+- sphinx-copybutton >= 0.5.2
 
 FreeSurfer Setup
 ----------------
@@ -105,10 +110,10 @@ Test your installation:
 
    import pyavs
    print(pyavs.__version__)
-   
+
    # Check available modules
    print("Available modules:")
-   for module in ['data', 'preprocessing', 'scenes', 'source', 'utils']:
+   for module in ['dataloader', 'preprocessing', 'scenes', 'source', 'utils']:
        try:
            exec(f"import pyavs.{module}")
            print(f"  ✓ pyavs.{module}")
@@ -133,13 +138,15 @@ Set up your data path:
    # Method 3: Auto-detection
    pyavs.setup_data_directory()
 
-Create a configuration file (optional):
+Persist the data path so you don't have to call ``set_data_path()`` every session:
 
 .. code-block:: bash
 
-   pyavs setup --data-path /path/to/avs/dataset --create-config
+   pyavs configure --data-path /path/to/avs/dataset
 
-This creates ``~/.pyavs_config.json`` with default settings.
+This writes ``~/.config/pyavs/config.json``, which :func:`pyavs.get_data_path` and the rest
+of the package read from automatically. Use ``pyavs configure --show`` to check the
+currently configured path.
 
 Troubleshooting
 ---------------
@@ -196,11 +203,14 @@ If you encounter issues with matplotlib backends:
 
 **Windows**
 
-Use Anaconda/Miniconda for easier dependency management:
+pyAVS is not yet published on conda-forge; use Anaconda/Miniconda to create an isolated
+environment, then install with pip as above:
 
 .. code-block:: bash
 
-   conda install -c conda-forge pyavs
+   conda create -n pyavs python=3.11
+   conda activate pyavs
+   pip install pyavs
 
 **Linux**
 
@@ -219,8 +229,8 @@ Getting Help
 
 If you encounter installation issues:
 
-1. Check the `troubleshooting guide <https://pyavs.readthedocs.io/en/latest/troubleshooting.html>`_
-2. Search existing `GitHub issues <https://github.com/your-org/pyavs/issues>`_
+1. Check the :doc:`reference/faq`
+2. Search existing `GitHub issues <https://github.com/KietzmannLab/pyavs/issues>`_
 3. Create a new issue with:
    - Operating system and version
    - Python version

@@ -11,6 +11,15 @@ BUILDDIR     = _build
 help:
 	@$(SPHINXBUILD) -M help "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
 
+# Build (warnings-as-errors) and serve the site locally at http://localhost:$(PORT).
+# Blocks in the foreground -- stop with Ctrl-C. Usage: make serve [PORT=8765]
+PORT ?= 8765
+.PHONY: serve
+serve:
+	@$(SPHINXBUILD) -b html "$(SOURCEDIR)" "$(BUILDDIR)/html" -W $(SPHINXOPTS) $(O)
+	@echo "Serving pyAVS docs at http://localhost:$(PORT)/index.html  (Ctrl-C to stop)"
+	@cd "$(BUILDDIR)/html" && python3 -m http.server $(PORT)
+
 .PHONY: help Makefile
 
 # Catch-all target: route all unknown targets to Sphinx-build using the new

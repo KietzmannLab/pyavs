@@ -9,7 +9,7 @@ NEW FEATURE: ET Event Offset Timing
   instead of event onset for MEG epoch creation
 - This is a fringe feature for specialized analyses requiring offset timing
 
-Author: P. Sulewski (psulewski@uos.de)
+Author: P. Sulewski (psulewski@uni-osnabrueck.de)
 """
 
 import os

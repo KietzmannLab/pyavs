@@ -121,6 +121,7 @@ def fetch_flickr_metadata(photo_id: str, api_key: str) -> dict | None:
     dict | None
         Dictionary with photo and owner metadata, or None if photo not found
         or error occurred. Keys include:
+
         - Owner info: flickr_username, flickr_realname, flickr_nsid,
           flickr_owner_location, flickr_path_alias
         - Photo info: flickr_title, flickr_description, flickr_date_taken,
@@ -256,6 +257,7 @@ def enrich_with_flickr_metadata(df: pd.DataFrame, api_key: str) -> pd.DataFrame:
     -------
     pd.DataFrame
         DataFrame with added columns:
+
         - flickr_photo_id: Extracted photo ID from URL
         - Owner info: flickr_username, flickr_realname, flickr_nsid,
           flickr_owner_location, flickr_path_alias
@@ -309,9 +311,10 @@ def enrich_with_flickr_metadata(df: pd.DataFrame, api_key: str) -> pd.DataFrame:
     return df
 
 
-def extract_licensed_images(annotation_file: str, split: str = None) -> pd.DataFrame:
+def extract_licensed_images(annotation_file: str, split: str = None,
+                             filter_permissive: bool = True) -> pd.DataFrame:
     """
-    Extract images with permissive licenses from COCO annotations.
+    Extract image license metadata from COCO annotations.
 
     Parameters
     ----------
@@ -319,11 +322,17 @@ def extract_licensed_images(annotation_file: str, split: str = None) -> pd.DataF
         Path to COCO annotation JSON file (e.g., instances_val2017.json)
     split : str, optional
         Split name to add as column (e.g., 'train', 'val')
+    filter_permissive : bool, default True
+        If True, keep only images whose license is in PERMISSIVE_LICENSE_IDS.
+        If False, return license metadata for all images regardless of license
+        (e.g. to document per-image licenses for a fixed image set without
+        excluding any of them).
 
     Returns
     -------
     pd.DataFrame
-        DataFrame containing image metadata for permissively licensed images.
+        DataFrame containing image license metadata (all images, or only the
+        permissively licensed ones if filter_permissive is True).
         Columns: coco_id, file_name, license_id, license_name, license_url,
         flickr_url, width, height, split (if provided)
     """
@@ -371,22 +380,25 @@ def extract_licensed_images(annotation_file: str, split: str = None) -> pd.DataF
         permissive = "✓" if license_id in PERMISSIVE_LICENSE_IDS else "✗"
         print(f"  {permissive} {license_id}: {license_name} - {count} images")
 
-    # Filter for permissive licenses only
-    df = df[df['license_id'].isin(PERMISSIVE_LICENSE_IDS)].reset_index(drop=True)
-    print(f"\nFiltered to {len(df)} images with permissive licenses")
+    if filter_permissive:
+        df = df[df['license_id'].isin(PERMISSIVE_LICENSE_IDS)].reset_index(drop=True)
+        print(f"\nFiltered to {len(df)} images with permissive licenses")
 
     return df
 
 
-def extract_from_coco_dir(coco_dir: str) -> pd.DataFrame:
+def extract_from_coco_dir(coco_dir: str, filter_permissive: bool = True) -> pd.DataFrame:
     """
-    Extract permissively licensed images from both train and val splits.
+    Extract image license metadata from both train and val splits.
 
     Parameters
     ----------
     coco_dir : str
         Path to COCO annotations directory containing instances_train2017.json
         and instances_val2017.json
+    filter_permissive : bool, default True
+        If True, keep only permissively licensed images. If False, return
+        license metadata for all images regardless of license.
 
     Returns
     -------
@@ -406,7 +418,8 @@ def extract_from_coco_dir(coco_dir: str) -> pd.DataFrame:
         annotation_file = coco_path / filename
         if annotation_file.exists():
             print(f"\n=== Processing {split_name} ===")
-            df = extract_licensed_images(str(annotation_file), split=split_name)
+            df = extract_licensed_images(str(annotation_file), split=split_name,
+                                          filter_permissive=filter_permissive)
             dfs.append(df)
         else:
             print(f"Warning: {annotation_file} not found, skipping {split_name}")
@@ -523,7 +536,16 @@ See README_coco_licenses.md for full license documentation.
         help='Path to AVS scenes directory. If provided, only fetch Flickr metadata for these scenes.'
     )
 
+    parser.add_argument(
+        '--all-licenses',
+        action='store_true',
+        help='Include images of all licenses instead of filtering to PERMISSIVE_LICENSE_IDS '
+             '— use this to document per-image license metadata for a fixed image set '
+             '(e.g. --avs-scenes-dir) without excluding any of them.'
+    )
+
     args = parser.parse_args()
+    filter_permissive = not args.all_licenses
 
     # Extract licensed images
     if args.coco_dir:
@@ -531,16 +553,17 @@ See README_coco_licenses.md for full license documentation.
         if not coco_path.exists():
             print(f"Error: COCO directory not found: {coco_path}")
             return 1
-        df = extract_from_coco_dir(str(coco_path))
+        df = extract_from_coco_dir(str(coco_path), filter_permissive=filter_permissive)
     else:
         annotation_path = Path(args.coco_annotations)
         if not annotation_path.exists():
             print(f"Error: Annotation file not found: {annotation_path}")
             return 1
-        df = extract_licensed_images(str(annotation_path))
+        df = extract_licensed_images(str(annotation_path), filter_permissive=filter_permissive)
 
     if len(df) == 0:
-        print("Warning: No images with permissive licenses found")
+        msg = "No images found" if args.all_licenses else "No images with permissive licenses found"
+        print(f"Warning: {msg}")
         return 1
 
     # Filter to AVS scenes if directory provided
@@ -557,7 +580,8 @@ See README_coco_licenses.md for full license documentation.
         print(f"Filtered from {original_count} to {len(df)} images")
 
         if len(df) == 0:
-            print("Warning: No AVS scenes found with permissive licenses")
+            msg = "No AVS scenes found" if args.all_licenses else "No AVS scenes found with permissive licenses"
+            print(f"Warning: {msg}")
             return 1
 
     # Enrich with Flickr metadata if API key is available

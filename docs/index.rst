@@ -1,5 +1,5 @@
-pyAVS Documentation
-===================
+pyAVS
+=========
 
 .. image:: https://badge.fury.io/py/pyavs.svg
    :target: https://badge.fury.io/py/pyavs
@@ -13,135 +13,143 @@ pyAVS Documentation
    :target: https://opensource.org/licenses/MIT
    :alt: License: MIT
 
-Welcome to pyAVS, a streamlined Python package for loading and preprocessing MEG + eye-tracking data from the Active Visual Semantics (AVS) BIDS dataset.
+**pyAVS** is the companion Python package for the **Active Visual Semantics (AVS) dataset**:
+MEG, eye tracking, and structural MRI recorded while participants freely explored natural
+scenes -- active vision, rather than the passive, fixation-enforced viewing used in most
+existing neuroimaging datasets.
 
-Features
---------
+:bdg-primary:`5 participants` :bdg-primary:`10 sessions each` :bdg-primary:`4,080 scenes`
+:bdg-primary:`200,000+ fixation epochs` :bdg-primary:`306-channel MEG`
+:bdg-primary:`1000 Hz eye tracking`
 
-**Core Functionality**
+What Is AVS?
+----------------
 
-- **MEG Data Processing**: Complete pipeline from raw data to source reconstruction
-- **Eye Tracking Analysis**: Advanced fixation and saccade detection with scene integration  
-- **MEG-ET Synchronization**: Temporal alignment and synchronized analysis
-- **BIDS Compatibility**: Support for BIDS-formatted datasets with legacy compatibility
-- **Source Reconstruction**: Beamformer and minimum norm estimation methods
-- **Population Code Analysis**: Advanced encoding analysis for experimental conditions
+.. note::
 
-**Key Capabilities**
+   AVS is described in a manuscript currently in preparation (Sulewski, Amme, König,
+   Hebart & Kietzmann) -- see :doc:`reference/citation`. The summary below is drawn from
+   that manuscript's abstract.
 
-- ✅ **Automated Preprocessing**: Maxwell filtering, bandpass filtering, ICA artifact removal
-- ✅ **Object Detection Integration**: MSCOCO object mapping for visual scenes
-- ✅ **ROI-based Analysis**: FreeSurfer and Glasser atlas integration  
-- ✅ **Command Line Interface**: Easy-to-use CLI for common workflows
-- ✅ **Parallel Processing**: Batch processing for multiple subjects/sessions
-- ✅ **Comprehensive Examples**: Full workflow demonstrations and tutorials
+Unlike existing neuroimaging datasets that rely on passive viewing with enforced central
+fixation, AVS captures brain activity during active scene exploration, including
+self-generated saccades and fixations, across five participants who freely explored 4,080
+natural scenes over 10 sessions each. A semantic captioning task on 25% of trials links gaze
+to scene understanding and memory. Alongside neural and behavioural data, AVS includes
+per-fixation object category labels, human-rated caption-relevance annotations, pupil
+dynamics, and individual head-stabilization casts paired with structural MRI scans for
+precise cross-session source reconstruction.
 
-Quick Start
------------
+.. figure:: _static/images/avs-overview.png
+   :alt: AVS dataset overview combining MEG recordings and eye tracking with natural scene understanding
+   :width: 100%
 
-Installation
-~~~~~~~~~~~~
+   Dataset design combining MEG recordings and eye tracking with natural scene understanding.
+   Adapted from Sulewski et al., 2025.
 
-.. code-block:: bash
+Getting Started
+--------------------
 
-   pip install pyavs
+.. grid:: 2
+   :gutter: 3
 
-Basic Usage with AVSComposer (Recommended)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   .. grid-item-card:: Installation
+      :link: installation
+      :link-type: doc
 
-.. code-block:: python
+      Install pyAVS and configure your local copy of the dataset.
 
-   import pyavs
+   .. grid-item-card:: Quickstart
+      :link: quickstart
+      :link-type: doc
 
-   # Set up data path
-   pyavs.set_data_path('/path/to/avs/dataset')
+      Load MEG + eye-tracking data and build your first epochs in a few minutes.
 
-   # Initialize AVS Composer - the main tool for MEG-ET data fusion
-   composer = pyavs.AVSComposer(
-       subject=1,
-       session_num=1,
-       preprocessed=True,           # Use preprocessed MEG data
-       use_precomputed_ica=True,    # Apply ICA artifact removal
-       verbose=True
-   )
+   .. grid-item-card:: Dataset at a Glance
+      :link: dataset_at_a_glance
+      :link-type: doc
 
-   # Complete MEG-ET processing pipeline
-   composer.load_meg_data()                    # Load MEG blocks
-   composer.apply_ica_to_blocks()              # Remove artifacts
-   composer.concatenate_raws_per_session()     # Combine blocks
-   composer.find_events_in_raw()               # Find MEG triggers
+      Key numbers, modalities, and a task-oriented "what do I need?" guide.
 
-   # Process eye tracking events and create epochs
-   composer.get_et_annotations(event_type="fixation", recording="scene")
-   composer.make_et_event_epochs(
-       tmin=-0.2, tmax=0.8, 
-       event_type="fixation",
-       get_metadata=True
-   )
+   .. grid-item-card:: Data Access
+      :link: data_access
+      :link-type: doc
 
-   print(f"Created {len(composer.et_epochs)} fixation epochs")
-   print(f"Metadata columns: {list(composer.et_epochs.metadata.columns)[:5]}")
+      What's included in the release and how to get it (pending publication).
 
-Alternative Functional API
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Citation
+------------
 
-For custom workflows requiring fine-grained control:
+If you use the AVS dataset or pyAVS, please cite the dataset paper:
 
-.. code-block:: python
+    Sulewski, P., Amme, C., König, P., Hebart, M. N., & Kietzmann, T. C. *Active Visual
+    Semantics: A large-scale MEG and eye-tracking dataset for understanding visual
+    intelligence in action.* Manuscript in preparation.
 
-   # Load and preprocess data
-   subject_data = pyavs.load_and_preprocess(
-       subject_id=1, session=1,
-       include_meg=True, include_eye=True
-   )
+See :doc:`reference/citation` for the full citation, BibTeX, and how to cite the software.
 
-   # Create epochs from eye tracking events
-   epochs, events = pyavs.get_epochs(
-       subject_data, 'fixation', 'meg',
-       tmin=-0.2, tmax=0.5
-   )
+Contributors
+----------------
 
-   # Source reconstruction
-   forward_model = pyavs.load_forward_model(subject_id=1, session=1)
-   source_data = pyavs.apply_source_reconstruction(
-       epochs, forward_model, method='beamformer'
-   )
-
-   print(f"Created {len(epochs)} epochs")
-
-Documentation Contents
-----------------------
-
-.. toctree::
-   :maxdepth: 2
-   :caption: User Guide
-
-   installation
-   quickstart
-   tutorials/index
-   examples/index
-
-.. toctree::
-   :maxdepth: 2
-   :caption: API Reference
-
-   api/dataloader
-   api/preprocessing  
-   api/scenes
-   api/source
-   api/utils
-   api/cli
+Philip Sulewski, Carmen Amme, Peter König, Martin N. Hebart, and Tim C. Kietzmann.
+Corresponding: phsulewski@gmail.com, tim.kietzmann@uni-osnabrueck.de.
 
 .. toctree::
    :maxdepth: 1
-   :caption: Development
+   :caption: Getting Started
+   :hidden:
 
-   contributing
-   changelog
-   license
+   installation
+   quickstart
+   dataset_at_a_glance
+   data_access
 
-Indices and tables
-==================
+.. toctree::
+   :maxdepth: 1
+   :caption: Dataset
+   :hidden:
+
+   dataset/overview
+   dataset/known_issues
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Methods
+   :hidden:
+
+   methods/index
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Example Analyses
+   :hidden:
+
+   analyses/index
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Python Package
+   :hidden:
+
+   package/index
+   tutorials/index
+   examples/index
+   api/index
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Reference
+   :hidden:
+
+   reference/citation
+   reference/faq
+   reference/terms_of_use
+   reference/contributing
+   reference/changelog
+   reference/license
+
+Indices and Tables
+-----------------------
 
 * :ref:`genindex`
 * :ref:`modindex`

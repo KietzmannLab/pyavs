@@ -690,12 +690,14 @@ def find_population_codes_files(subject_id: int,
         
     Examples
     --------
-    # Find all saccade population codes for subject 1, session 1
-    files = find_population_codes_files(1, 1, event_type='saccade')
-    
-    # Find 500Hz population codes with specific filter parameters
-    files = find_population_codes_files(1, 1, sampling_rate=500, 
-                                      filter_params={'l_freq': 0.2, 'h_freq': 200.0})
+    Find all saccade population codes for subject 1, session 1::
+
+        files = find_population_codes_files(1, 1, event_type='saccade')
+
+    Find 500Hz population codes with specific filter parameters::
+
+        files = find_population_codes_files(1, 1, sampling_rate=500,
+                                          filter_params={'l_freq': 0.2, 'h_freq': 200.0})
     """
     if data_path is None:
         data_path = get_data_path()

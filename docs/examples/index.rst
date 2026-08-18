@@ -1,63 +1,57 @@
 Examples
 ========
 
-This section contains practical examples demonstrating key pyAVS functionality, with a focus on the **AVSComposer** - the core component for MEG-eye tracking data fusion.
+This section contains focused examples demonstrating specific pyAVS functionality. Each
+example page shows the real, runnable script from the ``examples/`` directory alongside
+explanatory prose.
+
+For the core **AVSComposer** workflow (the recommended entry point for most analyses), see
+the dedicated :doc:`../package/composer_guide` instead of this section.
 
 .. toctree::
    :maxdepth: 2
    :caption: Available Examples
 
-   composer_usage
-   basic_data_loading
-   meg_preprocessing
-   eye_tracking_analysis
-   meg_eye_synchronization
    source_reconstruction_examples
-
-AVS Composer Usage (Recommended)
----------------------------------
-
-The :doc:`composer_usage` guide shows how to use the **AVSComposer class** - the main tool for MEG-eye tracking data processing in pyAVS. This is the recommended approach for most analyses as it provides:
-
-- Complete MEG preprocessing pipeline with ICA artifact removal
-- Eye tracking data integration with multiple event types
-- Trigger-based MEG-ET alignment and synchronization
-- Flexible epoch creation with rich metadata
-- Built-in quality control and error handling
-
-Basic Data Loading
-------------------
-
-Learn fundamental data loading concepts with the :doc:`basic_data_loading` guide.
-
-MEG Preprocessing
------------------
-
-Detailed MEG preprocessing options including filtering, ICA, and artifact removal in :doc:`meg_preprocessing`.
-
-Eye Tracking Analysis  
----------------------
-
-Fixation detection, saccade analysis, and scene integration in :doc:`eye_tracking_analysis`.
-
-MEG-Eye Synchronization
------------------------
-
-Advanced temporal alignment and synchronized analysis workflows in :doc:`meg_eye_synchronization`.
+   compute_cross_session_filters
+   config_example
+   cocostuff_object_detection
+   real_data_object_detection
+   reproduce_analysis
 
 Source Reconstruction
----------------------
+----------------------
 
-From forward modeling to source localization in :doc:`source_reconstruction_examples`.
+From forward modeling to source localization and population code extraction, see
+:doc:`source_reconstruction_examples`.
+
+Cross-Session Beamformer Filters
+-----------------------------------
+
+Computing a single set of LCMV beamformer filters shared across a subject's sessions, see
+:doc:`compute_cross_session_filters`.
+
+Configuration
+-------------
+
+Setting up and inspecting the pyAVS data path / configuration system, see
+:doc:`config_example`.
+
+Object Detection on Scenes
+----------------------------
+
+Mapping fixations to MS-COCO / COCO-Stuff object categories, both on synthetic
+(:doc:`cocostuff_object_detection`) and real (:doc:`real_data_object_detection`) data.
+
+Reproducing a Saved Analysis
+-------------------------------
+
+Re-running an analysis from a configuration saved alongside earlier population codes, see
+:doc:`reproduce_analysis`.
 
 Complete Example Scripts
-------------------------
+--------------------------
 
-You can find all working example scripts in the ``examples/`` directory:
-
-- ``avs_composer_example.py`` - Comprehensive AVSComposer demonstration
-- ``meg_et_workflow.py`` - Complete MEG-ET analysis pipeline
-- ``meg_et_workflow_simple.py`` - Minimal working example
-- ``scripts/batch_preprocessing.py`` - Batch processing multiple subjects (moved out of ``examples/``, it's a production CLI tool)
-
-**Getting Started**: We recommend starting with ``avs_composer_example.py`` to understand the core pyAVS workflow.
+All working example scripts live in the ``examples/`` directory at the repository root.
+We recommend starting with ``avs_composer_example.py`` (covered in
+:doc:`../package/composer_guide`) to understand the core pyAVS workflow.

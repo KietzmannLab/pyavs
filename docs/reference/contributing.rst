@@ -11,7 +11,7 @@ Getting Started
 
 .. code-block:: bash
 
-   git clone https://github.com/your-username/pyavs.git
+   git clone https://github.com/KietzmannLab/pyavs.git
    cd pyavs
 
 3. Set up development environment:

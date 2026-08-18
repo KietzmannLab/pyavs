@@ -65,8 +65,8 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 
 # Source file extensions
 source_suffix = {
-    '.rst': None,
-    '.md': None,
+    '.rst': 'restructuredtext',
+    '.md': 'markdown',
 }
 
 # -- Options for HTML output -------------------------------------------------
@@ -74,10 +74,50 @@ source_suffix = {
 
 html_theme = 'furo'
 html_static_path = ['_static']
+html_css_files = ['custom.css']
+html_logo = '_static/klab-logo.png'
+html_favicon = '_static/favicon.ico'
 
 # Theme options
 html_theme_options = {
     'sidebar_hide_name': False,
+    'announcement': (
+        '<a href="https://www.kietzmannlab.uni-osnabrueck.de/">'
+        '&larr; Kietzmann Lab</a> &middot; pyAVS documentation'
+    ),
+    # Colors matched to the live kietzmannlab.uni-osnabrueck.de/avs/ page
+    # (--bg/--text/--muted/--border/--link/--link-hover/--accent tokens in its
+    # BaseLayout CSS bundle, checked 2026-08-17). That page has no dark variant;
+    # dark_css_variables below is our own extrapolation from the same accent hues,
+    # not sourced from the live site.
+    'light_css_variables': {
+        'color-brand-primary': '#245b7a',
+        'color-brand-content': '#245b7a',
+        'color-background-primary': '#fbfaf7',
+        'color-background-secondary': '#f3f0ea',
+        'color-background-hover': '#e7f0f4',
+        'color-foreground-primary': '#172033',
+        'color-foreground-secondary': '#647084',
+        'color-foreground-muted': '#647084',
+        'color-foreground-border': '#ddd7cb',
+        'color-background-border': '#ddd7cb',
+        'color-link': '#245b7a',
+        'color-link--hover': '#a3432f',
+    },
+    'dark_css_variables': {
+        'color-brand-primary': '#6fa8c4',
+        'color-brand-content': '#6fa8c4',
+        'color-background-primary': '#141a26',
+        'color-background-secondary': '#1b2230',
+        'color-background-hover': '#232b3c',
+        'color-foreground-primary': '#e7e9ee',
+        'color-foreground-secondary': '#a8b0bf',
+        'color-foreground-muted': '#a8b0bf',
+        'color-foreground-border': '#2e3646',
+        'color-background-border': '#2e3646',
+        'color-link': '#6fa8c4',
+        'color-link--hover': '#d98a72',
+    },
     'footer_icons': [
         {
             'name': 'GitHub',
@@ -144,4 +184,5 @@ autodoc_mock_imports = [
     'sklearn',
     'cv2',
     'pycocotools',
+    'torch',
 ]
