@@ -14,6 +14,8 @@
 set -e
 
 echo "Running in shell: $SHELL"
+set -e
+
 export NCCL_SOCKET_IFNAME=lo
 
 # Load required modules
