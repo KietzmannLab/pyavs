@@ -932,6 +932,28 @@ class AVSComposer:
                 logger.info(f"Removed {removed_count} fixation events because they were the last fixation event on a scene")
             self.et_events = self.et_events[self.et_events["fix_sequence_from_last"] != 0]
 
+        # Add object-fixation labels (was accepted but silently unused before --
+        # get_object_labels had no effect anywhere in this function). Requires
+        # AVS-UTILS/avs_scene_annotations/cocostuff under data_path (same
+        # convention as scripts/rsa_analysis/compute_rsa.py). Runs on the
+        # combined fixation+saccade events dataframe before epoching, so
+        # add_et_metadata_to_epochs's "copy every et_events column" default
+        # picks up the resulting object_label/object_id columns for free.
+        if get_object_labels:
+            from ..scenes.objects import get_fixated_objects
+            transformed_annotations_dir = os.path.join(
+                self.data_path, 'AVS-UTILS', 'avs_scene_annotations', 'cocostuff')
+            if not os.path.exists(transformed_annotations_dir):
+                raise FileNotFoundError(
+                    f"Cannot find transformed annotations at {transformed_annotations_dir}")
+            if self.verbose:
+                logger.info('Adding object-fixation labels to eye tracking events')
+            self.et_events = get_fixated_objects(
+                self.et_events,
+                transformed_annotations_dir=transformed_annotations_dir,
+                verbose=self.verbose,
+            )
+
         # Apply offset timing if requested
         if onset_offset not in ["onset", "offset"]:
             raise ValueError(f"onset_offset must be 'onset' or 'offset', got '{onset_offset}'")

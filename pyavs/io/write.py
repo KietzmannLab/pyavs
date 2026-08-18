@@ -320,6 +320,7 @@ def save_population_codes_h5(population_codes: Dict[str, np.ndarray],
                             hemi: str = 'both',
                             compression: str = 'gzip',
                             data_type: str = 'population_codes',
+                            chunk_epochs: Optional[int] = 1,
                             **kwargs) -> str:
     """
     Save population codes to HDF5 file in standardized format.
@@ -360,6 +361,18 @@ def save_population_codes_h5(population_codes: Dict[str, np.ndarray],
         HDF5 compression method (default: 'gzip')
     data_type : str, optional
         Type of data being saved (default: 'population_codes')
+    chunk_epochs : int or None, optional
+        Number of epochs per HDF5 chunk (default: 1 -- one chunk spans a full
+        epoch's channel x time extent). Without this, h5py auto-chunks and
+        fragments the channel/time axes too (observed on shipped data: a
+        (2668, 204, 651) array chunked at (84, 13, 41)), so selecting an
+        arbitrary subset of epochs -- e.g. a content-filtered query across
+        subjects -- ends up touching most of the file's chunks regardless of
+        how few epochs are wanted. chunk_epochs=1 makes an N-epoch selection
+        cost close to N chunk reads. Pass None to fall back to h5py's
+        auto-chunking (the previous, unchunked-by-epoch behavior). Larger
+        values trade some of that partial-read benefit for a better gzip
+        ratio (compression sees more redundancy per chunk).
     **kwargs
         Additional parameters
         
@@ -500,9 +513,18 @@ def save_population_codes_h5(population_codes: Dict[str, np.ndarray],
             
             # Create ROI group
             roi_group = storage.create_group(roi_name)
-            
+
+            # Chunk by epoch so a scattered epoch subset (e.g. a content-filtered
+            # cross-subject query) costs close to one chunk read per epoch, instead
+            # of h5py's auto-chunking also fragmenting the channel/time axes -- see
+            # chunk_epochs docstring above.
+            chunks = None
+            if chunk_epochs is not None and roi_data.ndim >= 1 and roi_data.shape[0] > 0:
+                chunks = (min(chunk_epochs, roi_data.shape[0]),) + roi_data.shape[1:]
+
             # Save onset data
-            roi_group.create_dataset("onset", data=roi_data, dtype=np.float32, compression=compression)
+            roi_group.create_dataset("onset", data=roi_data, dtype=np.float32,
+                                      compression=compression, chunks=chunks)
         
         # Flush to ensure data is written
         storage.flush()

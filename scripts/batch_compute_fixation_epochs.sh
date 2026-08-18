@@ -11,17 +11,20 @@
 #SBATCH --array=1-50
 #SBATCH --requeue
 
+set -e
+
 echo "Running in shell: $SHELL"
 export NCCL_SOCKET_IFNAME=lo
 
 # Load required modules
+source /etc/profile.d/spack.sh
 spack load miniconda3
 eval "$(conda shell.bash hook)"
 conda activate avs
 
 # Base paths
 script_path="/home/student/p/psulewski/pyAVS/scripts"
-data_path="$(pyavs configure --show)"
+data_path="/share/klab/datasets/avs"
 
 # Decode subject (1-5) and session (1-10) from array task ID (1-50)
 # task 1-10 -> subject 1, task 11-20 -> subject 2, ..., task 41-50 -> subject 5
