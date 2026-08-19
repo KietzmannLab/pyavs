@@ -1,248 +1,65 @@
 """
 Path utilities for pyAVS package.
 
-This module provides functions for handling BIDS paths and converting between
-different naming conventions used in the AVS dataset.
+Naming helpers (``sub-XX``/``ses-XX`` labels, session letters, native
+subject-session IDs) and every dataset path now live in :mod:`pyavs.layout`.
+The session-naming functions below are thin aliases re-exported from there so
+existing imports keep working; new code should prefer ``pyavs.layout``.
+
+The legacy path builders that used to live here — ``get_bids_path`` and
+``get_legacy_paths`` — are gone. ``get_bids_path`` built
+``sub-01/ses-01/meg/sub-01_ses-01_task-avs_run-01_raw.fif``, a filename that
+exists in neither the public release nor the internal tree (the release
+preserves native scanner names), so every "try BIDS first" branch built on it
+always missed. ``get_legacy_paths`` addressed the internal ``results/as01_01/``
+tree, which pyAVS no longer supports. Use :class:`pyavs.layout.Layout` instead.
 """
 
 import os
-from typing import Optional, Tuple, Union
+from typing import Optional
+
+from ..layout import (
+    Layout,
+    get_layout,
+    letter_to_session as convert_letter_to_session,
+    session_letter as convert_session_to_letter,
+    sub_sess_id as get_subject_session_id,
+)
+
+__all__ = [
+    'convert_session_to_letter',
+    'convert_letter_to_session',
+    'get_subject_session_id',
+    'get_derivatives_path',
+    'get_max_blocks',
+    'get_default_subjects_dir',
+    'get_glasser_rois',
+]
 
 
-def convert_session_to_letter(session_num: int) -> str:
+def get_derivatives_path(data_path: str, subject_id: int,
+                         session: Optional[int] = None,
+                         datatype: Optional[str] = None) -> str:
     """
-    Convert session number to letter (MEG naming convention).
-    
-    The MEG naming conventions at MPI demand sessions to be represented by letters
-    e.g., 1,2,3 -> a,b,c
-    
-    Parameters
-    ----------
-    session_num : int
-        Session number (1-based)
-        
-    Returns
-    -------
-    str
-        Session letter
-    """
-    alphabet = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 
-                'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z']
-    
-    if session_num < 1 or session_num > len(alphabet):
-        raise ValueError(f"Session number {session_num} out of range (1-{len(alphabet)})")
-    
-    return alphabet[session_num - 1]
+    Get the pyAVS derivatives directory for a subject (and optionally session).
 
-
-def convert_letter_to_session(session_letter: str) -> int:
-    """
-    Convert session letter back to session number.
-    
-    Parameters
-    ----------
-    session_letter : str
-        Session letter
-        
-    Returns
-    -------
-    int
-        Session number (1-based)
-    """
-    alphabet = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 
-                'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z']
-    
-    if session_letter not in alphabet:
-        raise ValueError(f"Session letter {session_letter} not recognized")
-    
-    return alphabet.index(session_letter) + 1
-
-
-def get_subject_session_id(subject_id: int, session: int, prefix: str = 'as') -> str:
-    """
-    Generate subject-session ID string.
-    
-    Parameters
-    ----------
-    subject_id : int
-        Subject ID
-    session : int
-        Session number
-    prefix : str, optional
-        Prefix for the ID (default: 'as')
-        
-    Returns
-    -------
-    str
-        Subject-session ID string (e.g., 'as01a')
-    """
-    session_letter = convert_session_to_letter(session)
-    return f"{prefix}{subject_id:02d}{session_letter}"
-
-
-def get_bids_path(data_path: str, subject_id: int, session: int, 
-                  datatype: str, suffix: str = None, extension: str = None,
-                  run: int = None, task: str = 'avs') -> str:
-    """
-    Generate BIDS-compliant file path.
-    
     Parameters
     ----------
     data_path : str
-        Base data directory path
+        ``avs-public`` dataset root.
     subject_id : int
-        Subject ID
-    session : int
-        Session number
-    datatype : str
-        Data type ('meg', 'eeg', 'et', 'anat', etc.)
-    suffix : str, optional
-        File suffix (e.g., 'events', 'raw')
-    extension : str, optional
-        File extension (e.g., '.fif', '.csv')
-    run : int, optional
-        Run number (BIDS uses runs, AVS uses blocks)
-    task : str, optional
-        Task name (default: 'avs')
-        
-    Returns
-    -------
-    str
-        BIDS-compliant file path
-    """
-    # Build BIDS path structure
-    subject_dir = f"sub-{subject_id:02d}"
-    session_dir = f"ses-{session:02d}"
-    
-    # Base filename
-    filename_parts = [f"sub-{subject_id:02d}", f"ses-{session:02d}"]
-    
-    if task:
-        filename_parts.append(f"task-{task}")
-    
-    if run is not None:
-        filename_parts.append(f"run-{run:02d}")
-    
-    if suffix:
-        filename_parts.append(suffix)
-    
-    filename = "_".join(filename_parts)
-    
-    if extension:
-        filename += extension
-    
-    return os.path.join(data_path, subject_dir, session_dir, datatype, filename)
-
-
-def get_derivatives_path(data_path: str, subject_id: int, session: Optional[int] = None,
-                        pipeline: str = 'pyavs', suffix: str = None,
-                        extension: str = None) -> str:
-    """
-    Generate derivatives path for processed data.
-    
-    Parameters
-    ----------
-    data_path : str
-        Base data directory path
-    subject_id : int
-        Subject ID
+        Subject ID.
     session : int, optional
-        Session number. If None, returns subject-level derivatives path
-    pipeline : str, optional
-        Processing pipeline name (default: 'pyavs')
-    suffix : str, optional
-        File suffix
-    extension : str, optional
-        File extension
-        
+        Session number. Omitted from the path when None.
+    datatype : str, optional
+        Datatype subdirectory ('meg', 'epochs', 'eyetrack', ...).
+
     Returns
     -------
     str
-        Derivatives file path
+        e.g. ``<root>/derivatives/pyavs/sub-01/ses-01/meg``
     """
-    # Build derivatives path structure
-    subject_dir = f"sub-{subject_id:02d}"
-    
-    if session is not None:
-        session_dir = f"ses-{session:02d}"
-        
-        # Base filename
-        filename_parts = [f"sub-{subject_id:02d}", f"ses-{session:02d}"]
-        
-        if suffix:
-            filename_parts.append(suffix)
-        
-        filename = "_".join(filename_parts)
-        
-        if extension:
-            filename += extension
-        
-        return os.path.join(data_path, 'derivatives', pipeline, subject_dir, session_dir, filename)
-    else:
-        # Subject-level derivatives path
-        if suffix or extension:
-            filename_parts = [f"sub-{subject_id:02d}"]
-            
-            if suffix:
-                filename_parts.append(suffix)
-            
-            filename = "_".join(filename_parts)
-            
-            if extension:
-                filename += extension
-            
-            return os.path.join(data_path, 'derivatives', pipeline, subject_dir, filename)
-        else:
-            return os.path.join(data_path, 'derivatives', pipeline, subject_dir)
-
-
-# Subject/session pairs whose experiment log has a non-standard run suffix.
-# Format: (subject_id, session) -> suffix string used in the filename.
-_EXPLOG_SUFFIX = {
-    (60, 3): '3_11',
-    (60, 7): '3_10',
-}
-
-
-def get_legacy_paths(data_path: str, subject_id: int, session: int,
-                    prefix: str = 'as') -> dict:
-    """
-    Generate legacy file paths for backward compatibility.
-    
-    Parameters
-    ----------
-    data_path : str
-        Base data directory path
-    subject_id : int
-        Subject ID
-    session : int
-        Session number
-    prefix : str, optional
-        File prefix (default: 'as')
-        
-    Returns
-    -------
-    dict
-        Dictionary of legacy file paths
-    """
-    subject_session_dir = f"{prefix}{subject_id:02d}_{session:02d}"
-    
-    # add "results" to the datapath 
-    data_path = os.path.join(data_path, 'results')
-    
-    paths = {
-        'events': os.path.join(data_path, subject_session_dir, 'preprocessed',
-                              f"{prefix}_s{subject_id}_el_events.csv"),
-        'messages': os.path.join(data_path, subject_session_dir, 'preprocessed',
-                                f"{prefix}_s{subject_id}_el_msgs.csv"),
-        'experiment_log': os.path.join(data_path, subject_session_dir,
-                                      f"{prefix}_exp_data_{subject_id}_{session}_"
-                                      f"{_EXPLOG_SUFFIX.get((subject_id, session), '3_0')}.csv"),
-        'cleaned_samples': os.path.join(data_path, subject_session_dir, 'preprocessed',
-                                        f"{prefix}_s{subject_id}_el_cleaned_samples.csv"),
-    }
-    
-    return paths
+    return str(Layout(data_path).deriv_dir(subject_id, session, datatype))
 
 
 def get_max_blocks(session: int) -> int:
@@ -267,35 +84,30 @@ def get_max_blocks(session: int) -> int:
 
 def get_default_subjects_dir() -> str:
     """
-    Get default FreeSurfer subjects directory.
-    
+    Get the FreeSurfer subjects directory.
+
     Checks in order:
-    1. Environment variable SUBJECTS_DIR
-    2. Configured AVS data root's AVS-UTILS/source directory (see pyavs.configure())
-    3. Standard FreeSurfer directory: /usr/local/freesurfer/subjects
+
+    1. The ``SUBJECTS_DIR`` environment variable, if it points somewhere that exists.
+    2. ``<data_path>/derivatives/freesurfer`` from the configured AVS root
+       (see :func:`pyavs.configure`), which the public release ships as a
+       ready-to-use MNE ``SUBJECTS_DIR``.
 
     Returns
     -------
     str
-        Path to subjects directory
-    """
-    import os
-    from .config import get_data_path
+        Path to the subjects directory.
 
-    # Check environment variable first
+    Raises
+    ------
+    ValueError
+        If ``SUBJECTS_DIR`` is unset and no AVS data path is configured.
+    """
     subjects_dir = os.environ.get('SUBJECTS_DIR')
     if subjects_dir and os.path.exists(subjects_dir):
         return subjects_dir
 
-    # Check configured AVS data root
-    data_path = get_data_path()
-    if data_path is not None:
-        avs_subjects_dir = os.path.join(data_path, 'AVS-UTILS', 'source')
-        if os.path.exists(avs_subjects_dir):
-            return avs_subjects_dir
-
-    # Default FreeSurfer directory
-    return '/usr/local/freesurfer/subjects'
+    return str(get_layout().subjects_dir)
 
 
 def get_glasser_rois(area: str) -> list:

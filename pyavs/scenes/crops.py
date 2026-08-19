@@ -12,9 +12,45 @@ from typing import List, Optional, Tuple, Dict, Any, Union
 from PIL import Image
 import matplotlib.pyplot as plt
 
-from ..utils.config import get_input_paths
+from ..layout import get_layout
 from ..config.config import PyAVSConfig
 from .objects import load_object_masks
+
+
+def _resolve_scene_image(scene_id: int,
+                         scene_images: Optional[Dict[int, str]] = None,
+                         data_path: Optional[str] = None) -> str:
+    """Resolve the on-disk path of one MEG-size scene image.
+
+    Parameters
+    ----------
+    scene_id : int
+        COCO image ID.
+    scene_images : dict, optional
+        Precomputed ``{scene_id: path}`` mapping (e.g. from
+        :func:`pyavs.load_scenes`); consulted first.
+    data_path : str, optional
+        ``avs-public`` root. If None, uses the configured data path.
+
+    Returns
+    -------
+    str
+        Path to ``stimuli/images/{scene_id:012d}_MEG_size.jpg``.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the image does not exist.
+    """
+    if scene_images is not None and scene_id in scene_images:
+        image_path = scene_images[scene_id]
+    else:
+        image_path = get_layout(data_path).scene_image(scene_id)
+
+    if not os.path.exists(image_path):
+        raise FileNotFoundError(f"Scene image not found: {image_path}")
+
+    return str(image_path)
 
 
 def create_fixation_crops(eye_events_df: pd.DataFrame, 
@@ -143,7 +179,7 @@ def create_fixation_crops(eye_events_df: pd.DataFrame,
 def extract_scene_regions(scene_id: int,
                          regions: List[Tuple[int, int, int, int]],
                          scene_images: Optional[Dict[int, str]] = None,
-                         input_dir: Optional[str] = None) -> List[np.ndarray]:
+                         data_path: Optional[str] = None) -> List[np.ndarray]:
     """
     Extract rectangular regions from a scene image.
     
@@ -155,35 +191,15 @@ def extract_scene_regions(scene_id: int,
         List of regions as (left, top, width, height) tuples
     scene_images : dict, optional
         Dictionary mapping scene IDs to image paths
-    input_dir : str, optional
-        Path to input directory containing scenes
+    data_path : str, optional
+        ``avs-public`` root. If None, uses the configured data path.
         
     Returns
     -------
     list of np.ndarray
         List of extracted region arrays
     """
-    # Get scene image path
-    if scene_images is not None and scene_id in scene_images:
-        image_path = scene_images[scene_id]
-    else:
-        if input_dir is None:
-            input_dir = get_input_paths()
-        
-        scenes_dir = os.path.join(input_dir, 'mscoco_scenes')
-        image_filename = f"{scene_id:012d}.jpg"
-        image_path = os.path.join(scenes_dir, image_filename)
-        
-        # Try alternative locations
-        if not os.path.exists(image_path):
-            for subdir in ['train2017', 'val2017']:
-                alt_path = os.path.join(scenes_dir, subdir, image_filename)
-                if os.path.exists(alt_path):
-                    image_path = alt_path
-                    break
-    
-    if not os.path.exists(image_path):
-        raise FileNotFoundError(f"Scene image not found: {image_path}")
+    image_path = _resolve_scene_image(scene_id, scene_images, data_path)
     
     # Load image
     scene_image = Image.open(image_path)
@@ -212,7 +228,8 @@ def create_object_based_crops(scene_id: int,
                              config: PyAVSConfig,
                              crop_size: Tuple[int, int] = (100, 100),
                              scene_images: Optional[Dict[int, str]] = None,
-                             input_dir: Optional[str] = None) -> Dict[int, np.ndarray]:
+                             data_path: Optional[str] = None,
+                             masks_dir: Optional[str] = None) -> Dict[int, np.ndarray]:
     """
     Create crops centered on object centers of mass.
     
@@ -228,43 +245,27 @@ def create_object_based_crops(scene_id: int,
         Size of crops in pixels (width, height) (default: (100, 100))
     scene_images : dict, optional
         Dictionary mapping scene IDs to image paths
-    input_dir : str, optional
-        Path to input directory
-        
+    data_path : str, optional
+        ``avs-public`` root, used to locate the scene image. If None, uses the
+        configured data path.
+    masks_dir : str, optional
+        Directory of precomputed RLE object masks. **Not part of the public
+        release** — without it this function raises; see
+        :func:`pyavs.scenes.objects.load_object_masks`.
+
     Returns
     -------
     dict
         Dictionary mapping object IDs to crop arrays
     """
-    # Load object masks
-    masks = load_object_masks([scene_id], input_dir)
-    
+    masks = load_object_masks([scene_id], masks_dir)
+
     if scene_id not in masks:
         raise ValueError(f"No masks found for scene {scene_id}")
     
     scene_masks = masks[scene_id]
     
-    # Get scene image path
-    if scene_images is not None and scene_id in scene_images:
-        image_path = scene_images[scene_id]
-    else:
-        if input_dir is None:
-            input_dir = config.input_dir or get_input_paths()
-        
-        scenes_dir = os.path.join(input_dir, 'mscoco_scenes')
-        image_filename = f"{scene_id:012d}.jpg"
-        image_path = os.path.join(scenes_dir, image_filename)
-        
-        # Try alternative locations
-        if not os.path.exists(image_path):
-            for subdir in ['train2017', 'val2017']:
-                alt_path = os.path.join(scenes_dir, subdir, image_filename)
-                if os.path.exists(alt_path):
-                    image_path = alt_path
-                    break
-    
-    if not os.path.exists(image_path):
-        raise FileNotFoundError(f"Scene image not found: {image_path}")
+    image_path = _resolve_scene_image(scene_id, scene_images, data_path)
     
     # Load and rescale scene image using config
     scene_image = Image.open(image_path)
@@ -321,7 +322,7 @@ def visualize_fixations_on_scene(scene_id: int,
                                 fixations_df: pd.DataFrame,
                                 config: PyAVSConfig,
                                 scene_images: Optional[Dict[int, str]] = None,
-                                input_dir: Optional[str] = None,
+                                data_path: Optional[str] = None,
                                 figsize: Tuple[int, int] = (12, 8),
                                 save_path: Optional[str] = None) -> plt.Figure:
     """
@@ -337,8 +338,8 @@ def visualize_fixations_on_scene(scene_id: int,
         Configuration object with visual system parameters (required)
     scene_images : dict, optional
         Dictionary mapping scene IDs to image paths
-    input_dir : str, optional
-        Path to input directory
+    data_path : str, optional
+        ``avs-public`` root. If None, uses the configured data path.
     figsize : tuple of int, optional
         Figure size (width, height) (default: (12, 8))
     save_path : str, optional
@@ -349,27 +350,7 @@ def visualize_fixations_on_scene(scene_id: int,
     plt.Figure
         Matplotlib figure object
     """
-    # Get scene image path
-    if scene_images is not None and scene_id in scene_images:
-        image_path = scene_images[scene_id]
-    else:
-        if input_dir is None:
-            input_dir = config.input_dir or get_input_paths()
-        
-        scenes_dir = os.path.join(input_dir, 'mscoco_scenes')
-        image_filename = f"{scene_id:012d}.jpg"
-        image_path = os.path.join(scenes_dir, image_filename)
-        
-        # Try alternative locations
-        if not os.path.exists(image_path):
-            for subdir in ['train2017', 'val2017']:
-                alt_path = os.path.join(scenes_dir, subdir, image_filename)
-                if os.path.exists(alt_path):
-                    image_path = alt_path
-                    break
-    
-    if not os.path.exists(image_path):
-        raise FileNotFoundError(f"Scene image not found: {image_path}")
+    image_path = _resolve_scene_image(scene_id, scene_images, data_path)
     
     # Load and rescale scene image using config
     scene_image = Image.open(image_path)

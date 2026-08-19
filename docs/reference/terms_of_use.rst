@@ -25,7 +25,9 @@ What's Not Yet Decided
 ---------------------------
 
 - The exact legal text of the data-use agreement.
-- The hosting platform and access mechanism (see :doc:`../data_access`).
+- Whether access will require any form of registration or click-through acceptance, and how
+  that interacts with mirroring the data elsewhere (the primary host is settled -- see
+  :doc:`../data_access`).
 - Whether any additional agreement (e.g. co-authorship expectations for early access) will
   apply outside of the final public release.
 

@@ -134,57 +134,20 @@ def update_config(**kwargs) -> None:
             raise KeyError(f"Unknown configuration parameter: {key}")
 
 
-def get_server_paths(server: str = 'auto') -> Dict[str, str]:
+def get_derivatives_root() -> Optional[str]:
     """
-    Get server-specific paths.
+    Get the pyAVS derivatives write root.
 
-    Parameters
-    ----------
-    server : str, optional
-        Server name ('uos', 'auto')
+    Defaults to ``<data_path>/derivatives/pyavs``, overridable via the
+    ``PYAVS_DERIVATIVES_PATH`` environment variable or the config's
+    ``derivatives_path`` field — useful when the dataset copy is read-only.
 
     Returns
     -------
-    dict
-        Dictionary with 'raw_dir', 'results_dir', 'project_dir' keys
+    str or None
+        Derivatives root, or None if no data path is configured.
     """
-    data_path = get_data_path()
-    if data_path is None:
-        raise FileNotFoundError(
-            "No data path configured. Use set_data_path() or provide data_path parameter"
-        )
-
-    return {
-        'raw_dir': os.path.join(data_path, 'rawdir'),
-        'results_dir': os.path.join(data_path, 'results'),
-        'project_dir': data_path,
-    }
-
-
-def get_input_paths(server: str = 'auto') -> str:
-    """
-    Get the input data directory, derived from the configured data path.
-
-    Parameters
-    ----------
-    server : str, optional
-        Unused, kept for backward compatibility with existing call sites.
-
-    Returns
-    -------
-    str
-        Path to input data directory
-    """
-    manager = _get_global_config()
-    if manager.paths.input_dir:
-        return manager.paths.input_dir
-
-    data_path = get_data_path()
-    if data_path is None:
-        raise FileNotFoundError(
-            "No data path configured. Use set_data_path() or provide data_path parameter"
-        )
-    return os.path.join(data_path, 'input')
+    return _get_global_config().paths.get_derivatives_path()
 
 
 def save_config(filepath: str) -> None:

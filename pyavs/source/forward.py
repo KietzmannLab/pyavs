@@ -8,9 +8,10 @@ and handling coregistration for source reconstruction.
 import os
 import mne
 import numpy as np
+from pathlib import Path
 from typing import List, Optional, Tuple, Dict, Any, Union
 
-from ..utils.config import get_data_path
+from ..layout import bids_stem, get_layout
 from ..utils.validation import validate_subject_id
 from ..utils.logging import get_logger
 
@@ -261,9 +262,11 @@ def setup_coregistration(subject: str,
     if verbose:
         logger.info(f"Setting up coregistration for subject {subject}")
     
-    # Check if transformation file exists
-    trans_file = os.path.join(subjects_dir, subject, 'bem', f'{subject}-trans.fif')
-    
+    # Check if transformation file exists.  The release ships it under
+    # mri/transforms/, mirroring FreeSurfer's own convention.
+    trans_file = os.path.join(subjects_dir, subject, 'mri', 'transforms',
+                              f'{subject}-trans.fif')
+
     if os.path.exists(trans_file):
         if verbose:
             logger.info(f"Loading existing transformation: {trans_file}")
@@ -368,7 +371,20 @@ def check_forward_model(fwd: mne.Forward,
     return checks
 
 
-def save_forward_model(fwd: mne.Forward, 
+def _derivatives_forward_path(subject_id: int,
+                              session: int,
+                              data_path: Optional[str] = None) -> Path:
+    """Path of a pyAVS-computed forward inside the derivatives tree.
+
+    ``{derivatives}/sub-{id:02d}/ses-{sess:02d}/source/
+    sub-{id:02d}_ses-{sess:02d}_task-avs_fwd.fif``
+    """
+    layout = get_layout(data_path)
+    return (layout.deriv_dir(subject_id, session, 'source')
+            / f"{bids_stem(subject_id, session)}_fwd.fif")
+
+
+def save_forward_model(fwd: mne.Forward,
                       subject_id: int,
                       session: int,
                       data_path: Optional[str] = None,
@@ -395,61 +411,46 @@ def save_forward_model(fwd: mne.Forward,
         Path to saved forward model
     """
     validate_subject_id(subject_id)
-    
-    if data_path is None:
-        data_path = get_data_path()
-        if data_path is None:
-            raise ValueError("No data path configured")
-    
-    # Create derivatives directory structure
-    derivatives_dir = os.path.join(data_path, 'derivatives', 'pyavs')
-    subject_dir = f"sub-{subject_id:02d}"
-    session_dir = f"ses-{session:02d}"
-    source_dir = os.path.join(derivatives_dir, subject_dir, session_dir, 'source')
-    
-    os.makedirs(source_dir, exist_ok=True)
-    
-    # Create filename
-    fwd_filename = f"sub-{subject_id:02d}_ses-{session:02d}_task-avs_fwd.fif"
-    fwd_path = os.path.join(source_dir, fwd_filename)
-    
-    # Save
-    mne.write_forward_solution(fwd_path, fwd, overwrite=overwrite)
+
+    fwd_path = _derivatives_forward_path(subject_id, session, data_path)
+    fwd_path.parent.mkdir(parents=True, exist_ok=True)
+
+    mne.write_forward_solution(str(fwd_path), fwd, overwrite=overwrite)
     logger.info(f"Saved forward model to: {fwd_path}")
-    
-    return fwd_path
+
+    return str(fwd_path)
 
 
 def load_forward_model(subject_id: int,
-                      session: int,
+                      session: Optional[int] = None,
                       data_path: Optional[str] = None,
-                      fwd_dir: Optional[str] = None,
                       verbose: bool = True) -> mne.Forward:
     """
-    Load forward model from disk.
+    Load a forward model from the dataset.
 
-    Two path conventions are supported:
+    Two locations are searched, in order:
 
-    1. **BIDS derivatives** (default, ``fwd_dir=None``):
-       ``{data_path}/derivatives/pyavs/sub-{id:02d}/ses-{sess:02d}/source/
+    1. **pyAVS derivatives** (only when ``session`` is given) — a forward
+       recomputed with :func:`save_forward_model`:
+       ``{derivatives}/sub-{id:02d}/ses-{sess:02d}/source/
        sub-{id:02d}_ses-{sess:02d}_task-avs_fwd.fif``
 
-    2. **AVS-UTILS pre-computed** (``fwd_dir`` given):
-       ``{fwd_dir}/source/as{id:02d}/src/as{id:02d}-fwd.fif``
-       e.g. ``fwd_dir=/share/klab/datasets/avs/AVS-UTILS``
+    2. **The shipped forward** — one per subject, session-independent:
+       ``{root}/derivatives/freesurfer/sub-{id:02d}/bem/sub-{id:02d}-fwd.fif``
+
+    The shipped forward is what the release provides; the derivatives path only
+    exists if you recomputed one yourself, in which case it takes precedence.
 
     Parameters
     ----------
     subject_id : int
         Subject ID
-    session : int
-        Session number (only used for the BIDS derivatives path)
+    session : int, optional
+        Session number. When given, a per-session forward in the pyAVS
+        derivatives tree is preferred over the shipped one. The shipped
+        forward does not depend on session.
     data_path : str, optional
-        Path to data directory. If None, uses configured data path.
-        Ignored when ``fwd_dir`` is provided.
-    fwd_dir : str, optional
-        Root of the AVS-UTILS tree. When given, the BIDS derivatives path
-        is bypassed and the pre-computed forward is loaded directly.
+        Path to the ``avs-public`` root. If None, uses the configured data path.
     verbose : bool, optional
         Whether to print loading information (default: True)
 
@@ -460,27 +461,22 @@ def load_forward_model(subject_id: int,
     """
     validate_subject_id(subject_id)
 
-    if fwd_dir is not None:
-        # AVS-UTILS path: {fwd_dir}/source/as{id:02d}/src/as{id:02d}-fwd.fif
-        sub_name = f'as{subject_id:02d}'
-        fwd_path = os.path.join(fwd_dir, 'source', sub_name, 'src', f'{sub_name}-fwd.fif')
-    else:
-        if data_path is None:
-            data_path = get_data_path()
-            if data_path is None:
-                raise ValueError("No data path configured")
-        derivatives_dir = os.path.join(data_path, 'derivatives', 'pyavs')
-        subject_dir = f"sub-{subject_id:02d}"
-        session_dir = f"ses-{session:02d}"
-        fwd_filename = f"sub-{subject_id:02d}_ses-{session:02d}_task-avs_fwd.fif"
-        fwd_path = os.path.join(derivatives_dir, subject_dir, session_dir, 'source', fwd_filename)
+    layout = get_layout(data_path)
 
-    if not os.path.exists(fwd_path):
-        raise FileNotFoundError(f"Forward model not found: {fwd_path}")
+    candidates = []
+    if session is not None:
+        candidates.append(_derivatives_forward_path(subject_id, session, data_path))
+    candidates.append(layout.forward(subject_id))
+
+    for fwd_path in candidates:
+        if fwd_path.exists():
+            break
+    else:
+        searched = "\n  ".join(str(p) for p in candidates)
+        raise FileNotFoundError(
+            f"Forward model not found for subject {subject_id}. Searched:\n  {searched}")
 
     if verbose:
         logger.info(f"Loading forward model from: {fwd_path}")
 
-    fwd = mne.read_forward_solution(fwd_path, verbose=verbose)
-
-    return fwd
+    return mne.read_forward_solution(str(fwd_path), verbose=verbose)

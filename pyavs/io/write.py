@@ -14,7 +14,9 @@ import json
 import hashlib
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Union
+from ..layout import get_layout, sub_sess_id
 from ..utils.config import get_data_path
+from ..utils.tables import write_table
 from ..utils.validation import validate_subject_id, validate_session
 from ..utils.logging import get_logger
 
@@ -42,17 +44,15 @@ def _create_derivatives_directory(data_path: str, subject_id: Optional[int] = No
     str
         Path to created directory
     """
-    derivatives_dir = os.path.join(data_path, 'derivatives', 'pyavs')
-    
+    layout = get_layout(data_path)
+
     if subject_id is not None and session is not None:
-        subject_dir = f"sub-{subject_id:02d}" if isinstance(subject_id, int) else f"sub-{subject_id}"
-        session_dir = f"ses-{session:02d}" if isinstance(session, int) else f"ses-{session}"
-        output_dir = os.path.join(derivatives_dir, subject_dir, session_dir, data_type)
+        output_dir = layout.deriv_dir(subject_id, session, data_type)
     else:
-        output_dir = os.path.join(derivatives_dir, data_type)
-    
-    os.makedirs(output_dir, exist_ok=True)
-    return output_dir
+        output_dir = layout.derivatives_root / data_type
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return str(output_dir)
 
 
 def save_data_h5(data: Union[np.ndarray, mne.Epochs, mne.io.Raw, Dict[str, np.ndarray]],
@@ -443,8 +443,8 @@ def save_population_codes_h5(population_codes: Dict[str, np.ndarray],
             logger.warning(f"Could not save config file: {e}")
         
         # Create filename with original naming convention
-        sub_sess_id = f"as{subject_id:02d}{'abcde'[session-1] if session <= 5 else session}"
-        h5_filename = f"{sub_sess_id}_{data_type}_{event_type}_{sampling_rate}hz_{param_signature[:8]}.h5"
+        h5_filename = (f"{sub_sess_id(subject_id, session)}_{data_type}_{event_type}"
+                       f"_{sampling_rate}hz_{param_signature[:8]}.h5")
         
     else:
         # Standard directory structure for other data types
@@ -499,7 +499,7 @@ def save_population_codes_h5(population_codes: Dict[str, np.ndarray],
         
         # Fixation mask functionality removed
         
-        # Metadata is saved separately as CSV (see save_metadata_csv function)
+        # Metadata is saved separately as Parquet (see save_metadata_csv function)
         # Skip HDF5 metadata storage to avoid DataFrame serialization issues
         
         # Store data for each ROI
@@ -572,11 +572,16 @@ def _raw_to_h5_format(raw: mne.io.Raw) -> Dict[str, np.ndarray]:
 
 
 
-def save_metadata_csv(metadata: pd.DataFrame, subject_id: int, session: int, 
+def save_metadata_csv(metadata: pd.DataFrame, subject_id: int, session: int,
                       event_type: str, data_path: Optional[str] = None) -> str:
     """
-    Save epochs metadata as CSV file.
-    
+    Save epochs metadata alongside the epochs HDF5 file.
+
+    Despite the historical name, this writes **Parquet**
+    (``sub-01_ses-01_fixation_metadata.parquet``), which is the format the
+    public release ships. Read it back with
+    :func:`pyavs.io.read.load_metadata_csv`.
+
     Parameters
     ----------
     metadata : pd.DataFrame
@@ -586,31 +591,21 @@ def save_metadata_csv(metadata: pd.DataFrame, subject_id: int, session: int,
     session : int
         Session number
     event_type : str
-        Event type (e.g., 'fixation', 'saccade')
+        Event type (e.g., 'fixation', 'saccade'); a trailing '_scene' is
+        stripped for the filename.
     data_path : str, optional
-        Path to data directory
-        
+        Path to the ``avs-public`` root
+
     Returns
     -------
     str
-        Path to saved CSV file
+        Path to the saved Parquet file
     """
-    if data_path is None:
-        from ..utils.config import get_data_path
-        data_path = get_data_path()
-    
-    # Create output directory using same structure as epochs
-    output_dir = _create_derivatives_directory(data_path, subject_id, session, 'epochs')
-    
-    # Create filename
-    csv_file = Path(output_dir) / f"sub-{subject_id:02d}_ses-{session:02d}_{event_type}_metadata.csv"
-    
-    # Save metadata
-    if len(metadata) > 0:
-        metadata.to_csv(csv_file, index=False)
-        return str(csv_file)
-    else:
+    if metadata is None or len(metadata) == 0:
         raise ValueError("Metadata is empty or None")
+
+    metadata_file = get_layout(data_path).epochs_metadata(subject_id, session, event_type)
+    return str(write_table(metadata, metadata_file))
 
 
 def _save_parameter_metadata(metadata_file: str, metadata: Dict[str, Any]) -> None:

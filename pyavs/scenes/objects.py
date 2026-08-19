@@ -24,7 +24,7 @@ import pickle
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
-from ..utils.config import get_input_paths
+from ..layout import get_layout
 from .cocostuff_classes import (
     COCOSTUFF_CLASSES,
     get_class_name,
@@ -735,33 +735,51 @@ def get_fixated_objects(events_df: pd.DataFrame,
 
 
 
-def load_object_masks(scene_ids: Union[int, List[int]], 
-                     input_dir: Optional[str] = None) -> Dict[int, Dict[str, np.ndarray]]:
+_MASKS_NOT_IN_RELEASE = (
+    "Precomputed RLE object masks are not part of the public AVS release. The release "
+    "ships transformed scene annotations at stimuli/annotations/{coco_objects,cocostuff} "
+    "instead — use get_fixated_objects() or FixationObjectChecker, which read those "
+    "directly. To use RLE masks, build them yourself from a raw MSCOCO annotation "
+    "download with CocoObjectMasker and pass the output directory as masks_dir."
+)
+
+
+def load_object_masks(scene_ids: Union[int, List[int]],
+                      masks_dir: Optional[str] = None) -> Dict[int, Dict[str, np.ndarray]]:
     """
-    Load object masks for specified scene IDs.
-    
+    Load precomputed RLE object masks for specified scene IDs.
+
     Parameters
     ----------
     scene_ids : int or list of int
         Scene ID(s) to load masks for
-    input_dir : str, optional
-        Path to input data directory. If None, uses configured input path
-        
+    masks_dir : str
+        Directory holding ``object_masks_metadata.json`` and
+        ``compressed_masks/``, as produced by :class:`CocoObjectMasker`.
+
     Returns
     -------
     dict
         Dictionary mapping scene IDs to object masks
+
+    Raises
+    ------
+    FileNotFoundError
+        If ``masks_dir`` is not given, or does not contain the metadata file.
+        These masks are **not** part of the public release — see
+        :func:`get_fixated_objects` for the annotation-based equivalent.
     """
-    if input_dir is None:
-        input_dir = get_input_paths()
-    
-    compressed_masks_dir = os.path.join(input_dir, 'object_masks', 'compressed')
-    metadata_file = os.path.join(compressed_masks_dir, 'object_masks_metadata.json')
-    mask_files_dir = os.path.join(compressed_masks_dir, 'compressed_masks')
-    
+    if masks_dir is None:
+        raise FileNotFoundError(_MASKS_NOT_IN_RELEASE)
+
+    metadata_file = os.path.join(masks_dir, 'object_masks_metadata.json')
+    mask_files_dir = os.path.join(masks_dir, 'compressed_masks')
+
     if not os.path.exists(metadata_file):
-        raise FileNotFoundError(f"Object mask metadata not found: {metadata_file}")
-    
+        raise FileNotFoundError(
+            f"Object mask metadata not found: {metadata_file}. {_MASKS_NOT_IN_RELEASE}"
+        )
+
     if isinstance(scene_ids, int):
         scene_ids = [scene_ids]
     
@@ -799,13 +817,15 @@ def load_object_masks(scene_ids: Union[int, List[int]],
 
 
 def map_fixations_to_objects(fixations_df: pd.DataFrame,
-                           scene_id: int,
-                           x_col: str = 'mean_gx',
-                           y_col: str = 'mean_gy',
-                           input_dir: Optional[str] = None) -> pd.DataFrame:
+                             scene_id: int,
+                             x_col: str = 'mean_gx',
+                             y_col: str = 'mean_gy',
+                             data_path: Optional[str] = None,
+                             use_cocostuff: bool = False,
+                             transformed_annotations_dir: Optional[str] = None) -> pd.DataFrame:
     """
     Map fixations to objects for a single scene.
-    
+
     Parameters
     ----------
     fixations_df : pd.DataFrame
@@ -816,40 +836,37 @@ def map_fixations_to_objects(fixations_df: pd.DataFrame,
         Column name for x coordinates (default: 'mean_gx')
     y_col : str, optional
         Column name for y coordinates (default: 'mean_gy')
-    input_dir : str, optional
-        Path to input data directory
-        
+    data_path : str, optional
+        ``avs-public`` root. If None, uses the configured data path.
+    use_cocostuff : bool, optional
+        Use the COCO-Stuff annotations (183 classes) rather than the 80 COCO
+        thing classes (default: False).
+    transformed_annotations_dir : str, optional
+        Explicit annotation directory, overriding ``data_path``.
+
     Returns
     -------
     pd.DataFrame
-        Fixations dataframe with object information added
+        Fixations dataframe with ``object_id`` and ``object_label`` columns added.
     """
-    if input_dir is None:
-        input_dir = get_input_paths()
-    
-    # Set up paths
-    compressed_masks_dir = os.path.join(input_dir, 'object_masks', 'compressed')
-    metadata_file = os.path.join(compressed_masks_dir, 'object_masks_metadata.json')
-    mask_files_dir = os.path.join(compressed_masks_dir, 'compressed_masks')
-    
-    # Initialize object checker
-    fix_checker = FixationObjectChecker(metadata_file, mask_files_dir)
-    
-    # Get object labels for fixations
+    if transformed_annotations_dir is None:
+        kind = 'cocostuff' if use_cocostuff else 'coco_objects'
+        transformed_annotations_dir = get_layout(data_path).annotations_dir(kind)
+
+    fix_checker = FixationObjectChecker(str(transformed_annotations_dir),
+                                        use_cocostuff=use_cocostuff)
+
     object_ids, object_labels = fix_checker.get_fixated_objects(
         coco_id=scene_id,
         x_pos=fixations_df[x_col].values,
         y_pos=fixations_df[y_col].values,
         look_up_closest=True
     )
-    
-    # Add to dataframe
+
     result_df = fixations_df.copy()
     result_df['object_id'] = object_ids
     result_df['object_label'] = object_labels
-    
-    fix_checker.close()
-    
+
     return result_df
 
 

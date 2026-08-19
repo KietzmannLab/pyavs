@@ -75,7 +75,8 @@ Getting Started
       :link: data_access
       :link-type: doc
 
-      What's included in the release and how to get it (pending publication).
+      What's in the release, how it will be hosted, and how to download only the parts
+      you need.
 
 Citation
 ------------

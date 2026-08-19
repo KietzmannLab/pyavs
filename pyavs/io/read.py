@@ -15,7 +15,8 @@ from typing import List, Optional, Tuple, Dict, Any, Union
 
 from ..utils.config import get_data_path
 from ..utils.validation import validate_subject_id, validate_session
-from ..utils.paths import get_bids_path, get_legacy_paths, get_subject_session_id
+from ..layout import get_layout, sub_sess_id as get_subject_session_id
+from ..utils.tables import read_table
 from ..utils.logging import get_logger
 
 logger = get_logger('io.read')
@@ -181,11 +182,15 @@ def load_epochs_h5(subject_id: int,
     )
 
 
-def load_metadata_csv(subject_id: int, session: int, event_type: str, 
+def load_metadata_csv(subject_id: int, session: int, event_type: str,
                      data_path: Optional[str] = None) -> pd.DataFrame:
     """
-    Load metadata from CSV file.
-    
+    Load per-epoch metadata.
+
+    Despite the historical name, the file read is **Parquet**
+    (``sub-01_ses-01_fixation_metadata.parquet``), which is the format the
+    public release ships.
+
     Parameters
     ----------
     subject_id : int
@@ -193,41 +198,24 @@ def load_metadata_csv(subject_id: int, session: int, event_type: str,
     session : int
         Session number
     event_type : str
-        Event type (e.g., 'fixation', 'saccade')
+        Event type (e.g., 'fixation', 'saccade'); a trailing '_scene' is
+        stripped for the filename.
     data_path : str, optional
-        Path to data directory
-        
+        Path to the ``avs-public`` root
+
     Returns
     -------
     pd.DataFrame
-        Metadata DataFrame
+        Metadata DataFrame, empty if the file does not exist.
     """
-    if data_path is None:
-        data_path = get_data_path()
-        if data_path is None:
-            raise ValueError("No data path configured")
-    
-    # Create expected path for metadata CSV
-    from .write import _create_derivatives_directory
-    output_dir = _create_derivatives_directory(data_path, subject_id, session, 'epochs')
-    
-    # Extract event type without '_scene' suffix for filename
-    base_event_type = event_type.replace('_scene', '')
-    # sub-01_ses-01_fixation_metadata.csv
-    csv_filename = f"sub-{subject_id:02d}_ses-{session:02d}_{base_event_type}_metadata.csv"
-    csv_path = os.path.join(output_dir, csv_filename)
-    
-    if os.path.exists(csv_path):
-        try:
-            metadata_df = pd.read_csv(csv_path)
-            logger.info(f"Loaded metadata from: {csv_path}")
-            return metadata_df
-        except Exception as e:
-            logger.warning(f"Failed to load metadata from {csv_path}: {e}")
-            return pd.DataFrame()
-    else:
-        logger.warning(f"Metadata CSV file not found: {csv_path}")
+    metadata_path = get_layout(data_path).epochs_metadata(subject_id, session, event_type)
+
+    if not metadata_path.exists():
+        logger.warning(f"Metadata file not found: {metadata_path}")
         return pd.DataFrame()
+
+    logger.info(f"Loaded metadata from: {metadata_path}")
+    return read_table(metadata_path)
 
 
 def load_epochs(subject_id: int,
@@ -428,12 +416,8 @@ def load_meg_raw(subject_id: int, session: int, block: int,
         if data_path is None:
             raise ValueError("No data path configured")
     
-    # Construct MEG file path
-    meg_path = get_bids_path(
-        data_path, subject_id, session, 'meg', 
-        suffix='meg', extension='.fif', run=block
-    )
-    
+    meg_path = get_layout(data_path).meg_raw(subject_id, session, block)
+
     if not os.path.exists(meg_path):
         raise FileNotFoundError(f"MEG file not found: {meg_path}")
     
@@ -475,25 +459,13 @@ def load_meg_preprocessed(subject_id: int, session: int, block: int,
         if data_path is None:
             raise ValueError("No data path configured")
     
-    # Look for preprocessed data in derivatives
-    derivatives_path = os.path.join(data_path, 'derivatives', 'pyavs',
-                                   f'sub-{subject_id:02d}', f'ses-{session:02d}', 'meg')
-    
-    # Try different preprocessed file naming conventions
-    possible_names = [
-        f'sub-{subject_id:02d}_ses-{session:02d}_task-avs_run-{block:02d}_meg_preprocessed.fif',
-        f'sub-{subject_id:02d}_ses-{session:02d}_task-avs_run-{block:02d}_meg_clean.fif',
-        f'sub-{subject_id:02d}_ses-{session:02d}_run-{block:02d}_preprocessed.fif'
-    ]
-    
-    for filename in possible_names:
-        meg_path = os.path.join(derivatives_path, filename)
-        if os.path.exists(meg_path):
-            logger.info(f"Loading preprocessed MEG data from: {meg_path}")
-            return mne.io.read_raw_fif(meg_path, preload=preload, verbose=False)
-    
-    # If no preprocessed data found, fall back to raw
-    logger.warning("No preprocessed MEG data found, loading raw data")
+    meg_path = get_layout(data_path).meg_sss(subject_id, session, block)
+
+    if meg_path.exists():
+        logger.info(f"Loading preprocessed MEG data from: {meg_path}")
+        return mne.io.read_raw_fif(meg_path, preload=preload, verbose=False)
+
+    logger.warning(f"No preprocessed MEG data at {meg_path}, loading raw data")
     return load_meg_raw(subject_id, session, block, data_path, preload)
 
 
@@ -598,31 +570,20 @@ def load_eye_events_single(subject_id: int, session: int, event_type: str,
         if data_path is None:
             raise ValueError("No data path configured")
     
-    # Get legacy paths for eye tracking data
-    legacy_paths = get_legacy_paths(data_path, subject_id, session)
-    
-    # Construct event file path
-    sub_sess_id = get_subject_session_id(subject_id, session)
-    event_filename = f"{sub_sess_id}_{recording}_{event_type}s.csv"
-    
-    # Try different possible locations
-    possible_paths = [
-        os.path.join(data_path, f"sub-{subject_id:02d}", f"ses-{session:02d}", "et", event_filename),
-        os.path.join(data_path, "derivatives", "pyavs", f"sub-{subject_id:02d}", f"ses-{session:02d}", "et", event_filename),
-        legacy_paths.get('events', '').replace('el_events.csv', f'{event_type}s.csv')
-    ]
-    
-    for path in possible_paths:
-        if os.path.exists(path):
-            logger.info(f"Loading {event_type} events from: {path}")
-            try:
-                return pd.read_csv(path)
-            except Exception as e:
-                logger.error(f"Error reading {path}: {e}")
-                continue
-    
-    logger.warning(f"No {event_type} events file found for subject {subject_id}, session {session}")
-    return None
+    events_path = get_layout(data_path).eye_preprocessed(subject_id, session, 'events')
+
+    if not events_path.exists():
+        logger.warning(f"No eye-tracking events file found: {events_path}")
+        return None
+
+    logger.info(f"Loading {event_type} events from: {events_path}")
+    events_df = read_table(events_path)
+
+    # The preprocessed table holds every event type in one file.
+    if 'type' in events_df.columns:
+        events_df = events_df[events_df['type'] == event_type]
+
+    return events_df
 
 
 def load_experiment_log(subject_id: int, session: int,
@@ -652,20 +613,14 @@ def load_experiment_log(subject_id: int, session: int,
         if data_path is None:
             raise ValueError("No data path configured")
     
-    # Get legacy paths
-    legacy_paths = get_legacy_paths(data_path, subject_id, session)
-    exp_log_path = legacy_paths.get('experiment_log')
-    
-    if exp_log_path and os.path.exists(exp_log_path):
-        logger.info(f"Loading experiment log from: {exp_log_path}")
-        try:
-            return pd.read_csv(exp_log_path)
-        except Exception as e:
-            logger.error(f"Error reading experiment log: {e}")
-            return None
-    
-    logger.warning(f"No experiment log found for subject {subject_id}, session {session}")
-    return None
+    exp_log_path = get_layout(data_path).explog(subject_id, session)
+
+    if not exp_log_path.exists():
+        logger.warning(f"No experiment log found: {exp_log_path}")
+        return None
+
+    logger.info(f"Loading experiment log from: {exp_log_path}")
+    return read_table(exp_log_path)
 
 
 def load_anatomical(subject_id: int, data_path: Optional[str] = None) -> Optional[mne.SourceSpaces]:
@@ -735,39 +690,30 @@ def load_scenes(data_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
         if data_path is None:
             raise ValueError("No data path configured")
     
-    # Look for scene data
-    scenes_path = os.path.join(data_path, "stimuli", "scenes")
-    
-    if not os.path.exists(scenes_path):
-        logger.warning("No scenes directory found")
+    layout = get_layout(data_path)
+    scenes_path = layout.scenes_dir
+
+    if not scenes_path.exists():
+        logger.warning(f"No scenes directory found: {scenes_path}")
         return None
-    
+
     scenes_info = {}
-    
-    # Load scene metadata if available
-    metadata_files = ['scenes.csv', 'scene_info.csv', 'stimuli.csv']
-    for filename in metadata_files:
-        metadata_path = os.path.join(scenes_path, filename)
-        if os.path.exists(metadata_path):
-            logger.info(f"Loading scene metadata from: {metadata_path}")
-            try:
-                scenes_info['metadata'] = pd.read_csv(metadata_path)
-                break
-            except Exception as e:
-                logger.error(f"Error reading scene metadata: {e}")
-                continue
-    
-    # Find image files
-    image_extensions = ['.jpg', '.jpeg', '.png', '.bmp']
-    image_files = []
-    for ext in image_extensions:
-        image_files.extend([f for f in os.listdir(scenes_path) if f.lower().endswith(ext)])
-    
+
+    licenses_path = layout.scene_licenses()
+    if licenses_path.exists():
+        logger.info(f"Loading scene metadata from: {licenses_path}")
+        scenes_info['metadata'] = read_table(licenses_path)
+
+    image_files = sorted(
+        path.name for path in scenes_path.iterdir()
+        if path.suffix.lower() in ('.jpg', '.jpeg', '.png', '.bmp')
+    )
+
     if image_files:
-        scenes_info['image_files'] = sorted(image_files)
-        scenes_info['scenes_path'] = scenes_path
+        scenes_info['image_files'] = image_files
+        scenes_info['scenes_path'] = str(scenes_path)
         logger.info(f"Found {len(image_files)} scene images")
-    
+
     return scenes_info if scenes_info else None
 
 
@@ -788,54 +734,18 @@ def load_scene_images(data_path: Optional[str] = None) -> Dict[int, str]:
     dict
         Dictionary mapping scene IDs to image file paths
     """
-    if data_path is None:
-        data_path = get_data_path()
-        if data_path is None:
-            raise ValueError("No data path configured")
-    
+    scenes_dir = get_layout(data_path).scenes_dir
+
+    if not scenes_dir.exists():
+        raise FileNotFoundError(f"Scenes directory not found: {scenes_dir}")
+
     scene_images = {}
-    
-    # Look for COCO scenes in common locations
-    potential_paths = [
-        os.path.join(data_path, "input", "mscoco_scenes"),
-        os.path.join(data_path, "stimuli", "scenes"),
-        os.path.join(data_path, "mscoco_scenes"),
-        os.path.join(data_path, "input", "coco", "images"),
-        os.path.join(data_path, "coco", "images")
-    ]
-    
-    # Also check subdirectories for train/val splits
-    subdirs = ['', 'train2017', 'val2017', 'test2017']
-    
-    for base_path in potential_paths:
-        if not os.path.exists(base_path):
+    for path in scenes_dir.iterdir():
+        if path.suffix.lower() not in ('.jpg', '.jpeg', '.png'):
             continue
-            
-        for subdir in subdirs:
-            search_path = os.path.join(base_path, subdir) if subdir else base_path
-            if not os.path.exists(search_path):
-                continue
-                
-            logger.debug(f"Searching for scene images in: {search_path}")
-            
-            # Find image files with COCO naming convention
-            for filename in os.listdir(search_path):
-                if not filename.lower().endswith(('.jpg', '.jpeg', '.png')):
-                    continue
-                    
-                # Extract scene ID from filename (assumes COCO format: 000000123456.jpg)
-                try:
-                    name_part = os.path.splitext(filename)[0]
-                    scene_id = int(name_part)
-                    file_path = os.path.join(search_path, filename)
-                    
-                    if scene_id not in scene_images:  # Don't overwrite if already found
-                        scene_images[scene_id] = file_path
-                        
-                except ValueError:
-                    # Skip files that don't follow COCO naming convention
-                    continue
-    
+        # 000000000151_MEG_size.jpg -> 151
+        scene_images[int(path.name.split('_')[0])] = str(path)
+
     logger.info(f"Found {len(scene_images)} scene images")
     return scene_images
 
@@ -878,13 +788,13 @@ def find_population_codes_files(subject_id: int,
     validate_session(session)
     
     # Search pattern
-    pop_codes_dir = os.path.join(data_path, 'derivatives', 'pyavs', 'population_codes')
+    pop_codes_dir = os.path.join(str(get_layout(data_path).derivatives_root), 'population_codes')
     
     if not os.path.exists(pop_codes_dir):
         return []
     
     # Subject identifier for filename matching
-    sub_sess_id = f"as{subject_id:02d}{'abcde'[session-1] if session <= 5 else session}"
+    sub_sess_id = get_subject_session_id(subject_id, session)
     
     matching_files = []
     
@@ -968,7 +878,7 @@ def list_available_parameter_sets(data_path: Optional[str] = None) -> List[Dict[
         if data_path is None:
             raise ValueError("No data path configured")
     
-    pop_codes_dir = os.path.join(data_path, 'derivatives', 'pyavs', 'population_codes')
+    pop_codes_dir = os.path.join(str(get_layout(data_path).derivatives_root), 'population_codes')
     
     if not os.path.exists(pop_codes_dir):
         return []

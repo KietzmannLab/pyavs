@@ -368,6 +368,20 @@ def morph_source_space(src: mne.SourceSpaces,
         raise
 
 
+def _derivatives_src_path(subject_id: int,
+                          session: int,
+                          space_type: str = 'surface',
+                          data_path: Optional[str] = None) -> Path:
+    """Path of a pyAVS-computed source space inside the derivatives tree.
+
+    ``{derivatives}/sub-{id:02d}/ses-{sess:02d}/source/
+    sub-{id:02d}_ses-{sess:02d}_task-avs_{space_type}-src.fif``
+    """
+    layout = get_layout(data_path)
+    return (layout.deriv_dir(subject_id, session, 'source')
+            / f"{bids_stem(subject_id, session)}_{space_type}-src.fif")
+
+
 def save_source_space(src: mne.SourceSpaces,
                      subject_id: int,
                      session: int,
@@ -397,34 +411,18 @@ def save_source_space(src: mne.SourceSpaces,
     str
         Path to saved source space file
     """
-    from ..utils.config import get_data_path
     from ..utils.validation import validate_subject_id, validate_session
-    
+
     validate_subject_id(subject_id)
     validate_session(session)
-    
-    if data_path is None:
-        data_path = get_data_path()
-        if data_path is None:
-            raise ValueError("No data path configured")
-    
-    # Create derivatives directory
-    derivatives_dir = os.path.join(data_path, 'derivatives', 'pyavs')
-    subject_dir = f"sub-{subject_id:02d}"
-    session_dir = f"ses-{session:02d}"
-    source_dir = os.path.join(derivatives_dir, subject_dir, session_dir, 'source')
-    
-    os.makedirs(source_dir, exist_ok=True)
-    
-    # Create filename
-    src_filename = f"sub-{subject_id:02d}_ses-{session:02d}_task-avs_{space_type}-src.fif"
-    src_path = os.path.join(source_dir, src_filename)
-    
-    # Save
-    src.save(src_path, overwrite=overwrite)
+
+    src_path = _derivatives_src_path(subject_id, session, space_type, data_path)
+    src_path.parent.mkdir(parents=True, exist_ok=True)
+
+    src.save(str(src_path), overwrite=overwrite)
     logger.info(f"Saved source space to: {src_path}")
-    
-    return src_path
+
+    return str(src_path)
 
 
 def load_source_space(subject_id: int,

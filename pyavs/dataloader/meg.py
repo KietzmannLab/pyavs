@@ -5,14 +5,12 @@ This module provides functions for loading MEG data from the Active Visual Seman
 BIDS dataset, including raw files, preprocessed data, and empty room recordings.
 """
 
-import os
 import mne
 import numpy as np
-import pandas as pd
-from typing import List, Optional, Tuple, Dict, Any, Union
+from typing import List, Optional, Tuple, Dict, Any
 
-from ..utils.config import get_data_path
-from ..utils.paths import get_bids_path, get_subject_session_id, get_max_blocks
+from ..layout import get_layout
+from ..utils.paths import get_max_blocks
 from ..utils.validation import validate_subject_id, validate_session, validate_blocks
 from ..utils.logging import get_logger
 
@@ -35,12 +33,12 @@ def load_meg_raw(subject_id: int, session: int, run: int,
     run : int
         Run/block number
     data_path : str, optional
-        Path to data directory. If None, uses configured data path
+        Path to the ``avs-public`` root. If None, uses configured data path
     preload : bool, optional
         Whether to preload the data into memory (default: False)
     verbose : bool, optional
         Whether to print loading information (default: True)
-        
+
     Returns
     -------
     mne.io.Raw
@@ -48,32 +46,16 @@ def load_meg_raw(subject_id: int, session: int, run: int,
     """
     validate_subject_id(subject_id)
     validate_session(session)
-    
-    if data_path is None:
-        data_path = get_data_path()
-        if data_path is None:
-            raise ValueError("No data path configured. Use set_data_path() or provide data_path parameter")
-    
-    # Try BIDS structure first
-    meg_path = get_bids_path(data_path, subject_id, session, 'meg', 'raw', '.fif', run=run)
-    
-    if not os.path.exists(meg_path):
-        # Try legacy structure
-        sub_sess_id = get_subject_session_id(subject_id, session)
-        session_dir = os.path.join(data_path, "rawdir", sub_sess_id)
-        meg_path = os.path.join(session_dir, f"{sub_sess_id}{run:02d}.fif")
-    
-    if not os.path.exists(meg_path):
+
+    meg_path = get_layout(data_path).meg_raw(subject_id, session, run)
+
+    if not meg_path.exists():
         raise FileNotFoundError(f"MEG file not found: {meg_path}")
-    
+
     if verbose:
         logger.info(f"Loading MEG data from: {meg_path}")
-    
-    try:
-        raw = mne.io.read_raw_fif(meg_path, preload=preload, verbose=verbose)
-        return raw
-    except Exception as e:
-        raise IOError(f"Error loading MEG data: {e}")
+
+    return mne.io.read_raw_fif(meg_path, preload=preload, verbose=verbose)
 
 
 def load_meg_preprocessed(subject_id: int, session: int, run: int,
@@ -92,49 +74,29 @@ def load_meg_preprocessed(subject_id: int, session: int, run: int,
     run : int
         Run/block number
     data_path : str, optional
-        Path to data directory. If None, uses configured data path
+        Path to the ``avs-public`` root. If None, uses configured data path
     preload : bool, optional
         Whether to preload the data into memory (default: False)
     verbose : bool, optional
         Whether to print loading information (default: True)
-        
+
     Returns
     -------
     mne.io.Raw
-        Preprocessed raw MEG data
+        Preprocessed (Maxwell-filtered) raw MEG data
     """
     validate_subject_id(subject_id)
     validate_session(session)
-    
-    if data_path is None:
-        data_path = get_data_path()
-        if data_path is None:
-            raise ValueError("No data path configured. Use set_data_path() or provide data_path parameter")
-    
-    # Use unified derivatives structure
-    from ..utils.derivatives import get_bids_preprocessed_path, create_bids_meg_filename
-    
-    preprocessed_path = get_bids_preprocessed_path(subject_id, session, data_path)
-    meg_filename = create_bids_meg_filename(subject_id, session, run=run, suffix='raw-sss', data_path=data_path)
-    meg_path = preprocessed_path / meg_filename
-    
-    if not os.path.exists(meg_path):
-        # Try legacy structure
-        sub_sess_id = get_subject_session_id(subject_id, session)
-        prepro_dir = os.path.join(data_path, sub_sess_id, 'prepro')
-        meg_path = os.path.join(prepro_dir, f"{sub_sess_id}{run:02d}_raw-sss.fif")
-    
+
+    meg_path = get_layout(data_path).meg_sss(subject_id, session, run)
+
     if not meg_path.exists():
         raise FileNotFoundError(f"Preprocessed MEG file not found: {meg_path}")
-    
+
     if verbose:
         logger.info(f"Loading preprocessed MEG data from: {meg_path}")
-    
-    try:
-        raw = mne.io.read_raw_fif(meg_path, preload=preload, verbose=verbose)
-        return raw
-    except Exception as e:
-        raise IOError(f"Error loading preprocessed MEG data: {e}")
+
+    return mne.io.read_raw_fif(meg_path, preload=preload, verbose=verbose)
 
 
 def load_meg_session(subject_id: int, session: int,
@@ -233,48 +195,30 @@ def load_empty_room_recording(subject_id: int, session: int,
     """
     validate_subject_id(subject_id)
     validate_session(session)
-    
-    if data_path is None:
-        data_path = get_data_path()
-        if data_path is None:
-            raise ValueError("No data path configured. Use set_data_path() or provide data_path parameter")
-    
-    # Map recording type to file suffix
-    recording_map = {
-        'before': 'b',  # vorher (before)
-        'after': 'd'    # danach (after)  
-    }
-    
+
+    # 'b' = bevor (before the session), 'd' = danach (after)
+    recording_map = {'before': 'b', 'after': 'd'}
+
     if recording_type not in recording_map:
         raise ValueError(f"Invalid recording_type: {recording_type}. Use 'before' or 'after'")
-    
-    suffix = recording_map[recording_type]
-    sub_sess_id = get_subject_session_id(subject_id, session)
-    
-    # Try preprocessed first
-    prepro_dir = os.path.join(data_path, sub_sess_id, 'prepro')
-    er_path = os.path.join(prepro_dir, f"{sub_sess_id}{suffix}_raw-sss.fif")
-    
-    if not os.path.exists(er_path):
-        # Try raw
-        session_dir = os.path.join(data_path, sub_sess_id)
-        er_path = os.path.join(session_dir, f"{sub_sess_id}{suffix}.fif")
-    
-    if not os.path.exists(er_path):
+
+    recording = recording_map[recording_type]
+    layout = get_layout(data_path)
+
+    # Prefer the Maxwell-filtered version, fall back to the raw recording.
+    er_path = layout.meg_sss_empty_room(subject_id, session, recording)
+    if not er_path.exists():
+        er_path = layout.meg_empty_room(subject_id, session, recording)
+
+    if not er_path.exists():
         if verbose:
             logger.warning(f"Empty room recording not found: {er_path}")
         return None
-    
+
     if verbose:
         logger.info(f"Loading empty room recording from: {er_path}")
-    
-    try:
-        raw_er = mne.io.read_raw_fif(er_path, preload=preload, verbose=verbose)
-        return raw_er
-    except Exception as e:
-        if verbose:
-            logger.error(f"Error loading empty room recording: {e}")
-        return None
+
+    return mne.io.read_raw_fif(er_path, preload=preload, verbose=verbose)
 
 
 def load_and_preprocess_meg_run(subject_id: int, session: int, run: int,
@@ -365,19 +309,9 @@ def save_preprocessed_meg(raw: mne.io.Raw, subject_id: int, session: int, run: i
     str
         Path to saved file
     """
-    if data_path is None:
-        data_path = get_data_path()
-        if data_path is None:
-            raise ValueError("No data path configured. Use set_data_path() or provide data_path parameter")
-    
-    # Use unified derivatives structure
-    from ..utils.derivatives import get_bids_preprocessed_path, create_bids_meg_filename
-    
-    preprocessed_path = get_bids_preprocessed_path(subject_id, session, data_path)
-    meg_filename = create_bids_meg_filename(subject_id, session, run=run, suffix='raw-sss', data_path=data_path)
-    meg_path = preprocessed_path / meg_filename
-    
-    # Save
+    meg_path = get_layout(data_path).meg_sss(subject_id, session, run)
+    meg_path.parent.mkdir(parents=True, exist_ok=True)
+
     raw.save(meg_path, overwrite=overwrite)
     logger.info(f"Saved preprocessed MEG data to: {meg_path}")
     

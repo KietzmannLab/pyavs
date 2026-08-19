@@ -10,8 +10,37 @@ still works but receives less active development -- prefer ``AVSComposer`` for n
 
 **Where can I download the AVS dataset?**
 
-**TODO (pending publication):** the dataset's public hosting location is not yet finalized.
-See :doc:`../data_access` for what's known so far.
+Not yet -- the release is assembled and verified but not published. It is being deposited on
+GRO.data (Dataverse), and the DOI and download route will be listed on :doc:`../data_access`
+once it is live.
+
+**Do I have to download all 743 GiB?**
+
+No. The tree is organized so you can take only what you need, and the epoch *metadata* tables
+are small and separate from the epoch data -- so you can filter epochs by scene, fixated
+object or event kinematics before downloading any MEG. See :doc:`../data_access` for a
+per-goal breakdown.
+
+**Is the dataset BIDS?**
+
+BIDS-*inspired*, not BIDS-valid. It uses BIDS-style ``sub-<label>/ses-<label>/<datatype>/``
+directories and a ``derivatives/`` tree, but raw files keep their original acquisition
+filenames and no validator sidecars are shipped. See :doc:`../dataset/overview`.
+
+**Can I do source reconstruction with the released data?**
+
+Yes -- ``derivatives/freesurfer/`` is a directly usable MNE ``SUBJECTS_DIR`` with each
+participant's source space, single-shell BEM, forward solution, coregistration and
+parcellations. Scalp/head surfaces are withheld for privacy, so you cannot recompute the
+coregistration or a multi-shell BEM from scratch; use the shipped ones. See
+:doc:`../dataset/known_issues`.
+
+**Are the released epochs locked to scene onset?**
+
+No -- despite the ``_scene_`` in their filenames, which means "during the scene-viewing task".
+``fixation_scene`` and ``saccade_scene`` epochs are locked to eye movements. Stimulus-locked
+epochs can be built from the released SSS runs and scene annotations with
+:class:`pyavs.AVSComposer`.
 
 **How do I cite this dataset or pyAVS?**
 

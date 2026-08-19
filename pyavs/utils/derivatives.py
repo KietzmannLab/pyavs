@@ -11,7 +11,7 @@ from typing import Optional, Dict, Any, List, Union
 import hashlib
 import json
 
-from .config import get_data_path
+from ..layout import bids_stem, get_layout
 from .validation import validate_subject_id, validate_session
 from .logging import get_logger
 
@@ -22,32 +22,33 @@ class DerivativesManager:
     """
     Unified manager for all derivatives directory operations.
     
-    Ensures consistent BIDS-compliant structure:
-    derivatives/pyavs/{datatype}/sub-{subject_id:02d}/ses-{session:02d}/
+    Ensures a consistent structure, matching the public release:
+    ``derivatives/pyavs/sub-{subject_id:02d}/ses-{session:02d}/{datatype}/``.
+
+    Products keyed by a parameter signature rather than by session
+    (``filters/``, ``population_codes/``) stay directly under the derivatives
+    root, since they are not per-session artifacts.
     """
-    
+
     def __init__(self, data_path: Optional[str] = None):
         """
         Initialize derivatives manager.
-        
+
         Parameters
         ----------
         data_path : str, optional
             Base data path. If None, uses configured data path.
         """
-        if data_path is None:
-            data_path = get_data_path()
-            if data_path is None:
-                raise ValueError("No data path configured")
-        
-        self.data_path = Path(data_path)
-        self.derivatives_path = self.data_path / 'derivatives' / 'pyavs'
+        self.layout = get_layout(data_path)
+        self.data_path = self.layout.root
+        self.derivatives_path = self.layout.derivatives_root
     
-    def get_preprocessed_path(self, subject_id: int, session: int) -> Path:
+    def get_preprocessed_path(self, subject_id: int, session: int,
+                              create: bool = False) -> Path:
         """
-        Get BIDS-compliant path for preprocessed MEG data.
-        
-        Structure: derivatives/pyavs/preprocessed/sub-XX/ses-XX/meg/
+        Get the path for preprocessed (Maxwell-filtered) MEG data.
+
+        Structure: derivatives/pyavs/sub-XX/ses-XX/meg/
         
         Parameters
         ----------
@@ -55,22 +56,26 @@ class DerivativesManager:
             Subject ID
         session : int
             Session number
-            
+        create : bool, optional
+            Create the directory. Default False — resolving a path must not
+            write to the dataset, which may be a read-only release copy.
+
         Returns
         -------
         Path
-            BIDS-compliant preprocessed data path
+            Preprocessed data path
         """
         validate_subject_id(subject_id)
         validate_session(session)
         
-        path = (self.derivatives_path / 'preprocessed' / 
-                f'sub-{subject_id:02d}' / f'ses-{session:02d}' / 'meg')
-        path.mkdir(parents=True, exist_ok=True)
+        path = self.layout.deriv_meg_dir(subject_id, session)
+        if create:
+            path.mkdir(parents=True, exist_ok=True)
         return path
     
-    def get_population_codes_path(self, parameter_signature: str, 
-                                subject_id: int, session: int) -> Path:
+    def get_population_codes_path(self, parameter_signature: str,
+                                  subject_id: int, session: int,
+                                  create: bool = False) -> Path:
         """
         Get BIDS-compliant path for population codes.
         
@@ -95,7 +100,8 @@ class DerivativesManager:
         
         path = (self.derivatives_path / 'population_codes' / parameter_signature /
                 f'sub-{subject_id:02d}' / f'ses-{session:02d}')
-        path.mkdir(parents=True, exist_ok=True)
+        if create:
+            path.mkdir(parents=True, exist_ok=True)
         return path
     
     def get_source_reconstruction_path(self, subject_id: int, session: int,
@@ -103,11 +109,12 @@ class DerivativesManager:
                                      atlas: str = 'glasser',
                                      orientation: str = 'normal',
                                      hemisphere: str = 'both',
-                                     filter_spec: str = 'filter_0.2_200') -> Path:
+                                     filter_spec: str = 'filter_0.2_200',
+                                     create: bool = False) -> Path:
         """
-        Get BIDS-compliant path for source reconstruction data.
-        
-        Structure: derivatives/pyavs/source/{method}/{atlas}/sub-XX/ses-XX/
+        Get the path for source reconstruction data.
+
+        Structure: derivatives/pyavs/sub-XX/ses-XX/source/{method}/{atlas}/
         
         Parameters
         ----------
@@ -134,14 +141,15 @@ class DerivativesManager:
         validate_subject_id(subject_id)
         validate_session(session)
         
-        # Create method-specific subdirectory structure
-        path = (self.derivatives_path / 'source' / method / atlas /
-                f'sub-{subject_id:02d}' / f'ses-{session:02d}' /
+        # Method-specific subdirectories below the session's source/ datatype dir
+        path = (self.layout.deriv_dir(subject_id, session, 'source') / method / atlas /
                 f'ori-{orientation}' / f'hem-{hemisphere}' / filter_spec)
-        path.mkdir(parents=True, exist_ok=True)
+        if create:
+            path.mkdir(parents=True, exist_ok=True)
         return path
     
-    def get_filters_path(self, parameter_signature: str) -> Path:
+    def get_filters_path(self, parameter_signature: str,
+                         create: bool = False) -> Path:
         """
         Get BIDS-compliant path for beamformer filters.
         
@@ -158,15 +166,17 @@ class DerivativesManager:
             BIDS-compliant filters path
         """
         path = self.derivatives_path / 'filters' / parameter_signature
-        path.mkdir(parents=True, exist_ok=True)
+        if create:
+            path.mkdir(parents=True, exist_ok=True)
         return path
     
     def get_epochs_path(self, subject_id: int, session: int,
-                       event_type: str = 'saccade') -> Path:
+                        event_type: str = 'saccade',
+                        create: bool = False) -> Path:
         """
-        Get BIDS-compliant path for epoched data.
-        
-        Structure: derivatives/pyavs/epochs/sub-XX/ses-XX/
+        Get the path for epoched data.
+
+        Structure: derivatives/pyavs/sub-XX/ses-XX/epochs/
         
         Parameters
         ----------
@@ -185,9 +195,9 @@ class DerivativesManager:
         validate_subject_id(subject_id)
         validate_session(session)
         
-        path = (self.derivatives_path / 'epochs' / 
-                f'sub-{subject_id:02d}' / f'ses-{session:02d}')
-        path.mkdir(parents=True, exist_ok=True)
+        path = self.layout.epochs_dir(subject_id, session)
+        if create:
+            path.mkdir(parents=True, exist_ok=True)
         return path
     
     def create_bids_filename(self, subject_id: int, session: int,
@@ -230,18 +240,9 @@ class DerivativesManager:
         validate_subject_id(subject_id)
         validate_session(session)
         
-        # Build filename parts
-        parts = [f'sub-{subject_id:02d}', f'ses-{session:02d}']
-        
-        if task:
-            parts.append(f'task-{task}')
-        
-        if run is not None:
-            parts.append(f'run-{run:02d}')
-            
-        if recording:
-            parts.append(f'recording-{recording}')
-        
+        parts = [bids_stem(subject_id, session, task=task, run=run,
+                           recording=recording if recording else None)]
+
         # Add any additional entities
         for key, value in entities.items():
             if value is not None:
@@ -344,18 +345,21 @@ def get_derivatives_manager(data_path: Optional[str] = None) -> DerivativesManag
     return DerivativesManager(data_path)
 
 
-def get_bids_preprocessed_path(subject_id: int, session: int, 
-                              data_path: Optional[str] = None) -> Path:
-    """Get BIDS-compliant preprocessed data path."""
+def get_bids_preprocessed_path(subject_id: int, session: int,
+                               data_path: Optional[str] = None,
+                               create: bool = False) -> Path:
+    """Get the preprocessed MEG data directory. Pass ``create=True`` to make it."""
     manager = get_derivatives_manager(data_path)
-    return manager.get_preprocessed_path(subject_id, session)
+    return manager.get_preprocessed_path(subject_id, session, create=create)
 
 
-def get_bids_population_codes_path(parameter_signature: str, subject_id: int, 
-                                  session: int, data_path: Optional[str] = None) -> Path:
-    """Get BIDS-compliant population codes path."""
+def get_bids_population_codes_path(parameter_signature: str, subject_id: int,
+                                   session: int, data_path: Optional[str] = None,
+                                   create: bool = False) -> Path:
+    """Get the population codes directory. Pass ``create=True`` to make it."""
     manager = get_derivatives_manager(data_path)
-    return manager.get_population_codes_path(parameter_signature, subject_id, session)
+    return manager.get_population_codes_path(parameter_signature, subject_id, session,
+                                             create=create)
 
 
 def create_bids_meg_filename(subject_id: int, session: int, run: Optional[int] = None,

@@ -334,7 +334,7 @@ def extract_licensed_images(annotation_file: str, split: str = None,
         DataFrame containing image license metadata (all images, or only the
         permissively licensed ones if filter_permissive is True).
         Columns: coco_id, file_name, license_id, license_name, license_url,
-        flickr_url, width, height, split (if provided)
+        flickr_url, coco_url, width, height, split (if provided)
     """
     print(f"Loading COCO annotations from: {annotation_file}")
     coco = COCO(annotation_file)
@@ -362,6 +362,7 @@ def extract_licensed_images(annotation_file: str, split: str = None,
             'license_name': lic.get('name', 'Unknown'),
             'license_url': lic.get('url', ''),
             'flickr_url': img_info.get('flickr_url', ''),
+            'coco_url': img_info.get('coco_url', ''),
             'width': img_info.get('width'),
             'height': img_info.get('height'),
         }

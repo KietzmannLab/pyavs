@@ -123,25 +123,25 @@ class PyAVSConfig:
     })
     
     # === PATH CONFIGURATION ===
-    
-    # Base data path
+
+    # Base data path: the root of an `avs-public` dataset.
     data_path: Optional[str] = None
-    
+
+    # Where pyAVS writes derivatives. Defaults to <data_path>/derivatives/pyavs;
+    # set it when the dataset copy is read-only.
+    derivatives_path: Optional[str] = None
+
     # Server configuration (machine room: "uos")
     server: str = "auto"  # "auto", "uos", "mpi", "ikw"
-    
+
     # Output configuration
     output_prefix: str = "as"  # Machine room standard
     cache_dir: Optional[str] = None
-    
-    # Specific directories (auto-detected if None)
-    raw_dir: Optional[str] = None
-    results_dir: Optional[str] = None
-    project_dir: Optional[str] = None
-    input_dir: Optional[str] = None
-    meg_data_dir: Optional[str] = None
-    et_data_dir: Optional[str] = None
-    
+
+    # Derived directories of the public layout (recomputed from data_path)
+    stimuli_dir: Optional[str] = None
+    subjects_dir: Optional[str] = None
+
     # === DATA HANDLING PARAMETERS ===
     
     # Data selection
@@ -200,20 +200,25 @@ class PyAVSConfig:
         set_data_path() call — doesn't leave them stale, pointing at the old
         root. Nothing in the codebase pins these individually as overrides
         independent of data_path, so this is safe.
+
+        ``derivatives_path`` is the exception: it is a genuine override (a
+        read-only dataset copy still needs a writable output root), so an
+        explicitly set value, or ``PYAVS_DERIVATIVES_PATH``, wins over the
+        default of ``<data_path>/derivatives/pyavs``.
         """
         if self.data_path is None:
             self.data_path = self._detect_data_path()
 
-        # Set up server-specific paths
-        server_paths = self._get_server_paths()
+        layout = self.get_layout()
+        if layout is None:
+            self.stimuli_dir = None
+            self.subjects_dir = None
+            return
 
-        self.raw_dir = server_paths.get('raw_dir')
-        self.results_dir = server_paths.get('results_dir')
-        self.project_dir = server_paths.get('project_dir')
-        self.input_dir = server_paths.get('input_dir')
-        self.meg_data_dir = server_paths.get('meg_data_dir')
-        self.et_data_dir = server_paths.get('et_data_dir')
-    
+        self.stimuli_dir = str(layout.stimuli_dir)
+        self.subjects_dir = str(layout.subjects_dir)
+        self.derivatives_path = str(layout.derivatives_root)
+
     def _detect_data_path(self) -> Optional[str]:
         """Auto-detect data path via cascade: env var → user config."""
         # 1. Environment variable
@@ -234,22 +239,22 @@ class PyAVSConfig:
 
         # 3. Nothing found — return None, don't silently use a wrong server path
         return None
-    
-    def _get_server_paths(self) -> Dict[str, str]:
-        """Get derived directory paths from data_path."""
-        if self.data_path is None:
-            return {}
 
-        base_path = self.data_path
-        return {
-            'raw_dir': os.path.join(base_path, 'rawdir'),
-            'results_dir': os.path.join(base_path, 'results'),
-            'project_dir': base_path,
-            'input_dir': os.path.join(base_path, 'input'),
-            'meg_data_dir': os.path.join(base_path, 'rawdir'),
-            'et_data_dir': os.path.join(base_path, 'rawdir')
-        }
-    
+    def get_layout(self):
+        """Build the :class:`~pyavs.layout.Layout` for the configured root.
+
+        Returns
+        -------
+        pyavs.layout.Layout or None
+            ``None`` if no data path is configured.
+        """
+        if self.data_path is None:
+            return None
+
+        from ..layout import Layout
+        return Layout(self.data_path,
+                      os.environ.get('PYAVS_DERIVATIVES_PATH') or self.derivatives_path)
+
     # === PARAMETER EXTRACTION METHODS ===
     
     def get_parameter_signature_dict(self) -> Dict[str, Any]:
@@ -325,7 +330,7 @@ class PyAVSConfig:
     def get_composer_kwargs(self) -> Dict[str, Any]:
         """Get kwargs for AVSComposer initialization."""
         return {
-            'data_path': self.raw_dir or self.data_path,
+            'data_path': self.data_path,
             'min_block': self.min_block,
             'max_block': self.max_block,
             'interpolate_bad_channels': self.interpolate_bad_channels,
@@ -360,24 +365,22 @@ class PyAVSConfig:
     # === UTILITY METHODS ===
     
     def get_derivatives_path(self) -> Optional[str]:
-        """Get derivatives directory path."""
-        if self.data_path is None:
-            return None
-        return os.path.join(self.data_path, 'derivatives', 'pyavs')
-    
+        """Get the pyAVS derivatives write root."""
+        layout = self.get_layout()
+        return None if layout is None else str(layout.derivatives_root)
+
     def get_subjects_dir(self) -> Optional[str]:
-        """Get FreeSurfer subjects directory."""
+        """Get the FreeSurfer subjects directory (``derivatives/freesurfer``).
+
+        ``SUBJECTS_DIR`` takes precedence if it is set and exists.
+        """
         subjects_dir = os.environ.get('SUBJECTS_DIR')
         if subjects_dir and os.path.exists(subjects_dir):
             return subjects_dir
 
-        if self.data_path:
-            avs_subjects_dir = os.path.join(self.data_path, 'AVS-UTILS', 'source')
-            if os.path.exists(avs_subjects_dir):
-                return avs_subjects_dir
+        layout = self.get_layout()
+        return None if layout is None else str(layout.subjects_dir)
 
-        return None
-    
     def get_filter_string(self) -> str:
         """Get string representation of filter parameters."""
         l_freq = self.filter_params.get('l_freq', 'None')

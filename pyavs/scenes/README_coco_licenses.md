@@ -92,6 +92,7 @@ The output CSV contains the following columns:
 | `license_name` | Human-readable license name |
 | `license_url` | URL to license terms |
 | `flickr_url` | Original Flickr URL (for attribution) |
+| `coco_url` | Official `images.cocodataset.org` URL (for on-demand image download — same bytes as the official train2017/val2017 zip archives, more stable than `flickr_url`) |
 | `width` | Image width in pixels |
 | `height` | Image height in pixels |
 
