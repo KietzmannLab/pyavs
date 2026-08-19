@@ -8,8 +8,10 @@ including cortical and volume source spaces.
 import os
 import mne
 import numpy as np
+from pathlib import Path
 from typing import List, Optional, Tuple, Dict, Any, Union
 
+from ..layout import bids_stem, ensure_fsaverage, get_layout
 from ..utils.paths import get_glasser_rois, get_default_subjects_dir
 from ..utils.logging import get_logger
 
@@ -340,7 +342,11 @@ def morph_source_space(src: mne.SourceSpaces,
     """
     if verbose:
         logger.info(f"Morphing source space from {subject_from} to {subject_to}")
-    
+
+    # The release ships no template subject; fetch MNE's copy on first use.
+    if subject_to == 'fsaverage':
+        ensure_fsaverage(subjects_dir, verbose=verbose)
+
     try:
         # Create morph maps
         morph = mne.compute_source_morph(
@@ -426,55 +432,65 @@ def save_source_space(src: mne.SourceSpaces,
 
 
 def load_source_space(subject_id: int,
-                     session: int,
+                     session: Optional[int] = None,
                      space_type: str = 'surface',
                      data_path: Optional[str] = None,
                      verbose: bool = True) -> mne.SourceSpaces:
     """
-    Load source space from derivatives directory.
-    
+    Load a source space from the dataset.
+
+    Two locations are searched, in order:
+
+    1. **pyAVS derivatives** (only when ``session`` is given) — a source space
+       written by :func:`save_source_space`:
+       ``{derivatives}/sub-{id:02d}/ses-{sess:02d}/source/
+       sub-{id:02d}_ses-{sess:02d}_task-avs_{space_type}-src.fif``
+
+    2. **The shipped source space** — one per subject, session-independent:
+       ``{root}/derivatives/freesurfer/sub-{id:02d}/bem/sub-{id:02d}_oct6-src.fif``
+       (only for ``space_type='surface'``, the only kind the release ships).
+
     Parameters
     ----------
     subject_id : int
         Subject ID
-    session : int
-        Session number
+    session : int, optional
+        Session number. When given, a per-session source space in the pyAVS
+        derivatives tree is preferred over the shipped one.
     space_type : str, optional
         Type of source space ('surface', 'volume', 'mixed') (default: 'surface')
     data_path : str, optional
-        Path to data directory
+        Path to the ``avs-public`` root. If None, uses the configured data path.
     verbose : bool, optional
         Whether to print loading information (default: True)
-        
+
     Returns
     -------
     mne.SourceSpaces
         Loaded source space
     """
-    from ..utils.config import get_data_path
     from ..utils.validation import validate_subject_id, validate_session
-    
+
     validate_subject_id(subject_id)
-    validate_session(session)
-    
-    if data_path is None:
-        data_path = get_data_path()
-        if data_path is None:
-            raise ValueError("No data path configured")
-    
-    # Construct path
-    derivatives_dir = os.path.join(data_path, 'derivatives', 'pyavs')
-    subject_dir = f"sub-{subject_id:02d}"
-    session_dir = f"ses-{session:02d}"
-    src_filename = f"sub-{subject_id:02d}_ses-{session:02d}_task-avs_{space_type}-src.fif"
-    src_path = os.path.join(derivatives_dir, subject_dir, session_dir, 'source', src_filename)
-    
-    if not os.path.exists(src_path):
-        raise FileNotFoundError(f"Source space not found: {src_path}")
-    
+
+    layout = get_layout(data_path)
+
+    candidates = []
+    if session is not None:
+        validate_session(session)
+        candidates.append(_derivatives_src_path(subject_id, session, space_type, data_path))
+    if space_type == 'surface':
+        candidates.append(layout.src(subject_id))
+
+    for src_path in candidates:
+        if src_path.exists():
+            break
+    else:
+        searched = "\n  ".join(str(p) for p in candidates)
+        raise FileNotFoundError(
+            f"Source space not found for subject {subject_id}. Searched:\n  {searched}")
+
     if verbose:
         logger.info(f"Loading source space from: {src_path}")
-    
-    src = mne.read_source_spaces(src_path, verbose=verbose)
-    
-    return src
+
+    return mne.read_source_spaces(str(src_path), verbose=verbose)

@@ -22,10 +22,10 @@ from scipy.stats import pearsonr
 from typing import List, Optional, Tuple, Dict, Any, Union
 import matplotlib.pyplot as plt
 
+from ..layout import get_layout, sub_sess_id
 from ..utils.validation import validate_subject_id, validate_session
 from ..utils.logging import get_logger
 from ..utils.config import get_data_path
-from ..utils.paths import get_subject_session_id, convert_session_to_letter
 from ..dataloader.loaders import load_eye_samples, load_eye_events
 from ..dataloader.meg import load_meg_session
 from .trigger.tools import (get_meg_trigger_dict, repair_meg_trigger_events,
@@ -1660,7 +1660,7 @@ def apply_ica_to_raws(raws_dict: Dict[Any, mne.io.Raw],
     """
     Apply ICA artifact removal to a dictionary of raw MEG data.
 
-    Applies precomputed ICA solutions (from the AVS-UTILS shared directory) or
+    Applies the precomputed ICA solution shipped in ``derivatives/pyavs`` or
     newly computed ICA to unconcatenated raw MEG blocks. Kept for backward
     compatibility with AVSComposer.apply_ica_to_blocks().
 
@@ -1673,11 +1673,15 @@ def apply_ica_to_raws(raws_dict: Dict[Any, mne.io.Raw],
     session : int
         Session number.
     use_precomputed : bool, optional
-        Whether to use precomputed ICA solutions (default: True).
+        Whether to use a precomputed ICA solution (default: True).
     ica_solutions_dir : str, optional
-        Path to directory containing precomputed ICA solutions.
+        Directory of precomputed ICA solutions in the legacy
+        ``{dir}/as01a/as01a-ica.fif`` layout, for solutions computed outside
+        the ``derivatives/pyavs`` tree. Only used if both this and
+        ``ica_exclusions_file`` are given; otherwise the shipped
+        ``derivatives/pyavs`` ICA solution is used.
     ica_exclusions_file : str, optional
-        Path to JSON file containing ICA component exclusions.
+        JSON file of component exclusions matching ``ica_solutions_dir``.
     compute_new_ica : bool, optional
         Whether to compute new ICA if precomputed not available (default: False).
     find_artifacts : bool, optional
@@ -1704,115 +1708,70 @@ def apply_ica_to_raws(raws_dict: Dict[Any, mne.io.Raw],
 
         _data_path = data_path or get_data_path()
 
-        # --- 1. BIDS derivatives ICA (primary) ---
         if _data_path:
-            bids_ica_path = os.path.join(
-                _data_path, 'derivatives', 'pyavs',
-                f"sub-{subject_id:02d}", f"ses-{session:02d}", 'meg',
-                f"sub-{subject_id:02d}_ses-{session:02d}_task-avs_ica.fif"
-            )
-            bids_excl_path = os.path.join(
-                _data_path, 'derivatives', 'pyavs',
-                f"sub-{subject_id:02d}", f"ses-{session:02d}", 'meg',
-                f"sub-{subject_id:02d}_ses-{session:02d}_task-avs_ica-exclusions.json"
-            )
+            layout = get_layout(_data_path)
+            bids_ica_path = layout.ica(subject_id, session)
+            bids_excl_path = layout.ica_exclusions(subject_id, session)
         else:
             bids_ica_path = None
             bids_excl_path = None
 
-        if bids_ica_path and os.path.exists(bids_ica_path):
-            try:
-                if verbose:
-                    logger.info(f"Loading ICA from BIDS derivatives: {bids_ica_path}")
-                ica = mne.preprocessing.read_ica(bids_ica_path, verbose=verbose)
+        if bids_ica_path and bids_ica_path.exists():
+            if verbose:
+                logger.info(f"Loading ICA from BIDS derivatives: {bids_ica_path}")
+            ica = mne.preprocessing.read_ica(bids_ica_path, verbose=verbose)
 
-                subject_key = f"as{subject_id:02d}"
-                session_key = str(session)
-                exclude_components = None
+            subject_key = f"as{subject_id:02d}"
+            session_key = str(session)
+            exclude_components = None
 
-                if bids_excl_path and os.path.exists(bids_excl_path):
-                    with open(bids_excl_path, 'r') as f:
-                        bids_data = json.load(f)
-                    if subject_key in bids_data and session_key in bids_data[subject_key]:
-                        exclude_components = bids_data[subject_key][session_key]
-                        if verbose:
-                            logger.info(
-                                f"Loaded exclusions from BIDS derivatives: {bids_excl_path}"
-                            )
-
-                if exclude_components is not None:
-                    ica.exclude = exclude_components
+            if bids_excl_path.exists():
+                with open(bids_excl_path, 'r') as f:
+                    bids_data = json.load(f)
+                if subject_key in bids_data and session_key in bids_data[subject_key]:
+                    exclude_components = bids_data[subject_key][session_key]
                     if verbose:
                         logger.info(
-                            f"Excluding {len(exclude_components)} ICA components: "
-                            f"{exclude_components}"
-                        )
-                else:
-                    if verbose:
-                        logger.warning(
-                            f"No BIDS exclusions found for "
-                            f"sub-{subject_id:02d} ses-{session:02d}; "
-                            f"using ica.exclude from .fif"
+                            f"Loaded exclusions from BIDS derivatives: {bids_excl_path}"
                         )
 
-                for block_id, raw in raws_dict.items():
-                    if verbose:
-                        logger.info(f"Applying BIDS derivatives ICA to block {block_id}")
-                    cleaned_raws[block_id] = apply_ica(raw, ica, verbose=verbose)
-
+            if exclude_components is not None:
+                ica.exclude = exclude_components
                 if verbose:
-                    logger.info("Successfully applied BIDS derivatives ICA to all blocks")
-
-                return cleaned_raws
-
-            except Exception as e:
+                    logger.info(
+                        f"Excluding {len(exclude_components)} ICA components: "
+                        f"{exclude_components}"
+                    )
+            else:
                 if verbose:
                     logger.warning(
-                        f"Failed to apply BIDS derivatives ICA ({e}); "
-                        f"falling back to legacy AVS-UTILS ICA"
+                        f"No BIDS exclusions found for "
+                        f"sub-{subject_id:02d} ses-{session:02d}; "
+                        f"using ica.exclude from .fif"
                     )
 
-        # --- 2. Legacy AVS-UTILS ICA (fallback) ---
-        if ica_solutions_dir is None or ica_exclusions_file is None:
-            shared_ica_dir = os.path.join(_data_path, 'AVS-UTILS', 'ica') if _data_path else None
+            for block_id, raw in raws_dict.items():
+                if verbose:
+                    logger.info(f"Applying BIDS derivatives ICA to block {block_id}")
+                cleaned_raws[block_id] = apply_ica(raw, ica, verbose=verbose)
 
-            if ica_solutions_dir is None:
-                if shared_ica_dir and os.path.exists(shared_ica_dir):
-                    ica_solutions_dir = os.path.join(shared_ica_dir, 'ica_solutions')
-                else:
-                    import pyavs
-                    package_dir = os.path.dirname(pyavs.__file__)
-                    ica_solutions_dir = os.path.join(
-                        package_dir, 'preprocessing', 'ica', 'ica_solutions'
-                    )
-
-            if ica_exclusions_file is None:
-                if shared_ica_dir and os.path.exists(shared_ica_dir):
-                    ica_exclusions_file = os.path.join(
-                        shared_ica_dir, 'ica_exclusions', 'ex_components.json'
-                    )
-                else:
-                    import pyavs
-                    package_dir = os.path.dirname(pyavs.__file__)
-                    ica_exclusions_file = os.path.join(
-                        package_dir, 'preprocessing', 'ica',
-                        'ica_exclusions', 'ex_components.json'
-                    )
-
-        subject_session_id = get_subject_session_id(subject_id, session, prefix='as')
-        ica_solution_path = os.path.join(
-            ica_solutions_dir,
-            subject_session_id,
-            f"{subject_session_id}-ica.fif"
-        )
-
-        try:
             if verbose:
-                logger.info(f"Loading legacy ICA from: {ica_solution_path}")
+                logger.info("Successfully applied BIDS derivatives ICA to all blocks")
 
-            ica = mne.preprocessing.read_ica(ica_solution_path, verbose=verbose)
+            return cleaned_raws
 
-            try:
+        # --- User-supplied ICA solutions directory (optional, explicit only) ---
+        if ica_solutions_dir is not None and ica_exclusions_file is not None:
+            subject_session_id = sub_sess_id(subject_id, session)
+            ica_solution_path = os.path.join(
+                ica_solutions_dir, subject_session_id, f"{subject_session_id}-ica.fif"
+            )
+
+            if os.path.exists(ica_solution_path):
+                if verbose:
+                    logger.info(f"Loading ICA from user-supplied directory: {ica_solution_path}")
+                ica = mne.preprocessing.read_ica(ica_solution_path, verbose=verbose)
+
                 subject_key = f"as{subject_id:02d}"
                 session_key = str(session)
                 exclude_components = None
@@ -1837,34 +1796,27 @@ def apply_ica_to_raws(raws_dict: Dict[Any, mne.io.Raw],
                         )
                 else:
                     if verbose:
-                        logger.warning(
-                            f"No exclusions found for {subject_key} session {session}"
-                        )
+                        logger.warning(f"No exclusions found for {subject_key} session {session}")
 
-            except Exception as e:
-                if verbose:
-                    logger.warning(f"Could not load legacy ICA exclusions: {e}")
+                for block_id, raw in raws_dict.items():
+                    if verbose:
+                        logger.info(f"Applying user-supplied ICA to block {block_id}")
+                    cleaned_raws[block_id] = apply_ica(raw, ica, verbose=verbose)
 
-            for block_id, raw in raws_dict.items():
                 if verbose:
-                    logger.info(f"Applying legacy ICA to block {block_id}")
-                cleaned_raws[block_id] = apply_ica(raw, ica, verbose=verbose)
+                    logger.info("Successfully applied user-supplied ICA to all blocks")
+
+                return cleaned_raws
 
             if verbose:
-                logger.info("Successfully applied legacy ICA to all blocks")
+                logger.warning(f"User-supplied ICA solution not found: {ica_solution_path}")
 
-            return cleaned_raws
-
-        except (FileNotFoundError, ValueError) as e:
+        if not compute_new_ica:
             if verbose:
-                logger.error(f"Error loading legacy ICA: {e}")
-
-            if not compute_new_ica:
-                if verbose:
-                    logger.info(
-                        "compute_new_ica=False, returning original data without ICA"
-                    )
-                return raws_dict
+                logger.info(
+                    "No precomputed ICA found, returning original data without ICA"
+                )
+            return raws_dict
 
     if compute_new_ica or not use_precomputed:
         if verbose:

@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 
 from ..dataloader.meg import load_meg_raw, load_meg_preprocessed, load_and_preprocess_meg_run
 from ..dataloader.eye import load_and_enrich_eye_events, add_fixation_sequence_position, add_cross_event_information
-from ..utils.config import get_data_path
+from ..layout import get_layout, sub_sess_id
 from ..utils.paths import get_subject_session_id, get_max_blocks
 from ..utils.validation import validate_subject_id, validate_session
 from ..utils.logging import get_logger
@@ -132,12 +132,9 @@ class AVSComposer:
         self.session = chr(ord('a') + session_num - 1)  # Convert to session letter (1->a, 2->b, etc.)
         
         # Set up data directories
-        if data_path is None:
-            data_path = get_data_path()
-            if data_path is None:
-                raise ValueError("No data path configured. Use set_data_path() or provide data_path parameter")
-        
-        self.data_path = data_path
+        self.layout = get_layout(data_path)
+        self.data_path = str(self.layout.root)
+        data_path = self.data_path
         self.server = server
         self.et_path = et_path if et_path is not None else data_path
         self.output_path = output_path if output_path is not None else data_path
@@ -151,17 +148,14 @@ class AVSComposer:
         # Set up other parameters
         self.stim_channel = stim_channel
         self.verbose = verbose
-        self.sub_sess_id = 'as' + str(self.subject).zfill(2) + self.session
-        self.session_dir = os.path.join(self.data_path, 'rawdir', self.sub_sess_id)
-        
-        # Use BIDS derivatives directory for preprocessed data  
-        self.derivatives_path = os.path.join(self.data_path, 'derivatives', 'pyavs')
-        self.prepro_path = os.path.join(self.derivatives_path,'preprocessed' , f'sub-{self.subject:02d}', f'ses-{self.session_num:02d}', 'meg')
-        
-        # Ensure derivatives directory exists
-        os.makedirs(self.prepro_path, exist_ok=True)
-        
-        self.subject_dir = os.path.join(self.data_path, 'rawdir', 'as' + str(self.subject).zfill(2))
+        self.sub_sess_id = sub_sess_id(self.subject, self.session_num)
+        self.session_dir = str(self.layout.meg_dir(self.subject, self.session_num))
+
+        # Derivatives directory for preprocessed (Maxwell-filtered) data
+        self.derivatives_path = str(self.layout.derivatives_root)
+        self.prepro_path = str(self.layout.deriv_meg_dir(self.subject, self.session_num))
+
+        self.subject_dir = str(self.layout.subject_dir(self.subject))
         self.write_output = write_output
         self.preprocessed = preprocessed
         self.recompute_prepro = recompute_prepro
@@ -226,19 +220,17 @@ class AVSComposer:
         if block in self.empty_room_recording_names:  # d: danach # b: vorher
             empty_room_recording = True
             if self.preprocessed:
-                # BIDS-compliant filename for empty room in derivatives with task-noise_meg
-                meg_filename = f"sub-{self.subject:02d}_ses-{self.session_num:02d}_task-noise_recording-{block}_raw-sss.fif"
-                raw_fname = os.path.join(self.prepro_path, meg_filename)
+                raw_fname = str(self.layout.meg_sss_empty_room(
+                    self.subject, self.session_num, block))
             else:
-                raw_fname = os.path.join(self.session_dir, self.sub_sess_id + block + ".fif")
+                raw_fname = str(self.layout.meg_empty_room(
+                    self.subject, self.session_num, block))
         else:
             if self.preprocessed:
-                # BIDS-compliant filename for regular blocks in derivatives
-                meg_filename = f"sub-{self.subject:02d}_ses-{self.session_num:02d}_task-avs_run-{block:02d}_raw-sss.fif"
-                raw_fname = os.path.join(self.prepro_path, meg_filename)
+                raw_fname = str(self.layout.meg_sss(self.subject, self.session_num, block))
             else:
-                raw_fname = os.path.join(self.session_dir, self.sub_sess_id + str(block).zfill(2) + ".fif")
-        
+                raw_fname = str(self.layout.meg_raw(self.subject, self.session_num, block))
+
         logger.debug(f"Checking for data in: {raw_fname}")
 
         if os.path.exists(raw_fname) and not self.recompute_prepro:
@@ -273,7 +265,8 @@ class AVSComposer:
                             return block, raw_for_recompute
                         else:
                             # For empty room recordings, load raw data
-                            raw_fname = os.path.join(self.session_dir, self.sub_sess_id + block + ".fif")
+                            raw_fname = str(self.layout.meg_empty_room(
+                                self.subject, self.session_num, block))
                             logger.info(f"Loading empty room recording '{block}' from: {raw_fname}")
                             if not os.path.isfile(raw_fname):
                                 logger.error(f'Empty room recording file not found: {raw_fname}')
@@ -294,12 +287,14 @@ class AVSComposer:
                         try:
                             from .meg import preprocess_meg_block
                             # Prepare empty room recording properly if needed
-                            ref_filename = f"sub-{self.subject:02d}_ses-{self.session_num:02d}_task-avs_run-01_raw-sss.fif"
-                            raw_reference_fname = os.path.join(self.prepro_path, ref_filename)
+                            raw_reference_path = self.layout.meg_sss(
+                                self.subject, self.session_num, 1)
+                            raw_reference_fname = str(raw_reference_path)
                             logger.debug(f"Looking for reference file: {raw_reference_fname}")
-                            
-                            if os.path.isfile(raw_reference_fname):
-                                logger.info(f"Using reference file for empty room preparation: {ref_filename}")
+
+                            if raw_reference_path.is_file():
+                                logger.info(f"Using reference file for empty room preparation: "
+                                            f"{raw_reference_path.name}")
                                 raw_reference = mne.io.read_raw_fif(raw_reference_fname, preload=preload, verbose=self.verbose)
                                 from .meg import prepare_empty_room_recording
                                 logger.info(f"Preparing empty room recording '{block}' using reference data")
@@ -332,9 +327,10 @@ class AVSComposer:
                             logger.info(f"Successfully preprocessed empty room recording '{block}'")
                             
                             # Save the preprocessed empty room data with BIDS-compliant task-noise naming
-                            meg_filename = f"sub-{self.subject:02d}_ses-{self.session_num:02d}_task-noise_recording-{block}_raw-sss.fif"
-                            output_path = os.path.join(self.prepro_path, meg_filename)
-                            raw.save(output_path, overwrite=True)
+                            output_path = self.layout.meg_sss_empty_room(
+                                self.subject, self.session_num, block)
+                            output_path.parent.mkdir(parents=True, exist_ok=True)
+                            raw.save(str(output_path), overwrite=True)
                             logger.info(f"Saved preprocessed empty room recording to: {output_path}")
                         except Exception as e:
                             logger.error(f"Error processing empty room recording '{block}': {str(e)}")
@@ -933,16 +929,14 @@ class AVSComposer:
             self.et_events = self.et_events[self.et_events["fix_sequence_from_last"] != 0]
 
         # Add object-fixation labels (was accepted but silently unused before --
-        # get_object_labels had no effect anywhere in this function). Requires
-        # AVS-UTILS/avs_scene_annotations/cocostuff under data_path (same
-        # convention as scripts/rsa_analysis/compute_rsa.py). Runs on the
-        # combined fixation+saccade events dataframe before epoching, so
+        # get_object_labels had no effect anywhere in this function). Reads the
+        # transformed COCO-Stuff annotations shipped at stimuli/annotations/cocostuff.
+        # Runs on the combined fixation+saccade events dataframe before epoching, so
         # add_et_metadata_to_epochs's "copy every et_events column" default
         # picks up the resulting object_label/object_id columns for free.
         if get_object_labels:
             from ..scenes.objects import get_fixated_objects
-            transformed_annotations_dir = os.path.join(
-                self.data_path, 'AVS-UTILS', 'avs_scene_annotations', 'cocostuff')
+            transformed_annotations_dir = str(self.layout.annotations_dir('cocostuff'))
             if not os.path.exists(transformed_annotations_dir):
                 raise FileNotFoundError(
                     f"Cannot find transformed annotations at {transformed_annotations_dir}")

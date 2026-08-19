@@ -6,7 +6,7 @@ This script transforms MSCOCO object annotations to match the processed scene fo
 used in the AVS experiment. It applies the same center-crop and resize transformations
 that were applied to scene images by scene_resizer.py.
 
-The transformed annotations are stored in DATA_DIR/AVS-UTILS/avs_scene_annotations/coco_objects
+The transformed annotations are stored in DATA_DIR/stimuli/annotations/coco_objects
 for use by the FixationObjectChecker.
 
 Usage:
@@ -474,10 +474,10 @@ class AVSSceneAnnotationTransformer:
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(description='Transform MSCOCO annotations for AVS processed scenes')
-    parser.add_argument('--avs-scenes-dir', 
-                       help='Directory containing processed AVS scene images (e.g., DATA_DIR/AVS-UTILS/avs_scenes)')
+    parser.add_argument('--avs-scenes-dir',
+                       help='Directory containing processed AVS scene images (e.g., DATA_DIR/stimuli/images)')
     parser.add_argument('--output-dir',
-                       help='Output directory for transformed annotations (e.g., DATA_DIR/AVS-UTILS/avs_scene_annotations/coco_objects)')
+                       help='Output directory for transformed annotations (e.g., DATA_DIR/stimuli/annotations/coco_objects)')
     parser.add_argument('--mscoco-annotations-dir',
                        help='Directory containing MSCOCO annotation files')
     parser.add_argument('--mscoco-images-dir',

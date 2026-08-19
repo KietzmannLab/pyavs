@@ -9,15 +9,15 @@ Author: P. Sulewski (psulewski@uos.de)
 
 import pandas as pd
 import numpy as np
-import os
 from typing import Optional, Dict, List, Tuple
 import warnings
 from ast import literal_eval
 from pandas.api.types import is_list_like
 
+from ..layout import get_layout
+from ..utils.tables import read_table
 from ..utils.logging import get_logger
 from ..utils.validation import validate_subject_id, validate_session
-from ..utils.paths import get_subject_session_id
 
 logger = get_logger('preprocessing.samples')
 
@@ -193,41 +193,25 @@ def attach_scene_ids_to_samples(samples: pd.DataFrame,
 
 
 def _load_avs_files(data_path: str, subject_id: int, session: int, verbose: bool = True) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Load messages and experimental log files using pyAVS naming conventions."""
-    
-    # Get subject-session identifier
-    sub_sess_id_results_dir = "as{:02d}_{:02d}".format(subject_id, session)
-    session_dir = os.path.join(data_path, 'results', sub_sess_id_results_dir)
-    
-    # Messages file path
-    msgs_fname = os.path.join(
-        session_dir, 'preprocessed', 
-        f"as_s{subject_id}_el_msgs.csv"
-    )
-    
-    # Experimental log file path - phase 3, start_block 0
-    exp_log_fname = os.path.join(
-        session_dir,
-        f"as_exp_data_{subject_id}_{session}_3_0.csv"
-    )
-    
+    """Load messages and experimental log files using pyAVS conventions."""
+
+    layout = get_layout(data_path)
+    msgs_fname = layout.eye_preprocessed(subject_id, session, 'msgs')
+    exp_log_fname = layout.explog(subject_id, session)
+
     if verbose:
         logger.debug(f"Loading messages from: {msgs_fname}")
         logger.debug(f"Loading exp log from: {exp_log_fname}")
-    
+
     # Check if files exist
-    if not os.path.exists(msgs_fname):
+    if not msgs_fname.exists():
         raise FileNotFoundError(f"Messages file not found: {msgs_fname}")
-    if not os.path.exists(exp_log_fname):
+    if not exp_log_fname.exists():
         raise FileNotFoundError(f"Experimental log not found: {exp_log_fname}")
-    
-    # Load files
-    try:
-        msgs = pd.read_csv(msgs_fname, index_col=0)
-        explog = pd.read_csv(exp_log_fname)
-    except Exception as e:
-        raise IOError(f"Error reading data files: {e}")
-    
+
+    msgs = read_table(msgs_fname, index_col=0)
+    explog = read_table(exp_log_fname)
+
     # Validate required columns in messages
     required_msg_cols = ['msg_time', 'SCENEID_time', 'ENDTRIALID_time', 'SCENEID', 'TYPE']
     missing_cols = [col for col in required_msg_cols if col not in msgs.columns]
@@ -441,37 +425,21 @@ def load_samples_with_scenes(subject_id: int, session: int,
     if data_path is None:
         from ..utils.config import get_data_path
         data_path = get_data_path()
-        # exchange rawdir with "results" in the path
-       
         if data_path is None:
             raise ValueError("No data path configured. Use pyavs.set_data_path() or provide data_path parameter")
 
     # Auto-detect samples file if not provided
     if samples_file is None:
-        sub_sess_id_results_dir = "as{:02d}_{:02d}".format(subject_id, session)
-        session_dir = os.path.join(data_path, 'results', sub_sess_id_results_dir)
-        #as_s5_el_cleaned_samples.csv  as_s5_el_events.csv  as_s5_el_msgs.csv  as_s5_el_samples.csv
-        # (avs) [psulewski@klab-2 preprocessed]$ pwd
-        # /share/klab/datasets/avs/results/as05_03/preprocessed
-        samples_file = os.path.join(
-            session_dir, 'preprocessed', 
-            f"as_s{subject_id}_el_samples.csv")
-        
-        
-        
-        if samples_file is None:
-            raise FileNotFoundError(f"Could not find samples file for subject {subject_id}, session {session}. "
-                                  f"Searched in: {session_dir}/preprocessed/")
-    
+        samples_file = get_layout(data_path).eye_preprocessed(subject_id, session, 'samples')
+        if not samples_file.exists():
+            raise FileNotFoundError(f"Could not find samples file for subject {subject_id}, session {session}: "
+                                  f"{samples_file}")
+
     if verbose:
         logger.info(f"Loading samples from: {samples_file}")
-    
-    # Load samples
-    try:
-        samples = pd.read_csv(samples_file)
-    except Exception as e:
-        raise IOError(f"Error loading samples file {samples_file}: {e}")
-    
+
+    samples = read_table(samples_file)
+
     if verbose:
         logger.info(f"Loaded {len(samples)} samples")
     

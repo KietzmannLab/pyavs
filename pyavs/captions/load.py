@@ -8,7 +8,8 @@ import os
 import pandas as pd
 import ast
 from typing import List, Optional, Union, Dict
-from ..utils.config import get_data_path
+from ..layout import get_layout
+from ..utils.tables import read_table
 from ..utils.validation import validate_subject_id, validate_session
 from ..utils.logging import get_logger
 
@@ -152,18 +153,24 @@ def load_coco_captions_for_scenes(scene_ids: List[int], coco_annotations_paths: 
     return captions_dict
 
 
-def find_coco_annotations(data_path: str) -> List[str]:
+def find_coco_annotations(search_root: str) -> List[str]:
     """
-    Try to find COCO annotations files in common locations.
-    
+    Try to find MSCOCO annotation files under ``search_root``.
+
     Since AVS scenes come from both COCO train and val sets, we need to find both.
     This function searches for and returns all available annotation files.
-    
+
+    Note that the AVS release does **not** ship the raw MSCOCO annotation
+    archives — only per-scene transformed annotations under
+    ``stimuli/annotations/``. Download ``annotations_trainval2017.zip`` from
+    https://cocodataset.org/#download and point ``search_root`` (or
+    ``load_captions(coco_annotations_path=...)``) at it to use the COCO API.
+
     Parameters
     ----------
-    data_path : str
-        Base data path to search in
-        
+    search_root : str
+        Directory to search in.
+
     Returns
     -------
     list of str
@@ -176,18 +183,14 @@ def find_coco_annotations(data_path: str) -> List[str]:
         'instances_val2017.json',
         'instances_train2017.json'
     ]
-    
-    # Search in data path and common subdirectories
+
+    # Search the given directory and the usual COCO subdirectory names
     search_paths = [
-        data_path,
-        os.path.join(data_path, 'annotations'),
-        os.path.join(data_path, 'coco'),
-        os.path.join(data_path, 'input'),
-        os.path.join(data_path, 'input', 'coco'),
-        os.path.join(data_path, 'input', 'annotations'),
-        os.path.dirname(data_path)  # Parent directory
+        search_root,
+        os.path.join(search_root, 'annotations'),
+        os.path.join(search_root, 'coco'),
     ]
-    
+
     found_files = []
     
     for search_path in search_paths:
@@ -237,11 +240,8 @@ def load_captions(subjects: Union[int, List[int]],
         DataFrame with columns: subject, session, trial, block, scene_ID, 
         transcribed_caption, mscoco_captions, caption_task
     """
-    if data_path is None:
-        data_path = get_data_path()
-        if data_path is None:
-            raise ValueError("No data path configured")
-    
+    layout = get_layout(data_path)
+
     # Ensure subjects and sessions are lists
     if isinstance(subjects, int):
         subjects = [subjects]
@@ -260,18 +260,16 @@ def load_captions(subjects: Union[int, List[int]],
         for session in sessions:
             logger.info(f"Loading captions for subject {subject}, session {session}")
             
-            # Construct file path
-            sub_sess_dir = f"as{subject:02d}_{session:02d}"
-            log_filename = f"explog_transcribed_corrected_{subject:02d}_{session:02d}.csv"
-            explog_path = os.path.join(data_path, "results", sub_sess_dir, log_filename)
-            
-            if not os.path.exists(explog_path):
+            explog_path = layout.explog_transcribed(subject, session)
+            log_filename = explog_path.name
+
+            if not explog_path.exists():
                 logger.warning(f"Explog file not found: {explog_path}")
                 continue
-                
+
             try:
                 # Load explog file
-                explog = pd.read_csv(explog_path)
+                explog = read_table(explog_path)
                 logger.info(f"Loaded {len(explog)} rows from {log_filename}")
         
                 # Extract core identifier and caption columns
@@ -341,7 +339,7 @@ def load_captions(subjects: Union[int, List[int]],
         logger.info("Attempting to load COCO captions via API...")
         # Find COCO annotations file if not provided
         if coco_annotations_path is None:
-            coco_annotations_path = find_coco_annotations(data_path)
+            coco_annotations_path = find_coco_annotations(str(layout.root))
         elif isinstance(coco_annotations_path, str):
             # If a directory was passed, search within it for annotation JSON files
             if os.path.isdir(coco_annotations_path):
@@ -446,29 +444,16 @@ def inspect_explog_columns(subject: int, session: int, data_path: Optional[str] 
     list of str
         Column names in the explog file
     """
-    if data_path is None:
-        data_path = get_data_path()
-        if data_path is None:
-            raise ValueError("No data path configured")
-    
     validate_subject_id(subject)
     validate_session(session)
-    
-    # Construct file path
-    sub_sess_dir = f"as{subject:02d}_{session:02d}"
-    log_filename = f"explog_transcribed_corrected_{subject:02d}_{session:02d}.csv"
-    explog_path = os.path.join(data_path, sub_sess_dir, log_filename)
-    
-    if not os.path.exists(explog_path):
+
+    explog_path = get_layout(data_path).explog_transcribed(subject, session)
+
+    if not explog_path.exists():
         raise FileNotFoundError(f"Explog file not found: {explog_path}")
-    
-    try:
-        explog = pd.read_csv(explog_path, nrows=1)  # Just read header
-        columns = list(explog.columns)
-        logger.info(f"Found {len(columns)} columns in {log_filename}")
-        for i, col in enumerate(columns):
-            logger.info(f"  {i+1:2d}. {col}")
-        return columns
-    except Exception as e:
-        logger.error(f"Error reading {explog_path}: {e}")
-        raise
+
+    columns = list(read_table(explog_path).columns)
+    logger.info(f"Found {len(columns)} columns in {explog_path.name}")
+    for i, col in enumerate(columns):
+        logger.info(f"  {i+1:2d}. {col}")
+    return columns

@@ -5,12 +5,11 @@ This module provides functions for managing data paths and package configuration
 
 Historically this module kept its own separate global config dict, independent of
 the unified ``pyavs.config`` (``PyAVSConfig``/``ConfigManager``) system. That meant
-``pyavs.set_data_path()`` (which writes to the unified system) and the
-``get_data_path()``/``get_input_paths()`` used internally throughout the core
-library (which read from this module's old separate dict) never agreed with each
-other unless callers passed ``data_path=`` explicitly everywhere. The functions
-below now proxy to the unified global config so both entry points read/write the
-same underlying store.
+``pyavs.set_data_path()`` (which writes to the unified system) and
+``get_data_path()`` used internally throughout the core library (which read from
+this module's old separate dict) never agreed with each other unless callers
+passed ``data_path=`` explicitly everywhere. The functions below now proxy to the
+unified global config so both entry points read/write the same underlying store.
 """
 
 import os

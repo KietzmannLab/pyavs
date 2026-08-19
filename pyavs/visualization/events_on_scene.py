@@ -21,7 +21,7 @@ from tqdm import tqdm
 # Import pyavs functions
 from ..dataloader.loaders import load_eye_events, load_experiment_log
 from ..dataloader.eye import load_and_enrich_eye_events
-from ..utils.config import get_data_path
+from ..layout import get_layout
 from ..utils.logging import get_logger
 from ..config.config import PyAVSConfig
 
@@ -59,13 +59,10 @@ class EyeTrackingPlotter:
         self.sessions = sessions
         
         # Set data path
-        if data_path is None:
-            data_path = self.config.data_path or get_data_path()
-            if data_path is None:
-                raise ValueError("No data path configured. Use pyavs.set_data_path() or provide data_path parameter")
-        
-        self.data_path = Path(data_path)
-        
+        self.layout = get_layout(data_path or self.config.data_path)
+        self.data_path = self.layout.root
+        data_path = str(self.data_path)
+
         # Load eye tracking data using pyavs
         logger.info(f"Loading eye tracking data for subjects {subjects}, sessions {sessions}...")
         self.explog, self.df = load_and_enrich_eye_events(
@@ -88,26 +85,11 @@ class EyeTrackingPlotter:
     
     def load_scene(self, scene_id):
         """Load and scale scene image."""
-        # Try different possible scene directories
-        possible_paths = [
-            self.data_path / 'scenes' / f"{int(scene_id):012d}_MEG_size.jpg",
-            self.data_path / 'input' / 'avs_scenes' / f"{int(scene_id):012d}_MEG_size.jpg",
-        ]
-        configured_data_path = get_data_path()
-        if configured_data_path is not None:
-            possible_paths.append(
-                Path(configured_data_path) / 'input' / 'avs_scenes' / f"{int(scene_id):012d}_MEG_size.jpg"
-            )
-        
-        scene_file = None
-        for path in possible_paths:
-            if path.exists():
-                scene_file = path
-                break
-        
-        if scene_file is None:
-            raise FileNotFoundError(f"Scene image not found for scene {scene_id}. Tried: {possible_paths}")
-        
+        scene_file = self.layout.scene_image(scene_id)
+
+        if not scene_file.exists():
+            raise FileNotFoundError(f"Scene image not found for scene {scene_id}: {scene_file}")
+
         img = Image.open(scene_file)
         
         # Scale using config parameters
@@ -491,7 +473,8 @@ def main():
                        default='gaussian', help='Heatmap generation method')
     args = parser.parse_args()
     
-    plotter = EyeTrackingPlotter(args.subjects, args.sessions, args.data_path)
+    plotter = EyeTrackingPlotter(args.subjects, args.sessions, PyAVSConfig(),
+                                 data_path=args.data_path)
     
     if args.scene:
         if args.heatmap:

@@ -148,6 +148,35 @@ class DerivativesManager:
             path.mkdir(parents=True, exist_ok=True)
         return path
     
+    def get_noise_covariance_path(self, subject_id: int,
+                                  create: bool = False) -> Path:
+        """
+        Get the path for noise covariance matrices.
+
+        Structure: derivatives/pyavs/sub-XX/source/noise_covariance/
+
+        Noise covariance is estimated from empty-room recordings pooled across
+        sessions, so it lives at the subject level rather than under a session.
+
+        Parameters
+        ----------
+        subject_id : int
+            Subject ID
+        create : bool
+            Whether to create the directory (default: False)
+
+        Returns
+        -------
+        Path
+            Noise covariance directory
+        """
+        validate_subject_id(subject_id)
+
+        path = self.layout.deriv_dir(subject_id, datatype='source') / 'noise_covariance'
+        if create:
+            path.mkdir(parents=True, exist_ok=True)
+        return path
+
     def get_filters_path(self, parameter_signature: str,
                          create: bool = False) -> Path:
         """

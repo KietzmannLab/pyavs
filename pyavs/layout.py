@@ -635,14 +635,7 @@ class Layout:
         Path
             Path to the ``fsaverage`` directory.
         """
-        fsaverage_dir = self.subjects_dir / 'fsaverage'
-        if fsaverage_dir.exists():
-            return fsaverage_dir
-
-        import mne
-        self.subjects_dir.mkdir(parents=True, exist_ok=True)
-        return Path(mne.datasets.fetch_fsaverage(
-            subjects_dir=str(self.subjects_dir), verbose=verbose))
+        return ensure_fsaverage(self.subjects_dir, verbose=verbose)
 
     # === stimuli ============================================================
 
@@ -715,6 +708,37 @@ class Layout:
     def manifest(self) -> Path:
         """Release manifest, ``manifest.tsv``."""
         return self.root / 'manifest.tsv'
+
+
+def ensure_fsaverage(subjects_dir: Union[str, Path],
+                     verbose: Optional[bool] = None) -> Path:
+    """Make sure ``fsaverage`` exists in ``subjects_dir``, fetching it if not.
+
+    The release ships ``sub-01``…``sub-05`` but no template subject, while the
+    shipped morph maps assume ``fsaverage`` is present in ``SUBJECTS_DIR``. MNE
+    ships its own copy; this downloads it on first use.
+
+    Parameters
+    ----------
+    subjects_dir : str or Path
+        FreeSurfer ``SUBJECTS_DIR``.
+    verbose : bool, optional
+        Passed through to MNE.
+
+    Returns
+    -------
+    Path
+        Path to the ``fsaverage`` directory.
+    """
+    subjects_dir = Path(subjects_dir)
+    fsaverage_dir = subjects_dir / 'fsaverage'
+    if fsaverage_dir.exists():
+        return fsaverage_dir
+
+    import mne
+    subjects_dir.mkdir(parents=True, exist_ok=True)
+    return Path(mne.datasets.fetch_fsaverage(
+        subjects_dir=str(subjects_dir), verbose=verbose))
 
 
 def get_layout(data_path: Optional[Union[str, Path]] = None,

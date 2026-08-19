@@ -15,9 +15,10 @@ import hashlib
 from typing import List, Optional, Tuple, Dict, Any, Union
 from sklearn.preprocessing import StandardScaler
 
-from ..utils.config import get_data_path
+from ..layout import get_layout
 from ..utils.validation import validate_subject_id, validate_session
 from ..utils.paths import get_default_subjects_dir
+from ..utils.derivatives import get_derivatives_manager
 from ..utils.logging import get_logger
 from .forward import load_forward_model
 from ..io.write import save_source_data, save_population_codes_h5
@@ -655,130 +656,6 @@ def _save_parameter_metadata(metadata_file: str, metadata: Dict[str, Any]) -> No
         json.dump(existing_metadata, f, indent=2, default=str)
 
 
-def find_population_codes_files(subject_id: int,
-                               session: int,
-                               data_path: Optional[str] = None,
-                               event_type: Optional[str] = None,
-                               sampling_rate: Optional[int] = None,
-                               **param_filters) -> List[Dict[str, Any]]:
-    """
-    Find population codes files for a subject with optional parameter filtering.
-    
-    This function searches the intelligent storage structure to find all
-    population codes files for a given subject, optionally filtered by
-    processing parameters.
-    
-    Parameters
-    ----------
-    subject_id : int
-        Subject ID to search for
-    session : int
-        Session number to search for
-    data_path : str, optional
-        Path to data directory. If None, uses configured data path
-    event_type : str, optional
-        Filter by event type (e.g., 'saccade', 'fixation')
-    sampling_rate : int, optional
-        Filter by sampling rate
-    **param_filters
-        Additional parameter filters
-        
-    Returns
-    -------
-    list of dict
-        List of dictionaries containing file paths and metadata for matching files
-        
-    Examples
-    --------
-    Find all saccade population codes for subject 1, session 1::
-
-        files = find_population_codes_files(1, 1, event_type='saccade')
-
-    Find 500Hz population codes with specific filter parameters::
-
-        files = find_population_codes_files(1, 1, sampling_rate=500,
-                                          filter_params={'l_freq': 0.2, 'h_freq': 200.0})
-    """
-    if data_path is None:
-        data_path = get_data_path()
-        if data_path is None:
-            raise ValueError("No data path configured")
-    
-    validate_subject_id(subject_id)
-    validate_session(session)
-    
-    # Search pattern
-    pop_codes_dir = os.path.join(data_path, 'derivatives', 'pyavs', 'population_codes')
-    
-    if not os.path.exists(pop_codes_dir):
-        return []
-    
-    # Subject identifier for filename matching
-    sub_sess_id = f"as{subject_id:02d}{'abcde'[session-1] if session <= 5 else session}"
-    
-    matching_files = []
-    
-    # Search through parameter directories
-    for param_dir in os.listdir(pop_codes_dir):
-        param_path = os.path.join(pop_codes_dir, param_dir)
-        if not os.path.isdir(param_path):
-            continue
-        
-        # Load parameter metadata
-        metadata_file = os.path.join(param_path, 'parameters.json')
-        if not os.path.exists(metadata_file):
-            continue
-        
-        try:
-            with open(metadata_file, 'r') as f:
-                param_metadata = json.load(f)
-        except json.JSONDecodeError:
-            continue
-        
-        # Apply parameter filters
-        if event_type is not None and param_metadata.get('event_type') != event_type:
-            continue
-        if sampling_rate is not None and param_metadata.get('sampling_rate') != sampling_rate:
-            continue
-        
-        # Apply additional parameter filters
-        skip_this_dir = False
-        for filter_key, filter_value in param_filters.items():
-            if filter_key in param_metadata:
-                if param_metadata[filter_key] != filter_value:
-                    skip_this_dir = True
-                    break
-        if skip_this_dir:
-            continue
-        
-        # Search for subject files in this parameter directory
-        for subject_group_dir in os.listdir(param_path):
-            if subject_group_dir == 'parameters.json':
-                continue
-            
-            subject_group_path = os.path.join(param_path, subject_group_dir)
-            if not os.path.isdir(subject_group_path):
-                continue
-            
-            # Look for files matching our subject
-            for filename in os.listdir(subject_group_path):
-                if filename.startswith(sub_sess_id) and filename.endswith('.h5'):
-                    file_path = os.path.join(subject_group_path, filename)
-                    
-                    matching_files.append({
-                        'file_path': file_path,
-                        'filename': filename,
-                        'parameter_signature': param_dir,
-                        'parameter_metadata': param_metadata,
-                        'subject_group': subject_group_dir
-                    })
-    
-    # Sort by creation time (most recent first)
-    matching_files.sort(key=lambda x: x['parameter_metadata'].get('created', ''), reverse=True)
-    
-    return matching_files
-
-
 def compute_empty_room_covariance(data_path: str,
                                  subject_id: int,
                                  sessions: List[int],
@@ -809,30 +686,24 @@ def compute_empty_room_covariance(data_path: str,
     if verbose:
         logger.info(f"Computing empty room covariance for subject {subject_id}")
     
-    # Find empty room files from preprocessed derivatives directory
+    # Find Maxwell-filtered empty room files in the derivatives tree
+    layout = get_layout(data_path)
     empty_room_files = []
-    empty_room_recording_names = ['d', 'b']  # From composer.py
-    
+    empty_room_recording_names = ['d', 'b']  # 'danach'/'bevor' — after/before the session
+
     for session in sessions:
         validate_session(session)
-        
-        # Construct preprocessed empty room file paths
-        prepro_dir = os.path.join(data_path, 'derivatives', 'pyavs', 'preprocessed', 
-                                 f'sub-{subject_id:02d}', f'ses-{session:02d}', 'meg')
-        
-        if os.path.exists(prepro_dir):
-            for block in empty_room_recording_names:
-                empty_room_file = f"sub-{subject_id:02d}_ses-{session:02d}_task-noise_recording-{block}_raw-sss.fif"
-                empty_room_path = os.path.join(prepro_dir, empty_room_file)
-                
-                if os.path.exists(empty_room_path):
-                    empty_room_files.append(empty_room_path)
-                    if verbose:
-                        logger.info(f"Found empty room file: {empty_room_file}")
-                else:
-                    if verbose:
-                        logger.warning(f"Empty room file not found: {empty_room_path}")
-    
+
+        for recording in empty_room_recording_names:
+            empty_room_path = layout.meg_sss_empty_room(subject_id, session, recording)
+
+            if empty_room_path.exists():
+                empty_room_files.append(str(empty_room_path))
+                if verbose:
+                    logger.info(f"Found empty room file: {empty_room_path.name}")
+            elif verbose:
+                logger.warning(f"Empty room file not found: {empty_room_path}")
+
     if not empty_room_files:
         raise FileNotFoundError(f"No empty room files found for subject {subject_id}")
     
@@ -863,67 +734,13 @@ def compute_empty_room_covariance(data_path: str,
     )
     
     # Save covariance
-    noise_cov_dir = os.path.join(data_path, 'derivatives', 'pyavs', 
-                                f'sub-{subject_id:02d}', 'source_reconstruction', 
-                                'noise_covariance')
-    os.makedirs(noise_cov_dir, exist_ok=True)
-    
-    noise_cov_file = os.path.join(noise_cov_dir, 
-                                 f'sub-{subject_id:02d}_task-avs_desc-emptyroom_cov.fif')
-    
-    mne.write_cov(noise_cov_file, noise_cov, verbose=verbose)
-    
+    noise_cov_dir = get_derivatives_manager(data_path).get_noise_covariance_path(
+        subject_id, create=True)
+    noise_cov_file = noise_cov_dir / f'sub-{subject_id:02d}_task-avs_desc-emptyroom_cov.fif'
+
+    mne.write_cov(str(noise_cov_file), noise_cov, verbose=verbose)
+
     if verbose:
         logger.info(f"Saved noise covariance: {noise_cov_file}")
-    
-    return noise_cov, noise_cov_file
 
-
-def list_available_parameter_sets(data_path: Optional[str] = None) -> List[Dict[str, Any]]:
-    """
-    List all available parameter sets in the population codes storage.
-    
-    Parameters
-    ----------
-    data_path : str, optional
-        Path to data directory. If None, uses configured data path
-        
-    Returns
-    -------
-    list of dict
-        List of parameter sets with their metadata
-    """
-    if data_path is None:
-        data_path = get_data_path()
-        if data_path is None:
-            raise ValueError("No data path configured")
-    
-    pop_codes_dir = os.path.join(data_path, 'derivatives', 'pyavs', 'population_codes')
-    
-    if not os.path.exists(pop_codes_dir):
-        return []
-    
-    parameter_sets = []
-    
-    for param_dir in os.listdir(pop_codes_dir):
-        param_path = os.path.join(pop_codes_dir, param_dir)
-        if not os.path.isdir(param_path):
-            continue
-        
-        metadata_file = os.path.join(param_path, 'parameters.json')
-        if not os.path.exists(metadata_file):
-            continue
-        
-        try:
-            with open(metadata_file, 'r') as f:
-                metadata = json.load(f)
-            
-            metadata['parameter_directory'] = param_dir
-            parameter_sets.append(metadata)
-        except json.JSONDecodeError:
-            continue
-    
-    # Sort by creation time
-    parameter_sets.sort(key=lambda x: x.get('created', ''), reverse=True)
-    
-    return parameter_sets
+    return noise_cov, str(noise_cov_file)

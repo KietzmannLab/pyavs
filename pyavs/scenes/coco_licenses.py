@@ -479,7 +479,7 @@ Examples:
   # Filter to AVS scenes only (recommended for faster processing)
   python -m pyavs.scenes.coco_licenses \\
       --coco-dir /path/to/coco/annotations \\
-      --avs-scenes-dir /share/klab/datasets/avs/AVS-UTILS/avs_scenes \\
+      --avs-scenes-dir /path/to/avs-public/stimuli/images \\
       --output avs_permissive_images.csv \\
       --flickr-api-key YOUR_API_KEY
 

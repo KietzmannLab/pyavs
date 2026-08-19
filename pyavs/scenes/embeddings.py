@@ -12,7 +12,6 @@ import torch
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 
-from ..utils.config import get_data_path
 from ..utils.logging import get_logger
 
 logger = get_logger('scenes.embeddings')
@@ -209,26 +208,31 @@ def _setup_extractor(model_name: str, weights_path: Optional[str], device: str):
 
 def get_default_ecoset_path() -> Optional[str]:
     """
-    Get the default path to EcoSet ResNet50 model weights.
-    
+    Get the path to EcoSet ResNet50 model weights, from ``PYAVS_ECOSET_WEIGHTS``.
+
+    The EcoSet-trained ResNet50 checkpoint is a third-party model, not part of
+    the AVS release. Set the ``PYAVS_ECOSET_WEIGHTS`` environment variable to a
+    checkpoint of your own, or pass ``weights_path=`` explicitly, to use the
+    ``ecoset_resnet50`` model.
+
     Returns
     -------
     str or None
         Path to EcoSet weights if available, None otherwise
     """
-    default_paths = []
-    data_path = get_data_path()
-    if data_path is not None:
-        default_paths.append(
-            os.path.join(data_path, 'AVS-UTILS', 'models', 'ecoset_patches_trained',
-                         'resnet50', 'checkpoint_last.pth')
-        )
+    path = os.environ.get('PYAVS_ECOSET_WEIGHTS')
 
-    for path in default_paths:
-        if os.path.exists(path):
-            return path
-    
-    logger.warning("Default EcoSet model not found at any of the expected locations")
+    if path and os.path.exists(path):
+        return path
+
+    if path:
+        logger.warning(f"PYAVS_ECOSET_WEIGHTS is set but does not exist: {path}")
+    else:
+        logger.info(
+            "No EcoSet weights configured. The EcoSet-trained ResNet50 checkpoint is "
+            "not part of the AVS release — set PYAVS_ECOSET_WEIGHTS to your own "
+            "checkpoint, or pass weights_path= explicitly, to use ecoset_resnet50."
+        )
     return None
 
 

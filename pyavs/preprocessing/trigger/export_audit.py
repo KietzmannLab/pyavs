@@ -10,8 +10,7 @@ For each session this script:
   - Exports a summary CSV flagging collision codes and repair outcomes
 
 Usage:
-    python export_audit.py --rawdir /share/klab/datasets/avs/rawdir --outdir /path/to/output
-    python export_audit.py --rawdir /data/p_02644/act_vis_sem/rawdir --outdir /path/to/output
+    python export_audit.py --data-path /path/to/avs-public --outdir /path/to/output
 
 Output files (all written to --outdir):
     trigger_audit_summary.csv   -- one row per (subject, session, trigger_code)
@@ -36,14 +35,11 @@ from pyavs.preprocessing.trigger.tools import (
     get_avs_blocks,
     repair_meg_trigger_events,
 )
-from pyavs.utils.config import get_data_path
+from pyavs.layout import Layout, get_layout, sub_sess_id
 
 mne.set_log_level('WARNING')
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger('trigger_audit')
-
-# Map session number (1-10) to folder letter
-SESSION_LETTERS = {i: chr(ord('a') + i - 1) for i in range(1, 11)}
 
 # Subjects to process (skip pilot/special subjects 50, 60, 99)
 MAIN_SUBJECTS = [1]  # default: subject 1 only
@@ -52,14 +48,14 @@ MAIN_SUBJECTS = [1]  # default: subject 1 only
 N_SESSIONS = 10
 
 
-def find_fif_files(rawdir: Path, subject: int, session: int) -> list[Path]:
+def find_fif_files(layout: Layout, subject: int, session: int) -> list[Path]:
     """Return sorted list of numbered raw .fif files for a subject/session."""
-    letter = SESSION_LETTERS[session]
-    folder = rawdir / f"as{subject:02d}{letter}"
+    stem = sub_sess_id(subject, session)
+    folder = layout.meg_dir(subject, session)
     if not folder.exists():
         return []
     # Only numbered run files (e.g. as01a01.fif), not the _b/_d summary files
-    files = sorted(folder.glob(f"as{subject:02d}{letter}[0-9][0-9].fif"))
+    files = sorted(folder.glob(f"{stem}[0-9][0-9].fif"))
     return files
 
 
@@ -119,7 +115,7 @@ def build_summary_row(
 
 
 def audit_session(
-    rawdir: Path,
+    layout: Layout,
     outdir: Path,
     subject: int,
     session: int,
@@ -128,11 +124,10 @@ def audit_session(
     rep_events_dir: Path,
 ) -> list[dict]:
     """Run the full audit for one session. Returns list of summary rows."""
-    letter = SESSION_LETTERS[session]
-    expected_folder = rawdir / f"as{subject:02d}{letter}"
+    expected_folder = layout.meg_dir(subject, session)
     logger.info(f"sub-{subject:02d} ses-{session}: looking in {expected_folder}")
 
-    fif_files = find_fif_files(rawdir, subject, session)
+    fif_files = find_fif_files(layout, subject, session)
     if not fif_files:
         logger.warning(f"sub-{subject:02d} ses-{session}: no .fif files found in {expected_folder}")
         return []
@@ -183,26 +178,17 @@ def audit_session(
 
 def main():
     parser = argparse.ArgumentParser(description="Export MEG trigger audit for all subjects/sessions")
-    parser.add_argument('--rawdir', default=None,
-                        help='Path to rawdir (default: <configured pyavs data path>/rawdir)')
+    parser.add_argument('--data-path', default=None,
+                        help='Path to the avs-public root (default: configured pyavs data path)')
     parser.add_argument('--outdir', default=None,
-                        help='Output directory for audit files (default: /share/klab/psulewski/psulewski/pyavs)')
+                        help='Output directory for audit files')
     parser.add_argument('--subjects', nargs='+', type=int, default=MAIN_SUBJECTS,
                         help=f'Subject numbers to process (default: {MAIN_SUBJECTS})')
     parser.add_argument('--sessions', nargs='+', type=int, default=list(range(1, N_SESSIONS + 1)),
                         help='Session numbers to process (default: 1-10)')
     args = parser.parse_args()
 
-    if args.rawdir is None:
-        _data_path = get_data_path()
-        if _data_path is None:
-            parser.error(
-                "No data path configured. Pass --rawdir or run: "
-                "pyavs configure --data-path /path/to/data"
-            )
-        args.rawdir = os.path.join(_data_path, 'rawdir')
-
-    rawdir = Path(args.rawdir)
+    layout = get_layout(args.data_path)
     outdir = Path(args.outdir)
     raw_events_dir = outdir / 'trigger_audit_raw_events'
     rep_events_dir = outdir / 'trigger_audit_rep_events'
@@ -230,7 +216,7 @@ def main():
     for subject in args.subjects:
         for session in args.sessions:
             rows = audit_session(
-                rawdir=rawdir,
+                layout=layout,
                 outdir=outdir,
                 subject=subject,
                 session=session,

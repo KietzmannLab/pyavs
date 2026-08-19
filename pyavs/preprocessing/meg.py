@@ -12,8 +12,7 @@ import mne
 from typing import List, Optional, Tuple, Dict, Any, Union
 from mne.preprocessing import find_bad_channels_maxwell
 
-from ..utils.config import get_data_path
-from ..utils.paths import get_subject_session_id, convert_session_to_letter
+from ..layout import get_layout, sub_sess_id
 from ..utils.validation import validate_subject_id, validate_session
 from ..utils.logging import get_logger
 from .ica import compute_ica, apply_ica, load_ica
@@ -702,15 +701,16 @@ def prepare_empty_room_recording(raw_empty_room: mne.io.Raw,
 def apply_precomputed_ica(raw: mne.io.Raw,
                          subject_id: int,
                          session: int,
+                         data_path: Optional[str] = None,
                          ica_solutions_dir: Optional[str] = None,
                          ica_exclusions_file: Optional[str] = None,
                          verbose: bool = True) -> mne.io.Raw:
     """
     Apply precomputed ICA solution to MEG data.
-    
+
     This function loads a precomputed ICA solution and applies it to the MEG data,
     following standard MEG preprocessing methodology.
-    
+
     Parameters
     ----------
     raw : mne.io.Raw
@@ -719,18 +719,25 @@ def apply_precomputed_ica(raw: mne.io.Raw,
         Subject ID
     session : int
         Session number
+    data_path : str, optional
+        Path to the avs-public data root. If None, uses configured data path.
+        Ignored if ``ica_solutions_dir`` and ``ica_exclusions_file`` are given.
     ica_solutions_dir : str, optional
-        Path to ICA solutions directory. If None, uses package default
+        Directory of precomputed ICA solutions in the legacy
+        ``{dir}/as01a/as01a-ica.fif`` layout, for a solution computed outside
+        the ``derivatives/pyavs`` tree. Only used if both this and
+        ``ica_exclusions_file`` are given; otherwise the shipped
+        ``derivatives/pyavs`` ICA solution is used.
     ica_exclusions_file : str, optional
-        Path to ICA exclusions JSON file. If None, uses package default
+        JSON file of component exclusions matching ``ica_solutions_dir``.
     verbose : bool, optional
         Whether to print progress information (default: True)
-        
+
     Returns
     -------
     mne.io.Raw
         MEG data with precomputed ICA applied
-        
+
     Raises
     ------
     FileNotFoundError
@@ -739,48 +746,26 @@ def apply_precomputed_ica(raw: mne.io.Raw,
         If ICA solution is incompatible with data
     """
     import json
-    
-    # Get default paths - prefer the configured AVS data root, fallback to package directory
-    if ica_solutions_dir is None or ica_exclusions_file is None:
-        _data_path = get_data_path()
-        shared_ica_dir = os.path.join(_data_path, 'AVS-UTILS', 'ica') if _data_path else None
 
-        if ica_solutions_dir is None:
-            if shared_ica_dir and os.path.exists(shared_ica_dir):
-                ica_solutions_dir = os.path.join(shared_ica_dir, 'ica_solutions')
-            else:
-                # Fallback to package directory
-                import pyavs
-                package_dir = os.path.dirname(pyavs.__file__)
-                ica_solutions_dir = os.path.join(package_dir, 'preprocessing', 'ica', 'ica_solutions')
+    user_supplied = ica_solutions_dir is not None and ica_exclusions_file is not None
+    if user_supplied:
+        subject_session_id = sub_sess_id(subject_id, session)
+        ica_solution_path = os.path.join(
+            ica_solutions_dir, subject_session_id, f"{subject_session_id}-ica.fif"
+        )
+    else:
+        layout = get_layout(data_path)
+        ica_solution_path = layout.ica(subject_id, session)
+        ica_exclusions_file = layout.ica_exclusions(subject_id, session)
+        subject_session_id = sub_sess_id(subject_id, session)
 
-        if ica_exclusions_file is None:
-            if shared_ica_dir and os.path.exists(shared_ica_dir):
-                ica_exclusions_file = os.path.join(shared_ica_dir, 'ica_exclusions', 'ex_components.json')
-            else:
-                # Fallback to package directory
-                import pyavs
-                package_dir = os.path.dirname(pyavs.__file__)
-                ica_exclusions_file = os.path.join(package_dir, 'preprocessing', 'ica', 'ica_exclusions', 'ex_components.json')
-    
-    # Create subject-session identifier
-    session_letter = convert_session_to_letter(session)
-    subject_session_id = get_subject_session_id(subject_id, session, prefix='as')
-    
-    # Construct ICA solution file path
-    ica_solution_path = os.path.join(
-        ica_solutions_dir, 
-        subject_session_id,
-        f"{subject_session_id}-ica.fif"
-    )
-    
     if verbose:
         logger.info(f"Loading precomputed ICA solution from: {ica_solution_path}")
-    
+
     # Check if ICA solution file exists
     if not os.path.exists(ica_solution_path):
         raise FileNotFoundError(f"ICA solution file not found: {ica_solution_path}")
-    
+
     # Load ICA solution
     try:
         ica = mne.preprocessing.read_ica(ica_solution_path, verbose=verbose)
@@ -788,41 +773,41 @@ def apply_precomputed_ica(raw: mne.io.Raw,
             logger.info(f"  Loaded ICA solution with {ica.n_components_} components")
     except Exception as e:
         raise ValueError(f"Error loading ICA solution: {e}")
-    
-    # Load exclusion components
-    try:
-        with open(ica_exclusions_file, 'r') as f:
-            exclusions_data = json.load(f)
-        
-        # Get exclusions for this subject
-        subject_key = f"as{subject_id:02d}"
-        if subject_key in exclusions_data:
+
+    # Load exclusion components. The user-supplied format is a legacy
+    # {subject: [components_per_session, ...]} list indexed 0-based by
+    # session; the derivatives/pyavs format (see ica.save_ica_exclusions) is
+    # {subject: {session_str: components}}.
+    with open(ica_exclusions_file, 'r') as f:
+        exclusions_data = json.load(f)
+
+    subject_key = f"as{subject_id:02d}"
+    exclude_components = None
+    if subject_key in exclusions_data:
+        if user_supplied:
             session_idx = session - 1  # Convert to 0-based index
-            if session_idx < len(exclusions_data[subject_key]):
-                exclude_components = exclusions_data[subject_key][session_idx]
-                ica.exclude = exclude_components
-                
-                if verbose:
-                    logger.info(f"  Excluding {len(exclude_components)} ICA components: {exclude_components}")
-            else:
-                if verbose:
-                    logger.warning(f"  No exclusions found for session {session}")
+            subj_excl = exclusions_data[subject_key]
+            if session_idx < len(subj_excl):
+                exclude_components = subj_excl[session_idx]
         else:
-            if verbose:
-                logger.warning(f"  No exclusions found for subject {subject_id}")
-    
-    except Exception as e:
+            exclude_components = exclusions_data[subject_key].get(str(session))
+
+    if exclude_components is not None:
+        ica.exclude = exclude_components
         if verbose:
-            logger.warning(f"  Could not load ICA exclusions: {e}")
-    
+            logger.info(f"  Excluding {len(exclude_components)} ICA components: {exclude_components}")
+    else:
+        if verbose:
+            logger.warning(f"  No exclusions found for {subject_key} session {session}")
+
     # Apply ICA to the data
     try:
         raw_ica = apply_ica(raw, ica, verbose=verbose)
-        
+
         if verbose:
             logger.info(f"  Applied precomputed ICA to {subject_session_id}")
-        
+
         return raw_ica
-    
+
     except Exception as e:
         raise ValueError(f"Error applying precomputed ICA: {e}")

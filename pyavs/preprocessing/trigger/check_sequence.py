@@ -15,7 +15,7 @@ Usage:
     python check_sequence.py                          # subject 1, all sessions
     python check_sequence.py --subjects 1 2 3
     python check_sequence.py --subjects 1 --sessions 4 5
-    python check_sequence.py --rawdir /share/klab/datasets/avs/rawdir --outdir /share/klab/psulewski/psulewski/pyavs
+    python check_sequence.py --data-path /path/to/avs-public --outdir /path/to/output
 """
 
 import argparse
@@ -34,11 +34,9 @@ from pyavs.preprocessing.trigger.tools import (
     get_avs_blocks,
     repair_meg_trigger_events,
 )
-from pyavs.utils.config import get_data_path
+from pyavs.layout import Layout, get_layout, sub_sess_id
 
 mne.set_log_level('WARNING')
-
-SESSION_LETTERS = {i: chr(ord('a') + i - 1) for i in range(1, 11)}
 
 # Expected event code sequences within a trial (post-repair codes).
 # block_trigger and trial_number are checked structurally, not by fixed code.
@@ -46,14 +44,13 @@ SCENE_ONLY_SEQ  = [90, 91, 100, 'BLK', 'TRL', 101]
 CAPTION_TASK_SEQ = [90, 91, 100, 'BLK', 'TRL', 101, 112, 113, 110, 111]
 
 
-def find_fif_files(rawdir: Path, subject: int, session: int) -> list:
-    letter = SESSION_LETTERS[session]
-    folder = rawdir / f"as{subject:02d}{letter}"
-    return sorted(folder.glob(f"as{subject:02d}{letter}[0-9][0-9].fif"))
+def find_fif_files(layout: Layout, subject: int, session: int) -> list:
+    stem = sub_sess_id(subject, session)
+    return sorted(layout.meg_dir(subject, session).glob(f"{stem}[0-9][0-9].fif"))
 
 
-def load_and_repair(rawdir: Path, subject: int, session: int) -> np.ndarray:
-    fif_files = find_fif_files(rawdir, subject, session)
+def load_and_repair(layout: Layout, subject: int, session: int) -> np.ndarray:
+    fif_files = find_fif_files(layout, subject, session)
     if not fif_files:
         raise FileNotFoundError(f"No .fif files for sub-{subject:02d} ses-{session}")
     raws = [mne.io.read_raw_fif(str(f), preload=False) for f in fif_files]
@@ -174,8 +171,8 @@ def check_trial(trial: dict, blocks: np.ndarray) -> list[str]:
     return issues
 
 
-def check_session(rawdir: Path, subject: int, session: int) -> pd.DataFrame:
-    events = load_and_repair(rawdir, subject, session)
+def check_session(layout: Layout, subject: int, session: int) -> pd.DataFrame:
+    events = load_and_repair(layout, subject, session)
     blocks = get_avs_blocks(session, verbose=False)
     trials = segment_into_trials(events, blocks)
 
@@ -199,23 +196,14 @@ def check_session(rawdir: Path, subject: int, session: int) -> pd.DataFrame:
 
 def main():
     parser = argparse.ArgumentParser(description='Check MEG trigger sequences for all trials')
-    parser.add_argument('--rawdir', default=None,
-                        help='Path to rawdir (default: <configured pyavs data path>/rawdir)')
+    parser.add_argument('--data-path', default=None,
+                        help='Path to the avs-public root (default: configured pyavs data path)')
     parser.add_argument('--outdir', default=None)
     parser.add_argument('--subjects', nargs='+', type=int, default=[1])
     parser.add_argument('--sessions', nargs='+', type=int, default=list(range(1, 11)))
     args = parser.parse_args()
 
-    if args.rawdir is None:
-        _data_path = get_data_path()
-        if _data_path is None:
-            parser.error(
-                "No data path configured. Pass --rawdir or run: "
-                "pyavs configure --data-path /path/to/data"
-            )
-        args.rawdir = os.path.join(_data_path, 'rawdir')
-
-    rawdir = Path(args.rawdir)
+    layout = get_layout(args.data_path)
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
@@ -241,7 +229,7 @@ def main():
     for subject in args.subjects:
         for session in args.sessions:
             print(f"sub-{subject:02d} ses-{session:02d} ... ", end='', flush=True)
-            df = check_session(rawdir, subject, session)
+            df = check_session(layout, subject, session)
             all_dfs.append(df)
             n_total = len(df)
             n_bad   = (df['ok'] == False).sum()
