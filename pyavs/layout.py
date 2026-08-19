@@ -705,6 +705,53 @@ class Layout:
         """Per-image license table, ``stimuli/avs_scenes_all_licenses.parquet``."""
         return self.stimuli_dir / 'avs_scenes_all_licenses.parquet'
 
+    def ensure_scene_image(self, scene_id: Union[int, str], download: bool = True) -> Path:
+        """Scene image for a COCO ID, fetching it on demand if not present.
+
+        Checks, in order: a previously fetched copy under
+        :attr:`derivatives_root`, the shipped copy under :attr:`root`
+        (:meth:`scene_image`), then — if ``download`` — fetches the original
+        from COCO's own hosting (via its ``coco_url`` in
+        :meth:`scene_licenses`) and reapplies the release's center-crop +
+        resize, caching the result under ``derivatives_root/stimuli/images/``
+        so future calls skip the network.
+
+        Parameters
+        ----------
+        scene_id : int or str
+            COCO image ID.
+        download : bool, optional
+            Fetch from COCO if neither a cached nor a shipped copy exists
+            (default: ``True``). Set ``False`` to only ever use local files.
+
+        Returns
+        -------
+        Path
+            Path to the MEG-size scene image.
+
+        Raises
+        ------
+        FileNotFoundError
+            If no local copy exists and ``download`` is ``False``.
+        """
+        stem = f"{int(scene_id):012d}" if not isinstance(scene_id, str) else scene_id
+        cached = self.derivatives_root / 'stimuli' / 'images' / f"{stem}_MEG_size.jpg"
+        if cached.exists():
+            return cached
+
+        shipped = self.scene_image(scene_id)
+        if shipped.exists():
+            return shipped
+
+        if not download:
+            raise FileNotFoundError(
+                f"Scene image for {scene_id} not found (checked {cached} and {shipped}), "
+                f"and download=False."
+            )
+
+        from .scenes.fetch import fetch_scene_image
+        return fetch_scene_image(scene_id, cached, self)
+
     def manifest(self) -> Path:
         """Release manifest, ``manifest.tsv``."""
         return self.root / 'manifest.tsv'

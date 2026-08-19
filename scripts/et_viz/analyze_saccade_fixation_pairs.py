@@ -5,9 +5,15 @@ Analyze saccade-fixation duration relationships.
 This script matches saccades to fixations and visualizes the relationship
 between saccade durations and fixation durations using a 2D heatmap.
 
+Usage:
+    python analyze_saccade_fixation_pairs.py \\
+        --data-path /path/to/avs-public \\
+        --output-dir /path/to/output
+
 Author: P. Sulewski (psulewski@uos.de)
 """
 
+import argparse
 import os
 import numpy as np
 import pandas as pd
@@ -17,19 +23,12 @@ from typing import List
 from scipy.stats import bootstrap as scipy_bootstrap
 
 # pyAVS imports
-from pyavs import get_data_path
 from pyavs.dataloader.eye import load_and_enrich_eye_events
 from pyavs.config.config import PyAVSConfig
 from pyavs.utils.logging import get_logger
 from pyavs.utils.eye_tracking import match_saccades_to_fixations
 
 logger = get_logger('scripts.saccade_fixation_duration')
-
-# Configuration
-SUBJECTS = [1,2,3,4,5] #TODO: add more subjects
-SESSIONS = list(range(1, 11)) #TODO: add more sessions
-DATA_PATH = get_data_path()  # auto-detected via pyavs config cascade
-OUTPUT_DIR = "/share/klab/psulewski/psulewski/pyavs/saccade_fixation_output/"
 
 
 def load_eye_events_all_subjects(
@@ -344,33 +343,33 @@ def report_gaze_event_stats(
     logger.info(f"Stats saved: {txt_path}")
 
 
-def main():
+def run(
+    data_path: str,
+    output_dir: str,
+    subjects: List[int],
+    sessions: List[int],
+) -> None:
     """
     Main analysis function.
     """
     logger.info("=== Saccade-Fixation Duration Analysis ===\n")
 
-    if DATA_PATH is None:
-        raise FileNotFoundError(
-            "No data path configured. Run: pyavs configure --data-path /path/to/data"
-        )
-
     # Configuration
     config = PyAVSConfig()
-    config.data_path = DATA_PATH
+    config.data_path = data_path
 
     logger.info("Configuration:")
-    logger.info(f"  Data path: {DATA_PATH}")
-    logger.info(f"  Subjects: {SUBJECTS}")
-    logger.info(f"  Sessions: {len(SESSIONS)}")
-    logger.info(f"  Output directory: {OUTPUT_DIR}\n")
+    logger.info(f"  Data path: {data_path}")
+    logger.info(f"  Subjects: {subjects}")
+    logger.info(f"  Sessions: {len(sessions)}")
+    logger.info(f"  Output directory: {output_dir}\n")
 
     # Step 1: Load eye tracking events
     logger.info("Step 1: Loading eye tracking events...")
     events_df = load_eye_events_all_subjects(
-        subjects=SUBJECTS,
-        sessions=SESSIONS,
-        data_path=DATA_PATH,
+        subjects=subjects,
+        sessions=sessions,
+        data_path=data_path,
         recording_type='scene'
     )
 
@@ -394,7 +393,7 @@ def main():
 
     # Export fixation and saccade duration stats and source data
     logger.info("\nExporting gaze event duration stats...")
-    report_gaze_event_stats(fixations_df, saccades_df, output_dir=OUTPUT_DIR)
+    report_gaze_event_stats(fixations_df, saccades_df, output_dir=output_dir)
 
     # Step 3: Match saccades to fixations
     logger.info("\nStep 3: Matching saccades to fixations...")
@@ -414,8 +413,8 @@ def main():
             continue
 
         # Save matched data
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
-        matched_file = os.path.join(OUTPUT_DIR, f"matched_saccade_fixation_pairs_{saccade_type}.csv")
+        os.makedirs(output_dir, exist_ok=True)
+        matched_file = os.path.join(output_dir, f"matched_saccade_fixation_pairs_{saccade_type}.csv")
         matched_df.to_csv(matched_file)
         logger.info(f"Saved matched pairs: {matched_file}")
 
@@ -431,10 +430,58 @@ def main():
 
         # Step 4: Create heatmap
         logger.info(f"\nStep 4: Creating duration heatmap for {saccade_type}...")
-        plot_duration_heatmap(matched_df, OUTPUT_DIR, saccade_type=saccade_type)
+        plot_duration_heatmap(matched_df, output_dir, saccade_type=saccade_type)
 
     logger.info(f"\n=== Complete ===")
-    logger.info(f"Results saved to: {OUTPUT_DIR}")
+    logger.info(f"Results saved to: {output_dir}")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description=(
+            "Match saccades to fixations and visualize the relationship "
+            "between saccade and fixation durations as a 2D heatmap."
+        )
+    )
+    parser.add_argument(
+        '--data-path', '-d',
+        type=str,
+        default=None,
+        help='AVS BIDS data directory',
+    )
+    parser.add_argument(
+        '--output-dir', '-o',
+        type=str,
+        required=True,
+        help='Output directory for plots and stats',
+    )
+    parser.add_argument(
+        '--subjects', '-s',
+        nargs='+', type=int, default=[1, 2, 3, 4, 5],
+        help='Subject IDs to process',
+    )
+    parser.add_argument(
+        '--sessions', '-sess',
+        nargs='+', type=int, default=list(range(1, 11)),
+        help='Session numbers to include',
+    )
+
+    args = parser.parse_args()
+
+    if args.data_path is None:
+        from pyavs import get_data_path as _get_dp
+        args.data_path = _get_dp()
+    if args.data_path is None:
+        parser.error(
+            "No data path configured. Run: pyavs configure --data-path /path/to/data"
+        )
+
+    run(
+        data_path=args.data_path,
+        output_dir=args.output_dir,
+        subjects=args.subjects,
+        sessions=args.sessions,
+    )
 
 
 if __name__ == "__main__":

@@ -11,9 +11,10 @@ This script runs on the HPC cluster. It:
        {data_path}/derivatives/pyavs/sub-{id:02d}/ses-{sess:02d}/source/
        sub-{id:02d}_ses-{sess:02d}_task-avs_fwd.fif
 
-Pre-requisites (must exist under {subjects-dir}/{sub_name}/):
-  src/{sub_name}_oct6-src.fif          – cortical source space
-  src/{sub_name}-bem-sol.fif           – BEM conductor solution
+Pre-requisites (must exist under {subjects-dir}/{sub_name}/), matching the
+public release's ``derivatives/freesurfer/`` layout:
+  bem/{sub_name}_oct6-src.fif          – cortical source space
+  bem/{sub_name}-bem-sol.fif           – BEM conductor solution
   mri/transforms/{sub_name}-trans.fif  – head-to-MRI coregistration transform
 
 The saved forward model is then loaded by compute_source_erp.py via
@@ -22,8 +23,8 @@ pyavs.source.forward.load_forward_model().
 Usage:
     python compute_forward_model.py \\
         --subjects 1 2 3 4 5 \\
-        --subjects-dir /share/klab/datasets/avs/rawdir/ \\
-        --data-path /share/klab/datasets/avs/
+        --subjects-dir /path/to/avs-public/derivatives/freesurfer \\
+        --data-path /path/to/avs-public
 
 Author: P. Sulewski (psulewski@uos.de)
 """
@@ -36,14 +37,12 @@ from typing import List, Optional
 import mne
 
 import pyavs
+from pyavs.layout import sub as fs_subject_name
 from pyavs.preprocessing.composer import AVSComposer
 from pyavs.source.forward import save_forward_model
 from pyavs.utils.logging import get_logger
 
 logger = get_logger('scripts.source.compute_forward_model')
-
-# Subject ID → FreeSurfer subject name
-SUBJECT_FS_MAPPING = {i: f'as{i:02d}' for i in range(1, 20)}
 
 
 # ============================================================================
@@ -52,12 +51,12 @@ SUBJECT_FS_MAPPING = {i: f'as{i:02d}' for i in range(1, 20)}
 
 def _source_paths(subject_id: int, subjects_dir: str) -> dict:
     """Return paths to source space, BEM, and trans files for one subject."""
-    sub_name = SUBJECT_FS_MAPPING.get(subject_id, f'as{subject_id:02d}')
+    sub_name = fs_subject_name(subject_id)
     sub_dir = Path(subjects_dir) / sub_name
     return {
         'sub_name': sub_name,
-        'src':   sub_dir / 'src' / f'{sub_name}_oct6-src.fif',
-        'bem':   sub_dir / 'src' / f'{sub_name}-bem-sol.fif',
+        'src':   sub_dir / 'bem' / f'{sub_name}_oct6-src.fif',
+        'bem':   sub_dir / 'bem' / f'{sub_name}-bem-sol.fif',
         'trans': sub_dir / 'mri' / 'transforms' / f'{sub_name}-trans.fif',
     }
 
@@ -126,7 +125,7 @@ def compute_subject_forward(
     subject_id : int
         Subject ID
     subjects_dir : str
-        FreeSurfer subjects directory (contains as01/, as02/, ...)
+        FreeSurfer subjects directory (contains sub-01/, sub-02/, ...)
     data_path : str
         AVS BIDS data root
     raw_session : int
@@ -269,7 +268,7 @@ def main():
         '--subjects-dir',
         type=str,
         default=None,
-        help='FreeSurfer subjects directory (contains as01/, as02/, ...)',
+        help='FreeSurfer subjects directory (contains sub-01/, sub-02/, ...)',
     )
     parser.add_argument(
         '--subjects', '-s',

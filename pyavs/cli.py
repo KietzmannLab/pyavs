@@ -187,12 +187,17 @@ def check_data_command(args):
     
     try:
         availability = pyavs.check_data_availability(args.subject, args.session)
-        
+
         logger.info("Data availability:")
-        for data_type, available in availability.items():
+        for data_type, available in availability['available'].items():
             status = "✓" if available else "✗"
             logger.info(f"  {status} {data_type}")
-            
+
+        if availability['missing']:
+            logger.info("Missing files:")
+            for missing_path in availability['missing']:
+                logger.info(f"  {missing_path}")
+
     except Exception as e:
         logger.error(f"Error checking data: {e}")
         sys.exit(1)

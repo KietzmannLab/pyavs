@@ -4,7 +4,6 @@ Validation utilities for pyAVS package.
 This module provides functions for validating data integrity and input parameters.
 """
 
-import os
 import pandas as pd
 from typing import List, Union, Optional, Dict, Any
 import numpy as np
@@ -109,31 +108,33 @@ def validate_data_integrity(data_path: str, subject_id: int, session: int,
                            blocks: Optional[List[int]] = None) -> Dict[str, Any]:
     """
     Validate data integrity for a subject/session.
-    
+
     Parameters
     ----------
     data_path : str
-        Path to data directory
+        Path to the ``avs-public`` dataset root.
     subject_id : int
         Subject ID
     session : int
         Session number
     blocks : list of int, optional
         Block numbers to check
-        
+
     Returns
     -------
     dict
         Validation results with availability status
     """
-    from .paths import get_legacy_paths, get_bids_path
-    
+    from ..layout import Layout
+
     validate_subject_id(subject_id)
     validate_session(session)
-    
+
     if blocks is None:
         blocks = validate_blocks(None, session)
-    
+
+    layout = Layout(data_path)
+
     results = {
         'subject_id': subject_id,
         'session': session,
@@ -147,28 +148,35 @@ def validate_data_integrity(data_path: str, subject_id: int, session: int,
         'missing': [],
         'errors': []
     }
-    
-    # Check legacy eye tracking files
-    legacy_paths = get_legacy_paths(data_path, subject_id, session)
-    
-    for file_type, file_path in legacy_paths.items():
-        if os.path.exists(file_path):
-            if file_type == 'events':
-                results['available']['eye_events'] = True
-            elif file_type == 'messages':
-                results['available']['eye_messages'] = True
-            elif file_type == 'experiment_log':
-                results['available']['experiment_log'] = True
-        else:
-            results['missing'].append(file_path)
-    
-    # Check MEG blocks (if BIDS structure exists)
+
+    # Check preprocessed eye-tracking derivatives
+    eye_events_path = layout.eye_preprocessed(subject_id, session, 'events')
+    if eye_events_path.exists():
+        results['available']['eye_events'] = True
+    else:
+        results['missing'].append(str(eye_events_path))
+
+    eye_messages_path = layout.eye_preprocessed(subject_id, session, 'msgs')
+    if eye_messages_path.exists():
+        results['available']['eye_messages'] = True
+    else:
+        results['missing'].append(str(eye_messages_path))
+
+    # Check experiment log
+    explog_path = layout.explog(subject_id, session)
+    if explog_path.exists():
+        results['available']['experiment_log'] = True
+    else:
+        results['missing'].append(str(explog_path))
+
+    # Check raw MEG blocks
     for block in blocks:
-        meg_path = get_bids_path(data_path, subject_id, session, 'meg', 
-                                'raw', '.fif', run=block)
-        if os.path.exists(meg_path):
+        meg_path = layout.meg_raw(subject_id, session, block)
+        if meg_path.exists():
             results['available']['meg_blocks'].append(block)
-    
+        else:
+            results['missing'].append(str(meg_path))
+
     return results
 
 

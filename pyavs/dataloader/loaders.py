@@ -6,6 +6,7 @@ from the Active Visual Semantics BIDS dataset.
 """
 
 import pandas as pd
+from tqdm import tqdm
 from typing import List, Optional, Tuple, Dict, Union
 
 from ..layout import get_layout
@@ -150,16 +151,24 @@ def load_anatomical(subject_id: int, data_path: Optional[str] = None) -> str:
 
 
 def load_scenes(scene_ids: Union[str, List[int]] = 'all',
-               data_path: Optional[str] = None) -> Dict[int, str]:
+               data_path: Optional[str] = None,
+               download: bool = True) -> Dict[int, str]:
     """
-    Load scene image paths.
-    
+    Load scene image paths, fetching from COCO on demand if not shipped locally.
+
     Parameters
     ----------
     scene_ids : str or list of int, optional
-        Scene IDs to load. If 'all', loads all available scenes (default: 'all')
+        Scene IDs to load. If 'all', loads every AVS scene: from the shipped
+        ``stimuli/images/`` directory if present, else — if ``download`` —
+        by fetching all 4,080 from COCO (slow; a one-time cost, since each
+        fetch is cached). (default: 'all')
     data_path : str, optional
         Path to the ``avs-public`` root. If None, uses configured data path
+    download : bool, optional
+        Fetch images missing locally from COCO's own hosting and cache them
+        under the layout's ``derivatives_root`` (default: True). If False,
+        only already-shipped/cached images are returned.
 
     Returns
     -------
@@ -168,33 +177,40 @@ def load_scenes(scene_ids: Union[str, List[int]] = 'all',
 
     Notes
     -----
-    Reads ``stimuli/images/``, whose 4,080 files are the MEG-size scenes
-    actually shown in the experiment, named ``{coco_id:012d}_MEG_size.jpg``.
+    The release does not ship per-image scene JPEGs (COCO/Flickr photos carry
+    no redistribution license). Images are reconstructed on first use from
+    ``coco_url`` in ``stimuli/avs_scenes_all_licenses.parquet`` and the same
+    center-crop + resize used to build the original ``{coco_id:012d}_MEG_size.jpg``
+    stimuli, then cached locally so repeat calls skip the network.
     """
-    scenes_dir = get_layout(data_path).scenes_dir
+    layout = get_layout(data_path)
+    scenes_dir = layout.scenes_dir
 
-    if not scenes_dir.exists():
-        raise FileNotFoundError(f"Scenes directory not found: {scenes_dir}")
-
-    scene_files = {}
-    for path in scenes_dir.iterdir():
-        if path.suffix.lower() in ('.jpg', '.jpeg', '.png'):
-            # 000000000151_MEG_size.jpg -> 151
-            scene_files[int(path.name.split('_')[0])] = str(path)
-
-    if scene_ids == 'all':
+    if scene_ids == 'all' and scenes_dir.exists():
+        scene_files = {}
+        for path in scenes_dir.iterdir():
+            if path.suffix.lower() in ('.jpg', '.jpeg', '.png'):
+                # 000000000151_MEG_size.jpg -> 151
+                scene_files[int(path.name.split('_')[0])] = str(path)
         return scene_files
 
-    if isinstance(scene_ids, int):
+    if scene_ids == 'all':
+        if not download:
+            raise FileNotFoundError(
+                f"Scenes directory not found: {scenes_dir}, and download=False."
+            )
+        licenses = read_table(layout.scene_licenses())
+        scene_ids = licenses['coco_id'].tolist()
+        logger.info(
+            f"No local scenes directory found; fetching all {len(scene_ids)} "
+            f"AVS scenes from COCO (cached under {layout.derivatives_root})..."
+        )
+        scene_ids = tqdm(scene_ids, desc="Fetching AVS scenes")
+    elif isinstance(scene_ids, int):
         scene_ids = [scene_ids]
 
-    requested_scenes = {}
-    for scene_id in scene_ids:
-        if scene_id not in scene_files:
-            raise FileNotFoundError(f"Scene {scene_id} not found in {scenes_dir}")
-        requested_scenes[scene_id] = scene_files[scene_id]
-
-    return requested_scenes
+    return {int(scene_id): str(layout.ensure_scene_image(scene_id, download=download))
+            for scene_id in scene_ids}
 
 
 def load_calibration_files(subject_id: int, session: int,

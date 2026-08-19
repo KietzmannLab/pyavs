@@ -13,15 +13,22 @@ This demonstrates how to:
 Requirements:
 - Eye tracking data files (preprocessed)
 - Transformed AVS scene annotations (run transform_scene_annotations.py first)
-- Processed scene images (AVS-UTILS/avs_scenes)
+- Processed scene images (``stimuli/images``)
 - matplotlib for plotting
 
 Note: This uses the new simplified pyAVS approach with pre-transformed annotations
 that match the processed scene format used in the AVS experiment.
 
+Usage:
+    python plot_fixation_events_with_objects.py \\
+        --data-path /path/to/avs-public \\
+        --output-dir /path/to/output \\
+        --subject 4 --session 10
+
 Author: P. Sulewski (psulewski@uos.de)
 """
 
+import argparse
 import os
 import json
 import numpy as np
@@ -34,6 +41,7 @@ import pycocotools.mask as mask_util
 import seaborn as sns
 
 # pyAVS imports
+from pyavs.layout import get_layout
 from pyavs.scenes.objects import get_fixated_objects
 from pyavs.dataloader.eye import load_and_enrich_eye_events
 from pyavs.config.config import PyAVSConfig
@@ -63,45 +71,22 @@ def load_subject_eye_data(subject_id: int, session_id: int,
     """
     logger.info(f"Loading eye tracking data for subject {subject_id}, session {session_id}")
 
-    # Use the pyAVS dataloader function
-    try:
-        # Load enriched eye events (includes scene mapping)
-        _, events_df = load_and_enrich_eye_events(
-            subjects=[subject_id],
-            sessions=[session_id],
-            data_path=data_path,
-            preprocessed=True,
-            verbose=True
-        )
+    # Load enriched eye events (includes scene mapping)
+    _, events_df = load_and_enrich_eye_events(
+        subjects=[subject_id],
+        sessions=[session_id],
+        data_path=data_path,
+        preprocessed=True,
+        verbose=True
+    )
 
-        # Filter to fixations only for this example
-        fixations = events_df[events_df['type'] == 'fixation'].copy()
+    # Filter to fixations only for this example
+    fixations = events_df[events_df['type'] == 'fixation'].copy()
 
-        logger.info(f"Loaded {len(fixations)} fixations")
-        logger.info(f"Unique scenes: {len(fixations['sceneID'].dropna().unique())}")
+    logger.info(f"Loaded {len(fixations)} fixations")
+    logger.info(f"Unique scenes: {len(fixations['sceneID'].dropna().unique())}")
 
-        return fixations
-
-    except Exception as e:
-        logger.error(f"Error loading data with composer: {e}")
-        logger.info("Trying direct CSV loading as fallback...")
-
-        # Fallback to direct CSV loading
-        events_file = os.path.join(
-            data_path,
-            f"as{subject_id:02d}_{session_id:02d}",
-            "preprocessed",
-            f"as_s{subject_id}_el_events.csv"
-        )
-
-        if not os.path.exists(events_file):
-            raise FileNotFoundError(f"Eye tracking data not found: {events_file}")
-
-        logger.info(f"Loading from: {events_file}")
-        events_df = pd.read_csv(events_file)
-        fixations = events_df[events_df['type'] == 'fixation'].copy()
-
-        return fixations
+    return fixations
 
 
 def add_object_labels_to_data(fixations_df: pd.DataFrame,
@@ -479,7 +464,7 @@ def plot_object_fixation_summary(fixations_df: pd.DataFrame,
                 labels.append(f"{obj}\n(n={len(durations)})")
 
         if duration_data:
-            axes[0, 1].boxplot(duration_data, labels=labels)
+            axes[0, 1].boxplot(duration_data, tick_labels=labels)
             axes[0, 1].set_ylabel('Fixation Duration (s)')
             axes[0, 1].set_title('Fixation Duration by Object Type')
             axes[0, 1].tick_params(axis='x', rotation=45)
@@ -547,25 +532,23 @@ def plot_object_fixation_summary(fixations_df: pd.DataFrame,
     plt.close()
 
 
-def main():
+def run(
+    data_path: str,
+    output_dir: str,
+    subject_id: int,
+    session_id: int,
+    top_n_scenes: int = 20,
+) -> None:
     """
-    Main function demonstrating fixation event object detection workflow.
+    Main fixation event object detection workflow.
     """
     logger.info("=== Fixation Event Object Detection Visualization ===\n")
 
-    # Create configuration with standardized parameters (data_path auto-detected via pyavs config cascade)
+    layout = get_layout(data_path)
     config = PyAVSConfig()
-    if config.data_path is None:
-        raise FileNotFoundError(
-            "No data path configured. Run: pyavs configure --data-path /path/to/data"
-        )
-    plots_dir = "/share/klab/psulewski/psulewski/pyavs/object_detection"
-
-    # Configuration
-    SUBJECT_ID = 4
-    SESSION_ID = 10
-    DATA_PATH = config.data_path
-    TRANSFORMED_ANNOTATIONS_DIR = os.path.join(DATA_PATH, "AVS-UTILS", "avs_scene_annotations", "cocostuff")
+    config.data_path = data_path
+    transformed_annotations_dir = str(layout.annotations_dir('cocostuff'))
+    mscoco_image_dir = str(layout.scenes_dir)
 
     logger.info(f"Using standardized visual parameters:")
     logger.info(f"  Screen size: {config.screen_size_pixels} pixels")
@@ -573,42 +556,29 @@ def main():
     logger.info(f"  Pixels per degree: {config.get_pixels_per_degree():.1f}")
     logger.info(f"  Scene scaling factor: {config.get_scene_scaling_factor():.3f}\n")
 
-    # Check if paths exist
-    if not os.path.exists(DATA_PATH):
-        logger.error(f"Data path not found: {DATA_PATH}")
-        logger.error("Please update DATA_PATH in the script to point to your AVS data directory")
-        return
-
-    if not os.path.exists(TRANSFORMED_ANNOTATIONS_DIR):
-        logger.error(f"Transformed annotations directory not found: {TRANSFORMED_ANNOTATIONS_DIR}")
+    if not os.path.exists(transformed_annotations_dir):
+        logger.error(f"Transformed annotations directory not found: {transformed_annotations_dir}")
         logger.error("Please run the annotation transformation script first:")
         logger.error("python -m pyavs.scenes.transform_scene_annotations --avs-scenes-dir ... --output-dir ...")
         return
 
-
     # Step 1: Load eye tracking data
-    logger.info(f"Step 1: Loading eye tracking data for subject {SUBJECT_ID}, session {SESSION_ID}")
-    fixations_df = load_subject_eye_data(SUBJECT_ID, SESSION_ID, DATA_PATH)
+    logger.info(f"Step 1: Loading eye tracking data for subject {subject_id}, session {session_id}")
+    fixations_df = load_subject_eye_data(subject_id, session_id, data_path)
 
     # Step 2: Add object labels
     logger.info(f"\nStep 2: Adding object labels to {len(fixations_df)} fixations")
-    fixations_with_objects = add_object_labels_to_data(fixations_df, TRANSFORMED_ANNOTATIONS_DIR, verbose=True)
+    fixations_with_objects = add_object_labels_to_data(fixations_df, transformed_annotations_dir, verbose=True)
 
     # Step 3: Create visualizations
     logger.info(f"\nStep 3: Creating visualizations")
 
     # Plot summary statistics
-    plot_object_fixation_summary(fixations_with_objects, output_dir=plots_dir)
+    plot_object_fixation_summary(fixations_with_objects, output_dir=output_dir)
 
     # sort scenes by number of unique object fixations (getting more interesting scenes first)
-
     selected_scenes = fixations_with_objects.groupby('sceneID')['object_label'].nunique().sort_values(ascending=False).index.tolist()
-    # get the top 10 scenes with most unique object fixations
-    top_scenes = selected_scenes[:20]
-
-
-
-    mscoco_image_dir = os.path.join(DATA_PATH, "AVS-UTILS", "avs_scenes")
+    top_scenes = selected_scenes[:top_n_scenes]
 
     for scene_id in top_scenes:
         logger.info(f"\nPlotting fixations for scene {scene_id}")
@@ -617,12 +587,12 @@ def main():
             fixations_with_objects,
             mscoco_image_dir,
             config,
-            transformed_annotations_dir=TRANSFORMED_ANNOTATIONS_DIR,
-            output_dir=plots_dir,)
+            transformed_annotations_dir=transformed_annotations_dir,
+            output_dir=output_dir,)
 
     # Print final summary
     logger.info(f"\n=== Summary ===")
-    logger.info(f"Subject: {SUBJECT_ID}, Session: {SESSION_ID}")
+    logger.info(f"Subject: {subject_id}, Session: {session_id}")
     logger.info(f"Total fixations: {len(fixations_with_objects)}")
     logger.info(f"Fixations on objects: {len(fixations_with_objects[fixations_with_objects['object_label'] != 'None'])}")
     logger.info(f"Unique scenes: {len(fixations_with_objects['sceneID'].unique())}")
@@ -634,6 +604,58 @@ def main():
         logger.info(f"  {obj}: {count} fixations")
 
 
+def main():
+    parser = argparse.ArgumentParser(
+        description=(
+            "Visualize fixation events with COCO/COCO-Stuff object labels "
+            "overlaid on scene images, for one subject/session."
+        )
+    )
+    parser.add_argument(
+        '--data-path', '-d',
+        type=str,
+        default=None,
+        help='AVS BIDS data directory',
+    )
+    parser.add_argument(
+        '--output-dir', '-o',
+        type=str,
+        required=True,
+        help='Output directory for plots',
+    )
+    parser.add_argument(
+        '--subject', '-s',
+        type=int, default=4,
+        help='Subject ID (default: 4)',
+    )
+    parser.add_argument(
+        '--session',
+        type=int, default=10,
+        help='Session number (default: 10)',
+    )
+    parser.add_argument(
+        '--top-n-scenes',
+        type=int, default=20,
+        help='Number of scenes (ranked by unique objects fixated) to plot (default: 20)',
+    )
+
+    args = parser.parse_args()
+
+    if args.data_path is None:
+        from pyavs import get_data_path as _get_dp
+        args.data_path = _get_dp()
+    if args.data_path is None:
+        parser.error(
+            "No data path configured. Run: pyavs configure --data-path /path/to/data"
+        )
+
+    run(
+        data_path=args.data_path,
+        output_dir=args.output_dir,
+        subject_id=args.subject,
+        session_id=args.session,
+        top_n_scenes=args.top_n_scenes,
+    )
 
 
 if __name__ == "__main__":

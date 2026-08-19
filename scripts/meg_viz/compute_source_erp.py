@@ -18,7 +18,7 @@ Usage:
         --subjects 1 2 3 4 5 \\
         --sessions 1 2 3 4 5 6 7 8 9 10 \\
         --event-type fixation \\
-        --subjects-dir /share/klab/datasets/avs/rawdir/ \\
+        --subjects-dir /path/to/avs-public/derivatives/freesurfer \\
         --output-dir /share/klab/psulewski/psulewski/pyavs/source_erp/
 
 Author: P. Sulewski (psulewski@uos.de)
@@ -34,6 +34,7 @@ import logging
 from joblib import Parallel, delayed
 
 import pyavs
+from pyavs.layout import sub as fs_subject_name
 from pyavs.preprocessing.composer import AVSComposer
 from pyavs.source.forward import load_forward_model
 from pyavs.utils.logging import get_logger
@@ -43,8 +44,8 @@ from scripts.source.compute_scene_onset_noise_cov import get_noise_cov_path
 
 logger = get_logger('scripts.meg_viz.compute_source_erp')
 
-# Subject ID to FreeSurfer subject name
-SUBJECT_FS_MAPPING = {i: f'as{i:02d}' for i in range(1, 20)}
+# Subject ID to FreeSurfer subject name (public release layout, "sub-XX")
+SUBJECT_FS_MAPPING = {i: fs_subject_name(i) for i in range(1, 20)}
 
 
 # ============================================================================
@@ -166,7 +167,6 @@ def compute_subject_source_erp(
     event_type: str,
     data_path: str,
     fwd_session: int,
-    fwd_dir: Optional[str],
     tmin: float,
     tmax: float,
     baseline: Optional[Tuple[float, float]],
@@ -189,11 +189,9 @@ def compute_subject_source_erp(
     data_path : str
         AVS data path
     fwd_session : int
-        Which session's forward solution to load (BIDS path only)
-    fwd_dir : str or None
-        Root of AVS-UTILS tree. When given, loads pre-computed forward from
-        {fwd_dir}/source/as{id:02d}/src/as{id:02d}-fwd.fif and
-        fwd_session is ignored.
+        Session passed to load_forward_model(). Only takes effect if a
+        per-session forward was recomputed into the pyAVS derivatives tree;
+        otherwise the shipped, session-independent forward is used.
     tmin, tmax : float
         Epoch time window [s]
     baseline : tuple or None
@@ -251,7 +249,7 @@ def compute_subject_source_erp(
 
     # --- 4. Load forward solution ---
     try:
-        fwd = load_forward_model(subject, fwd_session, data_path, fwd_dir=fwd_dir)
+        fwd = load_forward_model(subject, fwd_session, data_path)
     except FileNotFoundError as e:
         logger.error(str(e))
         return None
@@ -322,7 +320,7 @@ def morph_and_save_subject_stc(
     str or None
         Path (without -lh.stc/-rh.stc extension) of saved file, or None on failure
     """
-    subject_from = SUBJECT_FS_MAPPING.get(subject_id, f'as{subject_id:02d}')
+    subject_from = SUBJECT_FS_MAPPING.get(subject_id, fs_subject_name(subject_id))
 
     logger.info(f"Morphing sub-{subject_id:02d} ({subject_from}) → {morph_to}")
 
@@ -368,7 +366,6 @@ def run(
     subjects_dir: str,
     output_dir: str,
     fwd_session: int = 1,
-    fwd_dir: Optional[str] = None,
     tmin: float = -0.2,
     tmax: float = 0.5,
     baseline: Optional[Tuple[float, float]] = (-0.2, 0.0),
@@ -385,10 +382,7 @@ def run(
     logger.info(f"Sessions:       {sessions}")
     logger.info(f"Event type:     {event_type}")
     logger.info(f"Timing:         {timing}")
-    if fwd_dir is not None:
-        logger.info(f"Fwd dir:        {fwd_dir}")
-    else:
-        logger.info(f"Fwd session:    {fwd_session}")
+    logger.info(f"Fwd session:    {fwd_session}")
     logger.info(f"Morph target:   {morph_to}")
     logger.info(f"Output:         {output_dir}")
 
@@ -417,7 +411,6 @@ def run(
             event_type=event_type,
             data_path=data_path,
             fwd_session=fwd_session,
-            fwd_dir=fwd_dir,
             tmin=tmin,
             tmax=tmax,
             baseline=baseline,
@@ -496,19 +489,14 @@ def main():
         help='Timing mode: onset or offset',
     )
     parser.add_argument(
-        '--fwd-dir',
-        type=str, default=None,
-        help=(
-            'Root of AVS-UTILS tree containing pre-computed forward models '
-            '(e.g. /share/klab/datasets/avs/AVS-UTILS). When given, loads '
-            '{fwd-dir}/source/as{id}/src/as{id}-fwd.fif and '
-            '--fwd-session is ignored.'
-        ),
-    )
-    parser.add_argument(
         '--fwd-session',
         type=int, default=1,
-        help='Which session\'s forward solution to use (default: 1, ignored when --fwd-dir is set)',
+        help=(
+            'Session passed to load_forward_model() (default: 1). Only takes '
+            'effect if a per-session forward was recomputed into the pyAVS '
+            'derivatives tree; otherwise the shipped, session-independent '
+            'forward from derivatives/freesurfer/ is used.'
+        ),
     )
     parser.add_argument(
         '--tmin',
@@ -568,7 +556,6 @@ def main():
         subjects_dir=args.subjects_dir,
         output_dir=args.output_dir,
         fwd_session=args.fwd_session,
-        fwd_dir=args.fwd_dir,
         tmin=args.tmin,
         tmax=args.tmax,
         baseline=tuple(args.baseline),

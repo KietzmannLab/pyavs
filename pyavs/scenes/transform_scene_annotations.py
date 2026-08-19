@@ -42,6 +42,68 @@ from .cocostuff_classes import (
 )
 
 
+def crop_resize(image: Image.Image, size: Tuple[int, int], ratio: Fraction,
+                resample: int = Image.LANCZOS) -> Image.Image:
+    """
+    Apply center crop and resize - matching scene_resizer.py logic.
+
+    Parameters
+    ----------
+    image : PIL.Image
+        Input image
+    size : tuple
+        Target size (width, height)
+    ratio : Fraction
+        Target aspect ratio
+    resample : int, optional
+        Resampling filter. Use Image.LANCZOS for photos, Image.NEAREST for masks.
+
+    Returns
+    -------
+    PIL.Image
+        Transformed image
+    """
+    w, h = image.size
+
+    # Center crop to target ratio
+    if w > ratio * h:  # width is larger than necessary
+        x, y = (w - ratio * h) // 2, 0
+    else:  # height is larger (ratio * h >= w)
+        x, y = 0, (h - w / ratio) // 2
+
+    image = image.crop((x, y, w - x, h - y))
+
+    # Resize to target size
+    if image.size != size:
+        image = image.resize(size, resample=resample)
+
+    return image
+
+
+def default_target_size_and_ratio(config: Optional[PyAVSConfig] = None
+                                  ) -> Tuple[Tuple[int, int], Fraction]:
+    """
+    Target (width, height) and aspect ratio for AVS MEG-size scene images.
+
+    Parameters
+    ----------
+    config : PyAVSConfig, optional
+        Source of ``screen_size_pixels``/``screen_usage``. Defaults to
+        ``PyAVSConfig()``.
+
+    Returns
+    -------
+    tuple
+        ``(target_size, target_ratio)``, e.g. ``((947, 710), Fraction(947, 710))``.
+    """
+    config = config or PyAVSConfig()
+    target_size = (
+        int(config.screen_size_pixels[0] * config.screen_usage),
+        int(config.screen_size_pixels[1] * config.screen_usage)
+    )
+    return target_size, Fraction(*target_size)
+
+
 class AVSSceneAnnotationTransformer:
     """
     Transforms MSCOCO annotations to match AVS processed scene format.
@@ -95,11 +157,7 @@ class AVSSceneAnnotationTransformer:
         self.config = PyAVSConfig()
         
         # Calculate target size and ratio (matching scene_resizer.py)
-        self.target_size = (
-            int(self.config.screen_size_pixels[0] * self.config.screen_usage),
-            int(self.config.screen_size_pixels[1] * self.config.screen_usage)
-        )
-        self.target_ratio = Fraction(*self.target_size)
+        self.target_size, self.target_ratio = default_target_size_and_ratio(self.config)
         
         self.logger.info(f"Target size: {self.target_size}")
         self.logger.info(f"Target ratio: {self.target_ratio}")
@@ -181,40 +239,8 @@ class AVSSceneAnnotationTransformer:
 
     def crop_resize(self, image: Image.Image, size: Tuple[int, int], ratio: Fraction,
                     resample: int = Image.LANCZOS) -> Image.Image:
-        """
-        Apply center crop and resize - matching scene_resizer.py logic.
-
-        Parameters
-        ----------
-        image : PIL.Image
-            Input image
-        size : tuple
-            Target size (width, height)
-        ratio : Fraction
-            Target aspect ratio
-        resample : int, optional
-            Resampling filter. Use Image.LANCZOS for photos, Image.NEAREST for masks.
-
-        Returns
-        -------
-        PIL.Image
-            Transformed image
-        """
-        w, h = image.size
-
-        # Center crop to target ratio
-        if w > ratio * h:  # width is larger than necessary
-            x, y = (w - ratio * h) // 2, 0
-        else:  # height is larger (ratio * h >= w)
-            x, y = 0, (h - w / ratio) // 2
-
-        image = image.crop((x, y, w - x, h - y))
-
-        # Resize to target size
-        if image.size != size:
-            image = image.resize(size, resample=resample)
-
-        return image
+        """Apply center crop and resize. See module-level :func:`crop_resize`."""
+        return crop_resize(image, size, ratio, resample=resample)
     
     def _transform_mask(self, mask: np.ndarray, original_size: Tuple[int, int]) -> np.ndarray:
         """

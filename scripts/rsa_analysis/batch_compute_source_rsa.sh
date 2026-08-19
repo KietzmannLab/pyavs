@@ -23,14 +23,12 @@ conda activate avs
 # Base paths
 script_path="/home/student/p/psulewski/pyAVS/scripts/rsa_analysis"
 data_path="$(pyavs configure --show)"
-# Pre-computed forward models live under the AVS-UTILS tree
-# ({fwd_dir}/source/as{id}/src/as{id}-fwd.fif). Without --fwd-dir the script
-# falls back to the (empty) BIDS derivatives path and fails to find the forward.
-fwd_dir="${data_path}/AVS-UTILS"
-# FreeSurfer SUBJECTS_DIR (individual anatomies as{id} + fsaverage). Needed for
+# FreeSurfer SUBJECTS_DIR (individual anatomies sub-0X + fsaverage). Needed for
 # morphing to fsaverage and loading the ico-5 source space. Without it,
 # subjects_dir is None and the run crashes in _load_fsaverage_src / morphing.
-subjects_dir="${data_path}/rawdir"
+# The pre-computed forward model itself (sub-0X-fwd.fif) is found automatically
+# by load_forward_model() under the same derivatives/freesurfer/ tree.
+subjects_dir="${data_path}/derivatives/freesurfer"
 rsa_results_dir="/share/klab/psulewski/psulewski/pyavs/rsa"
 output_dir="/share/klab/psulewski/psulewski/pyavs/source_rsa"
 layer="layer3"
@@ -55,7 +53,6 @@ python ${script_path}/compute_source_rsa.py \
     --layers ${layer} \
     --rsa-results-dir ${rsa_results_dir} \
     --output-dir ${output_dir} \
-    --fwd-dir ${fwd_dir} \
     --subjects-dir ${subjects_dir} \
     --n-jobs 50 \
     --n-permutations 100 \

@@ -6,20 +6,25 @@ across all subjects and sessions. It shows the top N most fixated objects includ
 unannotated fixations ('None').
 
 Usage:
-    python -m scripts.et_viz.plot_object_fixation_frequency
+    python plot_object_fixation_frequency.py \\
+        --data-path /path/to/avs-public \\
+        --output-dir /path/to/output
 
 Author: P. Sulewski (psulewski@uos.de)
 """
 
+import argparse
 import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
+from typing import List
 from tqdm import tqdm
 
 # pyAVS imports
+from pyavs.layout import get_layout
 from pyavs.scenes.objects import get_fixated_objects
 from pyavs.dataloader.eye import load_and_enrich_eye_events
 from pyavs.config.config import PyAVSConfig
@@ -345,36 +350,21 @@ def report_object_fixation_stats(
     logger.info(f"Stats saved: {txt_path}")
 
 
-def main():
-    """Main entry point."""
+def run(
+    data_path: str,
+    output_dir: str,
+    subjects: List[int],
+    sessions: List[int],
+    top_n: int = 25,
+) -> int:
     logger.info("=== Object Fixation Frequency Analysis ===\n")
 
-    # Configuration (data_path auto-detected via pyavs config cascade)
-    config = PyAVSConfig()
-    if config.data_path is None:
-        raise FileNotFoundError(
-            "No data path configured. Run: pyavs configure --data-path /path/to/data"
-        )
+    layout = get_layout(data_path)
+    transformed_annotations_dir = str(layout.annotations_dir('cocostuff'))
 
-    DATA_PATH = config.data_path
-    TRANSFORMED_ANNOTATIONS_DIR = os.path.join(
-        DATA_PATH, "AVS-UTILS", "avs_scene_annotations", "cocostuff"
-    )
-    OUTPUT_DIR = "/share/klab/psulewski/psulewski/pyavs/et_viz_output"
-
-    # Define subjects and sessions to process
-    # Adjust these lists based on available data
-    SUBJECTS = list(range(1,6))  # Subjects 1-5
-    SESSIONS = list(range(1, 11))  # Sessions 1-10
-
-    # Check paths
-    if not os.path.exists(DATA_PATH):
-        logger.error(f"Data path not found: {DATA_PATH}")
-        return 1
-
-    if not os.path.exists(TRANSFORMED_ANNOTATIONS_DIR):
+    if not os.path.exists(transformed_annotations_dir):
         logger.error(
-            f"Transformed annotations not found: {TRANSFORMED_ANNOTATIONS_DIR}"
+            f"Transformed annotations not found: {transformed_annotations_dir}"
         )
         logger.error(
             "Please run transform_scene_annotations.py first"
@@ -385,10 +375,10 @@ def main():
     logger.info("Loading fixation data for all subjects and sessions...")
     try:
         all_fixations = load_all_subjects_fixations(
-            subjects=SUBJECTS,
-            sessions=SESSIONS,
-            data_path=DATA_PATH,
-            transformed_annotations_dir=TRANSFORMED_ANNOTATIONS_DIR,
+            subjects=subjects,
+            sessions=sessions,
+            data_path=data_path,
+            transformed_annotations_dir=transformed_annotations_dir,
             verbose=True
         )
     except ValueError as e:
@@ -399,8 +389,8 @@ def main():
     logger.info("\nCreating object fixation frequency plot...")
     plot_object_fixation_frequency(
         all_fixations,
-        top_n=25,
-        output_dir=OUTPUT_DIR,
+        top_n=top_n,
+        output_dir=output_dir,
         filename="object_fixation_frequency_all_subjects"
     )
 
@@ -408,11 +398,65 @@ def main():
     logger.info("\nExporting fixation frequency stats...")
     report_object_fixation_stats(
         all_fixations,
-        top_n=25,
-        output_dir=OUTPUT_DIR,
+        top_n=top_n,
+        output_dir=output_dir,
     )
 
     return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description=(
+            "Visualize fixation frequency on the top N object categories "
+            "across all subjects and sessions."
+        )
+    )
+    parser.add_argument(
+        '--data-path', '-d',
+        type=str,
+        default=None,
+        help='AVS BIDS data directory',
+    )
+    parser.add_argument(
+        '--output-dir', '-o',
+        type=str,
+        required=True,
+        help='Output directory for plots and stats',
+    )
+    parser.add_argument(
+        '--subjects', '-s',
+        nargs='+', type=int, default=[1, 2, 3, 4, 5],
+        help='Subject IDs to process',
+    )
+    parser.add_argument(
+        '--sessions', '-sess',
+        nargs='+', type=int, default=list(range(1, 11)),
+        help='Session numbers to include',
+    )
+    parser.add_argument(
+        '--top-n',
+        type=int, default=25,
+        help='Number of top object categories to include (default: 25)',
+    )
+
+    args = parser.parse_args()
+
+    if args.data_path is None:
+        from pyavs import get_data_path as _get_dp
+        args.data_path = _get_dp()
+    if args.data_path is None:
+        parser.error(
+            "No data path configured. Run: pyavs configure --data-path /path/to/data"
+        )
+
+    return run(
+        data_path=args.data_path,
+        output_dir=args.output_dir,
+        subjects=args.subjects,
+        sessions=args.sessions,
+        top_n=args.top_n,
+    )
 
 
 if __name__ == "__main__":

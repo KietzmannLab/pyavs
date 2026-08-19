@@ -9,9 +9,16 @@ matching is needed. This provides a direct visualization of the raw gaze data de
 
 Inspired by real_data_object_detection_example.py but adapted for sample-level visualization.
 
+Usage:
+    python plot_samples_per_scene.py \\
+        --data-path /path/to/avs-public \\
+        --output-dir /path/to/output \\
+        --subject 1 --session 1
+
 Author: P. Sulewski (psulewski@uos.de)
 """
 
+import argparse
 import os
 import numpy as np
 import pandas as pd
@@ -19,6 +26,7 @@ import matplotlib.pyplot as plt
 from PIL import Image
 
 # pyAVS imports
+from pyavs.layout import get_layout
 from pyavs.preprocessing.samples import load_samples_with_scenes
 from pyavs.config.config import PyAVSConfig
 from pyavs.utils.logging import get_logger
@@ -343,9 +351,15 @@ def plot_samples_on_caption_task(
     plt.close()
 
 
-def main(plot_captions: bool = True):
+def run(
+    data_path: str,
+    output_dir: str,
+    subject_id: int = 1,
+    session_id: int = 1,
+    plot_captions: bool = False,
+) -> None:
     """
-    Main function demonstrating eye tracking sample visualization.
+    Main eye tracking sample visualization workflow.
 
     Parameters
     ----------
@@ -355,26 +369,17 @@ def main(plot_captions: bool = True):
     """
     logger.info("=== Eye Tracking Sample Visualization ===\n")
 
-    # Create configuration with standardized parameters (data_path auto-detected via pyavs config cascade)
+    layout = get_layout(data_path)
     config = PyAVSConfig()
-    if config.data_path is None:
-        raise FileNotFoundError(
-            "No data path configured. Run: pyavs configure --data-path /path/to/data"
-        )
-    plots_dir = "/share/klab/psulewski/psulewski/pyavs/et_viz_output"
-
-    # Configuration
-    SUBJECT_ID = 60
-    SESSION_ID = 1
-    DATA_PATH = config.data_path
-    MSCOCO_IMAGE_DIR = os.path.join(DATA_PATH, "AVS-UTILS", "avs_scenes")
+    config.data_path = data_path
+    mscoco_image_dir = str(layout.scenes_dir)
 
     if plot_captions:
-        plots_dir = os.path.join(plots_dir, f"as{SUBJECT_ID:02d}_{SESSION_ID:02d}_caption_samples")
+        plots_dir = os.path.join(output_dir, f"as{subject_id:02d}_{session_id:02d}_caption_samples")
         logger.info("Mode: Caption Recording Visualization")
     else:
-        plots_dir = os.path.join(plots_dir, f"as{SUBJECT_ID:02d}_{SESSION_ID:02d}_samples_per_scene")
-        logger.info("Mode: Scene Viewing Visualization")   
+        plots_dir = os.path.join(output_dir, f"as{subject_id:02d}_{session_id:02d}_samples_per_scene")
+        logger.info("Mode: Scene Viewing Visualization")
 
     logger.info(f"Using standardized visual parameters:")
     logger.info(f"  Screen size: {config.screen_size_pixels} pixels")
@@ -382,30 +387,20 @@ def main(plot_captions: bool = True):
     logger.info(f"  Pixels per degree: {config.get_pixels_per_degree():.1f}")
     logger.info(f"  Scene scaling factor: {config.get_scene_scaling_factor():.3f}\n")
 
-    # Check if paths exist
-    if not os.path.exists(DATA_PATH):
-        logger.error(f"Data path not found: {DATA_PATH}")
-        logger.error("Please update DATA_PATH in the script")
-        return
-
-    if not os.path.exists(MSCOCO_IMAGE_DIR):
-        logger.error(f"MSCOCO image directory not found: {MSCOCO_IMAGE_DIR}")
+    if not os.path.exists(mscoco_image_dir):
+        logger.error(f"MSCOCO image directory not found: {mscoco_image_dir}")
         return
 
     # Step 1: Load eye tracking samples with scene information
-    logger.info(f"Step 1: Loading eye tracking samples for subject {SUBJECT_ID}, session {SESSION_ID}")
-    try:
-        samples_df = load_samples_with_scenes(
-            subject_id=SUBJECT_ID,
-            session=SESSION_ID,
-            data_path=DATA_PATH,
-            verbose=True
-        )
-        logger.info(f"Loaded {len(samples_df)} samples")
-        logger.info(f"Sample types: {samples_df['type'].value_counts().to_dict()}")
-    except Exception as e:
-        logger.error(f"Error loading samples: {e}")
-        return
+    logger.info(f"Step 1: Loading eye tracking samples for subject {subject_id}, session {session_id}")
+    samples_df = load_samples_with_scenes(
+        subject_id=subject_id,
+        session=session_id,
+        data_path=data_path,
+        verbose=True
+    )
+    logger.info(f"Loaded {len(samples_df)} samples")
+    logger.info(f"Sample types: {samples_df['type'].value_counts().to_dict()}")
 
     # Step 2: Filter samples with valid types (exclude NaN and blinks for visualization)
     logger.info(f"\nStep 2: Filtering samples for visualization")
@@ -476,7 +471,7 @@ def main(plot_captions: bool = True):
                 plot_samples_on_scene(
                     scene_id_int,
                     samples_typed,
-                    MSCOCO_IMAGE_DIR,
+                    mscoco_image_dir,
                     config,
                     output_dir=plots_dir
                 )
@@ -485,7 +480,7 @@ def main(plot_captions: bool = True):
 
     # Print final summary
     logger.info(f"\n=== Summary ===")
-    logger.info(f"Subject: {SUBJECT_ID}, Session: {SESSION_ID}")
+    logger.info(f"Subject: {subject_id}, Session: {session_id}")
     logger.info(f"Total samples loaded: {len(samples_df)}")
     logger.info(f"Samples visualized: {len(samples_typed)}")
     logger.info(f"  Fixation samples: {(samples_typed['type'] == 'fixation').sum()}")
@@ -499,6 +494,61 @@ def main(plot_captions: bool = True):
         logger.info(f"Unique scenes: {len(scene_samples['sceneID'].unique())}")
 
     logger.info(f"Plots saved to: {plots_dir}")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description=(
+            "Visualize eye tracking sample datapoints on scene images (or, "
+            "in --plot-captions mode, on a grey background during caption "
+            "recording), colored by fixation/saccade/blink type."
+        )
+    )
+    parser.add_argument(
+        '--data-path', '-d',
+        type=str,
+        default=None,
+        help='AVS BIDS data directory',
+    )
+    parser.add_argument(
+        '--output-dir', '-o',
+        type=str,
+        required=True,
+        help='Output directory for plots',
+    )
+    parser.add_argument(
+        '--subject', '-s',
+        type=int, default=1,
+        help='Subject ID (default: 1)',
+    )
+    parser.add_argument(
+        '--session',
+        type=int, default=1,
+        help='Session number (default: 1)',
+    )
+    parser.add_argument(
+        '--plot-captions',
+        action='store_true',
+        help='Plot caption-recording samples on a grey background instead of scene-viewing samples',
+    )
+
+    args = parser.parse_args()
+
+    if args.data_path is None:
+        from pyavs import get_data_path as _get_dp
+        args.data_path = _get_dp()
+    if args.data_path is None:
+        parser.error(
+            "No data path configured. Run: pyavs configure --data-path /path/to/data"
+        )
+
+    run(
+        data_path=args.data_path,
+        output_dir=args.output_dir,
+        subject_id=args.subject,
+        session_id=args.session,
+        plot_captions=args.plot_captions,
+    )
 
 
 if __name__ == "__main__":

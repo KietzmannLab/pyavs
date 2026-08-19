@@ -84,11 +84,9 @@ class EyeTrackingPlotter:
         logger.info(f"Sessions: {sorted(self.df['session'].unique())}")
     
     def load_scene(self, scene_id):
-        """Load and scale scene image."""
-        scene_file = self.layout.scene_image(scene_id)
-
-        if not scene_file.exists():
-            raise FileNotFoundError(f"Scene image not found for scene {scene_id}: {scene_file}")
+        """Load and scale scene image, fetching it on demand from COCO if not
+        shipped/cached locally."""
+        scene_file = self.layout.ensure_scene_image(scene_id)
 
         img = Image.open(scene_file)
         

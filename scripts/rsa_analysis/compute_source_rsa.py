@@ -45,6 +45,7 @@ except ImportError as e:
 
 # Project imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+from pyavs.layout import sub as fs_subject_name
 from pyavs.source.forward import load_forward_model
 from pyavs.preprocessing.composer import AVSComposer
 from pyavs.utils.logging import get_logger
@@ -403,7 +404,6 @@ def process_subject(
     rsa_results_dir: str,
     output_dir: str,
     subjects_dir: str,
-    fwd_dir: Optional[str],
     fwd_session: int,
     morph_to: str,
     n_jobs: int,
@@ -434,10 +434,10 @@ def process_subject(
         Root output directory.
     subjects_dir : str
         FreeSurfer subjects directory.
-    fwd_dir : str or None
-        AVS-UTILS root for pre-computed forward solutions.
     fwd_session : int
-        Fallback session for forward solution (ignored when fwd_dir is set).
+        Session passed to load_forward_model(). Only takes effect if a
+        per-session forward was recomputed into the pyAVS derivatives tree;
+        otherwise the shipped, session-independent forward is used.
     morph_to : str
         Target subject for morphing (e.g. 'fsaverage').
     n_jobs : int
@@ -456,7 +456,7 @@ def process_subject(
 
     # Load forward solution once per subject (shared across models)
     try:
-        fwd = load_forward_model(subject, fwd_session, data_path, fwd_dir=fwd_dir)
+        fwd = load_forward_model(subject, fwd_session, data_path)
     except FileNotFoundError as e:
         logger.error(str(e))
         return
@@ -475,7 +475,7 @@ def process_subject(
     # Load fsaverage source space once per subject
     src_fsaverage = _load_fsaverage_src(subjects_dir, morph_to)
 
-    subject_from = SUBJECT_FS_MAPPING.get(subject, f'as{subject:02d}')
+    subject_from = SUBJECT_FS_MAPPING.get(subject, fs_subject_name(subject))
     subject_out_dir = Path(output_dir) / f"sub-{subject:02d}"
     subject_out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -962,17 +962,14 @@ def main():
         help='Output directory for source RSA .stc files',
     )
     parser.add_argument(
-        '--fwd-dir',
-        type=str, default=None,
-        help=(
-            'Root of AVS-UTILS tree containing pre-computed forward models. '
-            'When given, --fwd-session is ignored.'
-        ),
-    )
-    parser.add_argument(
         '--fwd-session',
         type=int, default=1,
-        help='Fallback forward session (default: 1, ignored when --fwd-dir is set)',
+        help=(
+            'Session passed to load_forward_model() (default: 1). Only takes '
+            'effect if a per-session forward was recomputed into the pyAVS '
+            'derivatives tree; otherwise the shipped, session-independent '
+            'forward from derivatives/freesurfer/ is used.'
+        ),
     )
     parser.add_argument(
         '--morph-to',
@@ -1043,7 +1040,6 @@ def main():
             rsa_results_dir=args.rsa_results_dir,
             output_dir=args.output_dir,
             subjects_dir=args.subjects_dir,
-            fwd_dir=args.fwd_dir,
             fwd_session=args.fwd_session,
             morph_to=args.morph_to,
             n_jobs=args.n_jobs,

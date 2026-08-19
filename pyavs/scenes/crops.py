@@ -20,7 +20,8 @@ from .objects import load_object_masks
 def _resolve_scene_image(scene_id: int,
                          scene_images: Optional[Dict[int, str]] = None,
                          data_path: Optional[str] = None) -> str:
-    """Resolve the on-disk path of one MEG-size scene image.
+    """Resolve the on-disk path of one MEG-size scene image, fetching it on
+    demand from COCO if not shipped/cached locally.
 
     Parameters
     ----------
@@ -35,22 +36,12 @@ def _resolve_scene_image(scene_id: int,
     Returns
     -------
     str
-        Path to ``stimuli/images/{scene_id:012d}_MEG_size.jpg``.
-
-    Raises
-    ------
-    FileNotFoundError
-        If the image does not exist.
+        Path to the MEG-size scene image.
     """
     if scene_images is not None and scene_id in scene_images:
-        image_path = scene_images[scene_id]
-    else:
-        image_path = get_layout(data_path).scene_image(scene_id)
+        return str(scene_images[scene_id])
 
-    if not os.path.exists(image_path):
-        raise FileNotFoundError(f"Scene image not found: {image_path}")
-
-    return str(image_path)
+    return str(get_layout(data_path).ensure_scene_image(scene_id))
 
 
 def create_fixation_crops(eye_events_df: pd.DataFrame, 

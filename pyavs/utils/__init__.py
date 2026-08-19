@@ -18,7 +18,8 @@ from .paths import (
     get_subject_session_id,
     convert_session_to_letter,
     convert_letter_to_session,
-    get_default_subjects_dir
+    get_default_subjects_dir,
+    get_derivatives_path
 )
 
 from .tables import (
