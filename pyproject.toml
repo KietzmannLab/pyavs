@@ -76,7 +76,6 @@ Homepage = "https://github.com/KietzmannLab/pyavs"
 Documentation = "https://pyavs.readthedocs.io/"
 Repository = "https://github.com/KietzmannLab/pyavs.git"
 "Bug Reports" = "https://github.com/KietzmannLab/pyavs/issues"
-Changelog = "https://github.com/KietzmannLab/pyavs/blob/main/CHANGELOG.md"
 
 [project.scripts]
 pyavs = "pyavs.cli:main"

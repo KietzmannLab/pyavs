@@ -1,7 +1,6 @@
 # Include important files in the package distribution
 include README.md
 include LICENSE
-include CHANGELOG.md
 include requirements.txt
 include .readthedocs.yaml
 

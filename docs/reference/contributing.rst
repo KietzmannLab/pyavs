@@ -275,7 +275,6 @@ Recognition
 
 Contributors are recognized in:
 
-- CHANGELOG.md for each release
 - README.md contributors section
 - Documentation acknowledgments
 

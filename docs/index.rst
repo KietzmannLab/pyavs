@@ -146,7 +146,6 @@ Corresponding: phsulewski@gmail.com, tim.kietzmann@uni-osnabrueck.de.
    reference/faq
    reference/terms_of_use
    reference/contributing
-   reference/changelog
    reference/license
 
 Indices and Tables
