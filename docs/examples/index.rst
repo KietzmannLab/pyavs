@@ -8,6 +8,14 @@ explanatory prose.
 For the core **AVSComposer** workflow (the recommended entry point for most analyses), see
 the dedicated :doc:`../package/composer_guide` instead of this section.
 
+.. tip::
+
+   New to pyAVS? `pyavs_colab_quickstart.ipynb
+   <https://colab.research.google.com/github/KietzmannLab/pyavs/blob/main/examples/pyavs_colab_quickstart.ipynb>`__
+   is a ~15 minute, no-install Colab notebook covering raw MEG + eye tracking, plotting gaze
+   on a scene image, and a flagship fixation-locked MEG comparison -- a gentler starting point
+   than the scripts below, which assume a local data path is already configured.
+
 .. toctree::
    :maxdepth: 2
    :caption: Available Examples

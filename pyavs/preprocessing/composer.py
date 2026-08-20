@@ -48,13 +48,11 @@ class AVSComposer:
         data_path: Optional[str] = None,
         output_path: Optional[str] = None,
         et_path: Optional[str] = None,
-        diagnostics: Optional[dict] = None,
         preprocessed: bool = True,
         recompute_prepro: bool = False,
         max_block: Optional[int] = None,
         min_block: int = 1,
         stim_channel: str = 'STI101',
-        server: str = "uos",
         verbose: bool = True,
         write_output: bool = True,
         interpolate_bad_channels: bool = True,
@@ -85,10 +83,9 @@ class AVSComposer:
             The directory where the output will be saved. If None, uses data_path.
         et_path : str, optional
             The directory where the eyetracking data is stored. If None, uses data_path.
-        diagnostics : dict, optional
-            A dictionary containing diagnostic information.
         preprocessed : bool, optional
-            Whether to run the diagnostics on preprocessed data. Defaults to True.
+            Whether to load Maxwell-filtered (SSS) raw data instead of the
+            original raw files, computing it first if missing. Defaults to True.
         recompute_prepro : bool, optional
             Whether to recompute the preprocessed data even if it is available. Defaults to False.
         max_block : int, optional
@@ -97,8 +94,6 @@ class AVSComposer:
             The minimum block number. Defaults to 1.
         stim_channel : str, optional
             The channel that contains the trigger events. Defaults to 'STI101'.
-        server : str, optional
-            The server name. Defaults to "uos".
         verbose : bool, optional
             Whether to print additional information. Defaults to True.
         write_output : bool, optional
@@ -135,7 +130,6 @@ class AVSComposer:
         self.layout = get_layout(data_path)
         self.data_path = str(self.layout.root)
         data_path = self.data_path
-        self.server = server
         self.et_path = et_path if et_path is not None else data_path
         self.output_path = output_path if output_path is not None else data_path
         

@@ -22,6 +22,7 @@ from typing import Optional, List
 from pyavs.config.config import PyAVSConfig
 from pyavs.utils.logging import get_logger
 from pyavs.captions.load import load_captions
+from pyavs.layout import Layout
 
 logger = get_logger('scripts.fix2cap')
 
@@ -118,26 +119,27 @@ def load_fix2cap_data(
     if verbose:
         logger.info(f"Loading fix2cap data for datasets: {datasets}")
 
-    # Construct path to fix2cap data
-    fix2cap_dir = os.path.join(data_path, "AVS-UTILS", "fix2cap")
+    layout = Layout(data_path)
 
     dfs = []
     for dataset in datasets:
-        csv_file = os.path.join(fix2cap_dir, f"fix2cap_events_{dataset}.csv")
+        parquet_file = layout.fix2cap(dataset)
 
-        if not os.path.exists(csv_file):
-            logger.warning(f"File not found: {csv_file}")
+        if not parquet_file.exists():
+            logger.warning(f"File not found: {parquet_file}")
             continue
 
         if verbose:
-            logger.info(f"Loading {csv_file}...")
+            logger.info(f"Loading {parquet_file}...")
 
-        df = pd.read_csv(csv_file)
+        df = pd.read_parquet(parquet_file)
         df['rater_id'] = dataset
         dfs.append(df)
 
     if len(dfs) == 0:
-        raise FileNotFoundError(f"No fix2cap CSV files found in {fix2cap_dir}")
+        raise FileNotFoundError(
+            f"No fix2cap tables found under {layout.fix2cap('<rater>').parent}"
+        )
 
     # Concatenate all datasets
     fix2cap = pd.concat(dfs, ignore_index=True)
@@ -512,7 +514,6 @@ def select_scenes(
 def plot_fix2cap_on_scene(
     scene_id: int,
     fix2cap_df: pd.DataFrame,
-    mscoco_image_dir: str,
     config: PyAVSConfig,
     output_dir: str = "plots",
     max_fixations: int = 500,
@@ -532,10 +533,9 @@ def plot_fix2cap_on_scene(
         COCO scene ID to plot
     fix2cap_df : pd.DataFrame
         Fix2cap dataframe with none_style column
-    mscoco_image_dir : str
-        Path to MSCOCO images directory
     config : PyAVSConfig
-        Configuration with visual system parameters
+        Configuration with visual system parameters (used for both the
+        coordinate transform and to resolve the scene image via Layout)
     output_dir : str
         Output directory for plots
     max_fixations : int
@@ -564,13 +564,10 @@ def plot_fix2cap_on_scene(
     #     scene_fixations = scene_fixations.head(max_fixations)
     #     logger.info(f"  Limited to {max_fixations} fixations for readability")
 
-    # Find and load the scene image
-    scene_id_str = str(int(scene_id)).zfill(12) + "_MEG_size"
-    candidate_path = os.path.join(mscoco_image_dir, f"{scene_id_str}.jpg")
-
-    if not os.path.exists(candidate_path):
-        logger.error(f"Scene image not found: {candidate_path}")
-        return
+    # Find and load the scene image (fetched on demand if not shipped/cached, see
+    # Layout.ensure_scene_image -- stimuli/images is no longer shipped in avs-public).
+    # main()'s calling loop already wraps this in a per-scene try/except.
+    candidate_path = Layout(config.data_path).ensure_scene_image(scene_id, download=True)
 
     # Load and rescale image using config (same as et_viz)
     scene_image = Image.open(candidate_path)
@@ -700,8 +697,6 @@ def main(subject_id: Optional[int] = None):
         subject_id = 4  # Default subject for demonstration
         logger.info(f"No subject specified, using default subject {subject_id}")
 
-    MSCOCO_IMAGE_DIR = os.path.join(config.data_path, "AVS-UTILS", "avs_scenes")
-
     logger.info(f"Using standardized visual parameters:")
     logger.info(f"  Screen size: {config.screen_size_pixels} pixels")
     logger.info(f"  Screen usage: {config.screen_usage}")
@@ -712,10 +707,6 @@ def main(subject_id: Optional[int] = None):
     if not os.path.exists(config.data_path):
         logger.error(f"Data path not found: {config.data_path}")
         logger.error("Please update data_path to point to your AVS data directory")
-        return
-
-    if not os.path.exists(MSCOCO_IMAGE_DIR):
-        logger.error(f"MSCOCO image directory not found: {MSCOCO_IMAGE_DIR}")
         return
 
     # Step 1: Load fix2cap data for specific subject
@@ -793,7 +784,6 @@ def main(subject_id: Optional[int] = None):
             plot_fix2cap_on_scene(
                 scene_id_int,
                 fix2cap_df,
-                MSCOCO_IMAGE_DIR,
                 config,
                 output_dir=plots_dir,
                 captions_df=captions_df

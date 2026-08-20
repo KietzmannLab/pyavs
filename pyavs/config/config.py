@@ -131,9 +131,6 @@ class PyAVSConfig:
     # set it when the dataset copy is read-only.
     derivatives_path: Optional[str] = None
 
-    # Server configuration (machine room: "uos")
-    server: str = "auto"  # "auto", "uos", "mpi", "ikw"
-
     # Output configuration
     output_prefix: str = "as"  # Machine room standard
     cache_dir: Optional[str] = None
@@ -217,7 +214,11 @@ class PyAVSConfig:
 
         self.stimuli_dir = str(layout.stimuli_dir)
         self.subjects_dir = str(layout.subjects_dir)
-        self.derivatives_path = str(layout.derivatives_root)
+        # derivatives_path is deliberately NOT reassigned here: writing the
+        # resolved default back into it would make every later setup_paths()
+        # call see it as an explicit override and pin it to today's data_path
+        # forever. get_layout()/get_derivatives_path() already recompute the
+        # default fresh from data_path whenever derivatives_path is None.
 
     def _detect_data_path(self) -> Optional[str]:
         """Auto-detect data path via cascade: env var → user config."""
@@ -335,7 +336,6 @@ class PyAVSConfig:
             'max_block': self.max_block,
             'interpolate_bad_channels': self.interpolate_bad_channels,
             'n_jobs': self.n_jobs,
-            'server': self.server,
             'verbose': self.verbose,
             'preprocessed': True,
             'recompute_prepro': self.recompute_meg_prepro,
@@ -527,9 +527,6 @@ class PyAVSConfig:
         if self.data_path and not os.path.exists(self.data_path):
             # Allow non-existent paths for flexibility
             pass
-        
-        if self.server not in ["auto", "uos", "mpi", "ikw"]:
-            raise ValueError(f"Unknown server: {self.server}")
         
         # Data validation
         if self.data_type not in ["epochs", "raw", "population_codes", "source"]:

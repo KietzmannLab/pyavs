@@ -1,14 +1,15 @@
 """
 On-demand fetching of AVS scene images.
 
-The public release does not ship per-image scene JPEGs under ``stimuli/images/``
-(the underlying COCO/Flickr photos carry no redistribution license). This module
-reconstructs the MEG-size stimuli on first use: it resolves each scene's
-``coco_url`` from ``stimuli/avs_scenes_all_licenses.parquet``, downloads the
-original from COCO's own hosting, and reapplies the same center-crop + resize
-used to build the shipped images (:func:`pyavs.scenes.transform_scene_annotations.crop_resize`).
-Callers should go through :meth:`pyavs.layout.Layout.ensure_scene_image`, which
-caches the result under ``derivatives_root`` so repeat calls skip the network.
+Reconstructs the MEG-size stimuli directly from COCO's own hosting: resolves
+each scene's ``coco_url`` from ``stimuli/avs_scenes_all_licenses.parquet``,
+downloads the original, and reapplies the same center-crop + resize used to
+build the shipped images (:func:`pyavs.scenes.transform_scene_annotations.crop_resize`).
+Used as the fallback tier of :meth:`pyavs.layout.Layout.ensure_scene_image`'s
+cache -> shipped -> fetch lookup (see :attr:`pyavs.layout.Layout.scenes_dir` for
+whether shipped per-image JPEGs are still part of the release). Callers should
+go through ``ensure_scene_image``, which caches the result under
+``derivatives_root`` so repeat calls skip the network.
 """
 
 from io import BytesIO

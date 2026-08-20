@@ -36,6 +36,28 @@ def test_set_data_path_visible_to_internal_utils_config(tmp_path):
     assert pyavs.utils.config.get_data_path() == str(tmp_path)
 
 
+def test_set_data_path_updates_derivatives_path(tmp_path):
+    """A second set_data_path() call must not stay pinned to the first path.
+
+    Regression test: setup_paths() used to write the resolved derivatives
+    default (<data_path>/derivatives/pyavs) back into config.derivatives_path
+    itself, the same field reserved for an explicit user override. Once set
+    once, it never went back to None, so every later set_data_path() call saw
+    a "genuine override" that was really just the previous call's computed
+    default — permanently pinning derivatives_path to the first data_path.
+    """
+    from pyavs.config.manager import get_config
+
+    path_a = tmp_path / "a"
+    path_b = tmp_path / "b"
+
+    pyavs.set_data_path(str(path_a))
+    assert get_config().config.get_derivatives_path() == str(path_a / "derivatives" / "pyavs")
+
+    pyavs.set_data_path(str(path_b))
+    assert get_config().config.get_derivatives_path() == str(path_b / "derivatives" / "pyavs")
+
+
 def test_modules_importable():
     """Test that all main modules can be imported."""
     import pyavs.dataloader

@@ -7,6 +7,10 @@ instructions_claude.md
 # Original AVS machine room scripts
 AVS-machine-room/
 avs_handbook/
+*.fif
+*.parquet
+*.hdf5
+*.h5
 
 # Python
 __pycache__/

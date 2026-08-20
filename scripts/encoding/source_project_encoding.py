@@ -235,8 +235,11 @@ def create_grad_info(template_raw_path: str, sfreq: float) -> mne.Info:
     # Create info with grad channels only
     info_grad = mne.pick_info(raw.info, picks_grad)
 
-    # Update sampling frequency to match encoding data
-    info_grad['sfreq'] = sfreq
+    # Update sampling frequency to match encoding data. MNE >= 1.12 locks
+    # Info against direct key assignment (RuntimeError: sfreq cannot be set
+    # directly), so this must go through _unlock().
+    with info_grad._unlock():
+        info_grad['sfreq'] = sfreq
 
     print(f"  Created Info with {len(info_grad['ch_names'])} gradiometer channels")
     print(f"  Sampling frequency: {sfreq} Hz")

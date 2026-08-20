@@ -11,25 +11,32 @@ Features:
 - Example images saved to cluster subfolders (AVS-sized images)
 - License + Flickr metadata saved as JSON per cluster for paper-safe attribution
 
-Usage (with defaults, requires `pyavs configure --data-path /path/to/data` to have been run once):
+Usage (with defaults, requires `pyavs configure --data-path /path/to/avs-public` to have been run once):
     python -m scripts.scene_clustering.plot_scene_clusters
 
 Usage (with custom paths):
     python -m scripts.scene_clustering.plot_scene_clusters \\
-        --embeddings-csv /path/to/df_mean_embeddings_clustered_60.csv \\
-        --avs-scenes /path/to/experiment_cocoIDs.csv \\
-        --avs-scenes-dir /path/to/avs_scenes \\
-        --permissive-csv /path/to/ms_coco_permissive_images.csv \\
-        --flickr-metadata-csv /path/to/avs_permissive_images_with_flickr.csv \\
+        --embeddings-csv /path/to/df_mean_embeddings_clustered_60.parquet \\
+        --avs-scenes /path/to/experiment_cocoIDs.parquet \\
+        --permissive-csv /path/to/avs_permissive_images_with_flickr.parquet \\
+        --flickr-metadata-csv /path/to/avs_permissive_images_with_flickr.parquet \\
         --output-dir /path/to/output
 
-Default paths (derived from the auto-detected pyavs data root, see pyavs.get_data_path()):
-    embeddings-csv: <data-root>/input/scene_sampling_MEG/df_mean_embeddings_clustered_60.csv
-    avs-scenes: <data-root>/input/scene_sampling_MEG/experiment_cocoIDs.csv
-    avs-scenes-dir: <data-root>/AVS-UTILS/avs_scenes
-    permissive-csv: <data-root>/AVS-UTILS/avs_scene_annotations/ms_coco_permissive_images.csv
-    flickr-metadata-csv: <data-root>/AVS-UTILS/avs_scene_annotations/avs_permissive_images_with_flickr.csv
+Default paths (derived from the auto-detected pyavs data root via Layout, see
+pyavs.get_data_path() / pyavs.layout.Layout). --embeddings-csv/--avs-scenes/
+--permissive-csv/--flickr-metadata-csv accept either .csv or .parquet:
+    embeddings-csv: Layout.scene_embeddings_clustered()
+        -> stimuli/scene_sampling_MEG/df_mean_embeddings_clustered_60.parquet
+    avs-scenes: Layout.experiment_coco_ids()
+        -> stimuli/scene_sampling_MEG/experiment_cocoIDs.parquet
+    permissive-csv, flickr-metadata-csv: Layout.permissive_images_with_flickr()
+        -> stimuli/avs_permissive_images_with_flickr.parquet (same file serves both --
+        it carries both license_id and flickr_* attribution columns)
     output-dir: /share/klab/psulewski/psulewski/pyavs/scene_clustering
+
+Scene images (for individual_clusters/ example crops) are resolved via
+Layout.ensure_scene_image, fetched on demand from COCO if not already shipped/cached --
+stimuli/images is not shipped in avs-public (see release/README.md, Task 4 2026-08-19).
 
 Output structure:
     output_dir/
@@ -53,7 +60,6 @@ import json
 import logging
 import os
 import shutil
-from pathlib import Path
 from typing import Optional
 
 import matplotlib.colors
@@ -65,7 +71,9 @@ from scipy.stats import chi2_contingency
 from sklearn.manifold import TSNE
 
 from pyavs import get_data_path
+from pyavs.layout import Layout
 from pyavs.utils.logging import get_logger
+from pyavs.utils.tables import read_table
 
 logger = get_logger('scripts.scene_clustering')
 
@@ -93,7 +101,7 @@ def get_paper_safe_coco_ids(
     set[int]
         Set of COCO IDs with permitted licenses
     """
-    df = pd.read_csv(permissive_csv)
+    df = read_table(permissive_csv)
     filtered = df[df['license_id'].isin(license_ids)]
     logger.info(f"Found {len(filtered)} images with license IDs {license_ids}")
     return set(filtered['coco_id'].astype(int))
@@ -118,11 +126,11 @@ def load_embeddings_data(
     tuple[pd.DataFrame, set[int]]
         Embeddings dataframe and set of AVS COCO IDs
     """
-    df_embeddings = pd.read_csv(embeddings_csv)
+    df_embeddings = read_table(embeddings_csv)
     logger.info(f"Loaded {len(df_embeddings)} scene embeddings")
     print("DF Embeddings head:")
     print(df_embeddings.head())
-    df_avs = pd.read_csv(avs_scenes_csv)
+    df_avs = read_table(avs_scenes_csv)
     print("DF AVS head:")
     print(df_avs.head())
   
@@ -489,7 +497,7 @@ def report_cluster_share_statistics(
 
 def save_cluster_examples(
     df_embeddings: pd.DataFrame,
-    avs_scenes_dir: str,
+    layout: Layout,
     output_dir: str,
     permissive_csv: str,
     flickr_df: Optional[pd.DataFrame] = None,
@@ -508,12 +516,14 @@ def save_cluster_examples(
     ----------
     df_embeddings : pd.DataFrame
         Embeddings dataframe with 'cluster' and 'cocoID' columns
-    avs_scenes_dir : str
-        Directory containing AVS-sized scene images (AVS-UTILS/avs_scenes)
+    layout : Layout
+        Resolves AVS-sized scene images, fetching from COCO on demand via
+        :meth:`Layout.ensure_scene_image` if not already shipped/cached
+        (``stimuli/images`` is not shipped in avs-public).
     output_dir : str
         Output directory for cluster subfolders
     permissive_csv : str
-        Path to CSV with COCO license info
+        Path to COCO license info table (CSV or Parquet)
     flickr_df : pd.DataFrame, optional
         DataFrame with Flickr metadata. If provided, filters to scenes with
         complete metadata and includes Flickr fields in the licenses.json.
@@ -530,7 +540,7 @@ def save_cluster_examples(
         List of dicts with coco_id and cluster info for saved examples
     """
     # Load license info
-    df_licenses = pd.read_csv(permissive_csv)
+    df_licenses = read_table(permissive_csv)
 
     # Merge Flickr metadata if provided
     if flickr_df is not None:
@@ -580,9 +590,12 @@ def save_cluster_examples(
         for _, row in examples.iterrows():
             coco_id = int(row['cocoID'])
 
-            # Find source image (AVS-sized)
-            src_path = _find_avs_scene_image(avs_scenes_dir, coco_id)
-            if src_path is None:
+            # Find source image (AVS-sized), fetching from COCO on demand if needed.
+            # Per-item try/except is deliberate batch robustness: a single missing/
+            # unfetchable image shouldn't abort the whole cluster.
+            try:
+                src_path = layout.ensure_scene_image(coco_id, download=True)
+            except FileNotFoundError:
                 logger.warning(f"Image not found for coco_id {coco_id}")
                 continue
 
@@ -638,20 +651,6 @@ def save_cluster_examples(
     return all_saved_examples
 
 
-def _find_avs_scene_image(avs_scenes_dir: str, coco_id: int) -> Optional[Path]:
-    """Find AVS-sized scene image by COCO ID."""
-    avs_scenes_dir = Path(avs_scenes_dir)
-    # list files in avs_scenes_dir and find one that contains the coco_id as a substring
-    
-    # AVS scenes use zero-padded 12-digit filenames
-    filename = f"{coco_id:012d}_MEG_size.jpg"
-    print()
-    path = avs_scenes_dir / filename
-
-    if path.exists():
-        return path
-
-    return None
 
 
 def plot_individual_cluster_tsne(
@@ -721,20 +720,15 @@ def plot_individual_cluster_tsne(
     logger.info(f"Saved: {png_path}")
 
 
-def _default_under(root: Optional[str], *parts: str) -> Optional[str]:
-    """Join path parts under an auto-detected data root, or None if unconfigured
-    (explicit --flags on the CLI still work without pyavs being configured)."""
-    return os.path.join(root, *parts) if root else None
-
-
-# Default paths, derived from the auto-detected pyavs data root (see pyavs.configure())
+# Default paths, derived from the auto-detected pyavs data root via Layout (see
+# pyavs.configure() / pyavs.layout.Layout). None if unconfigured -- explicit --flags
+# on the CLI still work without pyavs being configured.
 _DATA_ROOT = get_data_path()
-DEFAULT_INPUT_DIR = _default_under(_DATA_ROOT, 'input')
-DEFAULT_AVS_UTILS_DIR = _default_under(_DATA_ROOT, 'AVS-UTILS')
+_LAYOUT = Layout(_DATA_ROOT) if _DATA_ROOT else None
 DEFAULT_OUTPUT_DIR = '/share/klab/psulewski/psulewski/pyavs/scene_clustering'
-DEFAULT_FLICKR_METADATA_PATH = _default_under(
-    _DATA_ROOT, 'AVS-UTILS', 'avs_scene_annotations', 'avs_permissive_images_with_flickr.csv'
-)
+DEFAULT_EMBEDDINGS_CSV = str(_LAYOUT.scene_embeddings_clustered()) if _LAYOUT else None
+DEFAULT_AVS_SCENES_CSV = str(_LAYOUT.experiment_coco_ids()) if _LAYOUT else None
+DEFAULT_FLICKR_METADATA_PATH = str(_LAYOUT.permissive_images_with_flickr()) if _LAYOUT else None
 
 # Required Flickr metadata fields for attribution
 FLICKR_REQUIRED_FIELDS = ['flickr_nsid', 'flickr_username', 'flickr_title',
@@ -752,36 +746,29 @@ def main():
     parser.add_argument(
         '--embeddings-csv',
         type=str,
-        default=_default_under(DEFAULT_INPUT_DIR, 'scene_sampling_MEG', 'df_mean_embeddings_clustered_60.csv'),
-        help='Path to CSV with scene embeddings and cluster assignments'
+        default=DEFAULT_EMBEDDINGS_CSV,
+        help='Path to table (CSV or Parquet) with scene embeddings and cluster assignments'
     )
 
     parser.add_argument(
         '--avs-scenes',
         type=str,
-        default=_default_under(DEFAULT_INPUT_DIR, 'scene_sampling_MEG', 'experiment_cocoIDs.csv'),
-        help='Path to CSV with AVS experiment COCO IDs'
-    )
-
-    parser.add_argument(
-        '--avs-scenes-dir',
-        type=str,
-        default=_default_under(DEFAULT_AVS_UTILS_DIR, 'avs_scenes'),
-        help='Directory containing AVS-sized scene images'
+        default=DEFAULT_AVS_SCENES_CSV,
+        help='Path to table (CSV or Parquet) with AVS experiment COCO IDs'
     )
 
     parser.add_argument(
         '--permissive-csv',
         type=str,
-        default=_default_under(DEFAULT_AVS_UTILS_DIR, 'avs_scene_annotations', 'avs_permissive_images_with_flickr.csv'),
-        help='Path to CSV with COCO image license info'
+        default=DEFAULT_FLICKR_METADATA_PATH,
+        help='Path to table (CSV or Parquet) with COCO image license info'
     )
 
     parser.add_argument(
         '--flickr-metadata-csv',
         type=str,
         default=DEFAULT_FLICKR_METADATA_PATH,
-        help='Path to CSV with Flickr metadata for attribution'
+        help='Path to table (CSV or Parquet) with Flickr metadata for attribution'
     )
 
     parser.add_argument(
@@ -849,13 +836,20 @@ def main():
     for path_arg, path_val in [
         ('embeddings-csv', args.embeddings_csv),
         ('avs-scenes', args.avs_scenes),
-        ('avs-scenes-dir', args.avs_scenes_dir),
         ('permissive-csv', args.permissive_csv),
         ('flickr-metadata-csv', args.flickr_metadata_csv),
     ]:
         if not os.path.exists(path_val):
             logger.error(f"Path not found for --{path_arg}: {path_val}")
             return 1
+
+    if _LAYOUT is None:
+        logger.error(
+            "No data path configured (needed to resolve/fetch scene images). "
+            "Run: pyavs configure --data-path /path/to/avs-public"
+        )
+        return 1
+    layout = _LAYOUT
 
     # Load data
     logger.info("Loading data...")
@@ -866,7 +860,7 @@ def main():
 
     # Load Flickr metadata for attribution
     logger.info(f"Loading Flickr metadata from {args.flickr_metadata_csv}")
-    flickr_df = pd.read_csv(args.flickr_metadata_csv)
+    flickr_df = read_table(args.flickr_metadata_csv)
 
     # Get paper-safe COCO IDs
     logger.info(f"Filtering examples by license IDs: {args.license_ids}")
@@ -932,7 +926,7 @@ def main():
         # Save example images to cluster subfolder (with license JSON and Flickr metadata)
         examples = save_cluster_examples(
             df_avs_only,
-            args.avs_scenes_dir,
+            layout,
             individual_dir,
             args.permissive_csv,
             flickr_df=flickr_df,

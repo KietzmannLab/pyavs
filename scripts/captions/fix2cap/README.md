@@ -35,11 +35,11 @@ The `fix2cap` module visualizes human annotation data from the fixation-to-capti
 
 ## Data Source
 
-Fix2cap data is loaded from:
+Fix2cap data is loaded via `Layout.fix2cap(rater)` from `avs-public`:
 ```
-/share/klab/datasets/avs/AVS-UTILS/fix2cap/
-├── fix2cap_events_ld.csv    # Language-driven dataset
-└── fix2cap_events_og.csv    # Original dataset
+derivatives/pyavs/fix2cap/
+├── fix2cap_events_ld.parquet    # Language-driven dataset
+└── fix2cap_events_og.parquet    # Original dataset
 ```
 
 By default, both datasets are loaded and concatenated.
@@ -76,11 +76,11 @@ captions_df = load_captions(
     data_path=config.data_path
 )
 
-# Plot a specific scene
+# Plot a specific scene (scene image resolved via Layout.ensure_scene_image,
+# fetched on demand from COCO if not already shipped/cached)
 plot_fix2cap_on_scene(
     scene_id=123456,
     fix2cap_df=fix2cap_df,
-    mscoco_image_dir="/share/klab/datasets/avs/AVS-UTILS/avs_scenes",
     config=config,
     output_dir="./fix2cap_plots",
     captions_df=captions_df  # Optional: displays caption below scene
@@ -153,7 +153,6 @@ fix2cap_df = process_none_style(fix2cap_df)
 plot_fix2cap_on_scene(
     scene_id=123456,
     fix2cap_df=fix2cap_df,
-    mscoco_image_dir=mscoco_dir,
     config=config,
     marker_size=700,      # Larger markers
     alpha=0.4,            # More transparent
@@ -218,8 +217,9 @@ Both formats use:
 ## Requirements
 
 ### Data Requirements
-- Fix2cap CSV files (preprocessed human rating data)
-- AVS scene images (AVS-UTILS/avs_scenes)
+- Fix2cap rating tables (`derivatives/pyavs/fix2cap/*.parquet`, via `Layout.fix2cap`)
+- AVS scene images, fetched on demand via `Layout.ensure_scene_image` if not already
+  shipped/cached (stimuli/images is not shipped in avs-public)
 - PyAVSConfig for consistent coordinate transformations
 
 ### Software Dependencies
@@ -300,8 +300,8 @@ When running the main script:
 === Fix2cap Visualization ===
 
 Loading fix2cap data for datasets: ['ld', 'og']
-Loading /share/klab/datasets/avs/AVS-UTILS/fix2cap/fix2cap_events_ld.csv...
-Loading /share/klab/datasets/avs/AVS-UTILS/fix2cap/fix2cap_events_og.csv...
+Loading /path/to/avs-public/derivatives/pyavs/fix2cap/fix2cap_events_ld.parquet...
+Loading /path/to/avs-public/derivatives/pyavs/fix2cap/fix2cap_events_og.parquet...
 Loaded 15000 total fixations from 2 dataset(s)
 Filtered to fix2cap_done==True: 12000/15000 (80.0%)
 Unique scenes: 500
@@ -330,13 +330,14 @@ Plots saved to: /share/klab/psulewski/psulewski/pyavs/fix2cap_output
 
 ## Troubleshooting
 
-### "No fix2cap CSV files found"
-- Check that data_path points to the correct AVS data directory
-- Verify that CSV files exist in `{data_path}/AVS-UTILS/fix2cap/`
+### "No fix2cap tables found"
+- Check that data_path points to an `avs-public` root
+- Verify Parquet files exist under `{data_path}/derivatives/pyavs/fix2cap/`
 
 ### "Scene image not found"
-- Check that MSCOCO_IMAGE_DIR points to the correct scene directory
-- Verify scene images are named `{scene_id:012d}_MEG_size.jpg`
+- `Layout.ensure_scene_image` checks a local cache, the shipped copy (if present), then
+  fetches from COCO — check network access if all three fail
+- Verify the scene ID has a valid `coco_url` in `Layout.scene_licenses()`
 
 ### "Could not find gaze coordinate columns"
 - Verify the CSV has either `mean_gx`/`mean_gy` or `gx`/`gy` columns

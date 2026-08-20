@@ -22,10 +22,11 @@ renamed (``as0X`` → ``sub-0X``), because it has to work as an MNE
 
     avs-public/
     ├── manifest.tsv
-    ├── stimuli/{images,annotations/{coco_objects,cocostuff},avs_scenes_all_licenses.parquet}
+    ├── stimuli/{annotations/{coco_objects,cocostuff},avs_scenes_all_licenses.parquet,
+    │            avs_permissive_images_with_flickr.parquet,scene_sampling_MEG/}
     ├── sub-0X/{anat,ses-0Y/{meg,eyetrack,beh}}
     └── derivatives/
-        ├── pyavs/sub-0X/ses-0Y/{meg,epochs,eyetrack}
+        ├── pyavs/{fix2cap/,sub-0X/ses-0Y/{meg,epochs,eyetrack}}
         └── freesurfer/sub-0X/{bem,label,mri/transforms,surf}
 
 Nothing here touches the filesystem: every method is pure string construction
@@ -704,6 +705,62 @@ class Layout:
     def scene_licenses(self) -> Path:
         """Per-image license table, ``stimuli/avs_scenes_all_licenses.parquet``."""
         return self.stimuli_dir / 'avs_scenes_all_licenses.parquet'
+
+    def permissive_images_with_flickr(self) -> Path:
+        """Permissive-license COCO image subset with Flickr attribution metadata.
+
+        A distinct, smaller table than :meth:`scene_licenses` (a permissive-
+        license subset with rich ``flickr_*`` attribution columns, vs. the
+        full 4,080-image license table with none).
+
+        Returns
+        -------
+        Path
+            ``stimuli/avs_permissive_images_with_flickr.parquet``.
+        """
+        return self.stimuli_dir / 'avs_permissive_images_with_flickr.parquet'
+
+    @property
+    def scene_sampling_dir(self) -> Path:
+        """Scene-clustering / NSD-sampling tables, ``stimuli/scene_sampling_MEG/``."""
+        return self.stimuli_dir / 'scene_sampling_MEG'
+
+    def scene_embeddings_clustered(self) -> Path:
+        """Mean NSD+AVS scene embeddings with cluster assignments.
+
+        Returns
+        -------
+        Path
+            ``stimuli/scene_sampling_MEG/df_mean_embeddings_clustered_60.parquet``.
+        """
+        return self.scene_sampling_dir / 'df_mean_embeddings_clustered_60.parquet'
+
+    def experiment_coco_ids(self) -> Path:
+        """AVS experiment COCO scene IDs with their cluster assignment.
+
+        Returns
+        -------
+        Path
+            ``stimuli/scene_sampling_MEG/experiment_cocoIDs.parquet``.
+        """
+        return self.scene_sampling_dir / 'experiment_cocoIDs.parquet'
+
+    def fix2cap(self, rater: str) -> Path:
+        """Fix2cap fixation-to-caption human rating table for one rater.
+
+        Parameters
+        ----------
+        rater : {'ld', 'og'}
+            Rater dataset.
+
+        Returns
+        -------
+        Path
+            ``derivatives/pyavs/fix2cap/fix2cap_events_{rater}.parquet``, under
+            :attr:`derivatives_root` (a shipped derivative, same convention as
+            :meth:`ica`/:meth:`epochs`).
+        """
+        return self.derivatives_root / 'fix2cap' / f'fix2cap_events_{rater}.parquet'
 
     def ensure_scene_image(self, scene_id: Union[int, str], download: bool = True) -> Path:
         """Scene image for a COCO ID, fetching it on demand if not present.
