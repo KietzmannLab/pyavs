@@ -104,6 +104,7 @@ from .io import save_source_data, save_annotated_raw, save_population_codes_h5, 
 from .source.spaces import create_source_space, get_roi_labels, get_glasser_roi_labels
 from .visualization.meg import plot_evoked_joint, plot_median_erf, plot_sensor_space_overview
 from .visualization.events_on_scene import EyeTrackingPlotter
+from .remote import AVSRemote, open_remote
 
 # Main workflow functions
 def load_and_preprocess_eye_tracking(subjects, sessions, data_path=None, **kwargs):
@@ -332,6 +333,7 @@ from . import scenes
 from . import utils
 from . import io
 from . import pilot
+from . import remote
 from .pilot import (
     load_pilot_events,
     load_pilot_samples,
