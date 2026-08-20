@@ -256,10 +256,40 @@ def load_epochs(subject_id: int,
     csv_metadata = load_metadata_csv(subject_id, session, event_type, data_path)
     if not csv_metadata.empty:
         metadata_df = csv_metadata
-    
+
+    return build_epochs_array(data_dict, metadata_df, attributes_dict)
+
+
+def build_epochs_array(data_dict: Dict[str, np.ndarray],
+                       metadata_df: pd.DataFrame,
+                       attributes_dict: Dict[str, Any]) -> mne.Epochs:
+    """
+    Reconstruct an ``mne.Epochs`` object from raw per-ROI arrays + metadata.
+
+    Shared by :func:`load_epochs` (single whole-session h5) and
+    :class:`pyavs.remote.query.EpochQuery` (assembled from range-read chunks
+    spanning one or more remote h5 files) — both end up with the same
+    ``data_dict``/``metadata_df``/``attributes_dict`` shape and need identical
+    channel-naming/timing/metadata-attachment logic.
+
+    Parameters
+    ----------
+    data_dict : dict of str to np.ndarray
+        Per-ROI epoch arrays (``'grad'``/``'mag'`` or a single ``'epochs'``
+        key), each shaped ``(n_epochs, n_channels, n_times)``.
+    metadata_df : pd.DataFrame
+        Per-epoch metadata, row-aligned with the epoch axis.
+    attributes_dict : dict
+        File attributes; ``'times'`` (sample times) and ``'hz'`` (sampling
+        rate) are used when present.
+
+    Returns
+    -------
+    mne.Epochs
+    """
     if not data_dict:
-        raise ValueError(f"No epoch data found for subject {subject_id}, session {session}, event_type {event_type}")
-    
+        raise ValueError("No epoch data provided")
+
     # Reconstruct epochs data - combine mag and grad if they exist separately
     if 'mag' in data_dict and 'grad' in data_dict:
         # Combine magnetometer and gradiometer data

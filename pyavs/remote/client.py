@@ -36,6 +36,8 @@ from ..dataloader.meg import (
     load_meg_preprocessed as _load_meg_preprocessed,
 )
 from ..io.read import load_epochs as _load_epochs, load_epochs_h5 as _load_epochs_h5
+from .catalog import load_epochs_catalog
+from .query import EpochQuery
 from .store import DEFAULT_BUCKET, DEFAULT_REGION, RemoteFileNotFoundError, S3Store
 
 __all__ = ['AVSRemote', 'open_remote']
@@ -55,18 +57,25 @@ class AVSRemote:
         S3 bucket name (default: the public AVS release bucket).
     region : str, optional
         Bucket region (default: ``'us-west-2'``).
+    verbose : bool, optional
+        Log size/time/cache-location feedback for each fetch (default:
+        True). Set False for silent fetching.
 
     Examples
     --------
     >>> avs = AVSRemote()
     >>> explog = avs.load_experiment_log(1, 1)
-    >>> epochs = avs.load_epochs(1, 1, event_type='fixation_scene')
+    >>> epochs = avs.load_epochs(1, 1, event_type='fixation_scene')  # one whole session
+    >>> dogs = avs.epochs(event_type='fixation_scene').where("object_label == 'dog'")
+    >>> dog_epochs = dogs.load()  # range-read only the matching epochs, across subjects
     """
 
     def __init__(self, cache_root: Optional[Union[str, Path]] = None,
-                 bucket: str = DEFAULT_BUCKET, region: str = DEFAULT_REGION):
-        self.store = S3Store(cache_root=cache_root, bucket=bucket, region=region)
+                 bucket: str = DEFAULT_BUCKET, region: str = DEFAULT_REGION,
+                 verbose: bool = True):
+        self.store = S3Store(cache_root=cache_root, bucket=bucket, region=region, verbose=verbose)
         self._layout = Layout(self.store.cache_root)
+        self._epochs_catalog = None
 
     def __repr__(self) -> str:
         return f"AVSRemote({self.store!r})"
@@ -135,6 +144,52 @@ class AVSRemote:
         self._fetch(self._layout.epochs_metadata(subject_id, session, event_type))
         return _load_epochs(subject_id, session, event_type=event_type, data_path=self.data_path)
 
+    def epochs(self, event_type: Optional[str] = None,
+              subject_id: Optional[int] = None, session: Optional[int] = None) -> EpochQuery:
+        """
+        Open a content-indexed query over every epoch in the dataset.
+
+        Downloads (and caches) the small epoch catalog on first call, then
+        filters entirely locally -- no bulk data is fetched until
+        :meth:`EpochQuery.load` is called. This is what makes "every
+        fixation on a dog, across subjects" answerable without downloading
+        each session's full epoch file.
+
+        Parameters
+        ----------
+        event_type : str, optional
+            Restrict to ``'fixation_scene'`` or ``'saccade_scene'``
+            (default: both).
+        subject_id : int, optional
+            Restrict to one subject (default: all).
+        session : int, optional
+            Restrict to one session (default: all).
+
+        Returns
+        -------
+        EpochQuery
+
+        Notes
+        -----
+        Only epochs whose underlying h5 has actually been uploaded to the
+        bucket can be `.load()`-ed; the catalog itself covers the whole
+        released dataset regardless of upload progress. A query spanning
+        un-uploaded sessions raises :class:`RemoteFileNotFoundError` on
+        `.load()`.
+        """
+        if self._epochs_catalog is None:
+            self._epochs_catalog = load_epochs_catalog(self.store)
+
+        df = self._epochs_catalog
+        if event_type is not None:
+            df = df[df['event_type'] == event_type]
+        if subject_id is not None:
+            df = df[df['subject'] == subject_id]
+        if session is not None:
+            df = df[df['session'] == session]
+
+        return EpochQuery(df, self.store)
+
     def load_anatomical(self, subject_id: int) -> str:
         """Fetch and return the path to the defaced T1 volume. See :func:`pyavs.load_anatomical`."""
         try:
@@ -145,7 +200,8 @@ class AVSRemote:
 
 
 def open_remote(cache_root: Optional[Union[str, Path]] = None,
-                bucket: str = DEFAULT_BUCKET, region: str = DEFAULT_REGION) -> AVSRemote:
+                bucket: str = DEFAULT_BUCKET, region: str = DEFAULT_REGION,
+                verbose: bool = True) -> AVSRemote:
     """
     Open a remote AVS client backed by the public S3 release bucket.
 
@@ -157,9 +213,12 @@ def open_remote(cache_root: Optional[Union[str, Path]] = None,
         S3 bucket name (default: the public AVS release bucket).
     region : str, optional
         Bucket region (default: ``'us-west-2'``).
+    verbose : bool, optional
+        Log size/time/cache-location feedback for each fetch (default:
+        True). Set False for silent fetching.
 
     Returns
     -------
     AVSRemote
     """
-    return AVSRemote(cache_root=cache_root, bucket=bucket, region=region)
+    return AVSRemote(cache_root=cache_root, bucket=bucket, region=region, verbose=verbose)

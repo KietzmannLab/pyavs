@@ -7,7 +7,7 @@ This guide will get you started with pyAVS in just a few minutes.
 
    Prefer to run code rather than read it? `Open the interactive Colab quickstart
    <https://colab.research.google.com/github/KietzmannLab/pyavs/blob/main/examples/pyavs_colab_quickstart.ipynb>`__
-   -- a ~15 minute, no-install walkthrough of raw MEG + eye tracking + a flagship
+   -- a ~15 minute, no-install walkthrough of raw MEG + eye tracking + a
    fixation-locked MEG comparison on one subject/session. The static source is at
    :doc:`examples/index` / ``examples/pyavs_colab_quickstart.ipynb`` in the repository.
 
