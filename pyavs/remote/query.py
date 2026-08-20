@@ -16,9 +16,22 @@ opening the remote file over :mod:`fsspec`'s ``HTTPFileSystem`` with
 range request per chunk rather than downloading the file. ``cache_type='none'``
 matters: fsspec's default block-caching would pull in ~8x more bytes than
 needed for this scattered access pattern (measured in the design doc).
+
+Moving fewer bytes doesn't by itself make this fast: each chunk is its own
+HTTP round trip, and a serial loop over hundreds of scattered epochs is
+latency-bound, not bandwidth-bound (measured: 220 epochs from 4 files moved
+68x less data than downloading those files whole, but took *longer* in wall
+clock -- 100s serial vs. ~95s for the whole-file download). ``load()``
+therefore issues chunk reads concurrently via a thread pool: independent
+range requests overlap instead of queueing one after another. Read tasks are
+split both across files (the common "one query, many
+sessions/subjects" case) and, within one file, across sub-batches when a
+single file has enough matching epochs to be worth it -- so a query
+concentrated in one session benefits too, not just cross-subject queries.
 """
 
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Sequence
 
 import fsspec
@@ -34,6 +47,11 @@ from .store import RemoteFileNotFoundError, S3Store, _format_size
 logger = get_logger('remote.query')
 
 DEFAULT_PICKS = ('grad', 'mag')
+DEFAULT_MAX_WORKERS = 8
+# Below this many epochs, opening a second handle to the same file (~14 extra
+# requests to re-open, per the design doc's measurement) costs more than it
+# saves -- keep small per-file matches as a single task.
+MIN_EPOCHS_PER_TASK = 25
 
 
 class EpochQuery:
@@ -79,16 +97,27 @@ class EpochQuery:
         """
         return EpochQuery(self.metadata.query(expr), self._store)
 
-    def load(self, picks: Sequence[str] = DEFAULT_PICKS) -> mne.Epochs:
+    def load(self, picks: Sequence[str] = DEFAULT_PICKS,
+             max_workers: int = DEFAULT_MAX_WORKERS) -> mne.Epochs:
         """
         Range-read only the matching epochs and assemble them into one
         ``mne.Epochs``, row-aligned with ``.metadata``.
+
+        Chunk reads run concurrently across a thread pool (see module
+        docstring) -- each is an independent HTTP request, so overlapping
+        them cuts wall-clock time roughly in proportion to ``max_workers``
+        for queries spread across enough files/epochs to fill the pool.
 
         Parameters
         ----------
         picks : sequence of str, optional
             Which ROI arrays to read (default: both ``'grad'`` and
             ``'mag'``, matching the local API's default combination).
+        max_workers : int, optional
+            Concurrent range-read workers (default: 8). Higher isn't free --
+            each worker holds its own connection, and bucket-side throttling
+            under heavy concurrency is unmeasured; 8 is an untuned starting
+            point, not a validated ceiling.
 
         Returns
         -------
@@ -101,40 +130,67 @@ class EpochQuery:
         n = len(df)
         data_dict = {pick: None for pick in picks}
         attributes_dict = {}
+        tasks = self._build_read_tasks(df, max_workers)
 
         start = time.monotonic()
         bytes_read = 0
-        n_files = df['file_dst'].nunique()
 
-        for file_dst, group in df.groupby('file_dst', sort=False):
-            positions = group.index.to_numpy()
-            epoch_indices = group['epoch_index'].to_numpy()
-            order = np.argsort(epoch_indices)
-            sorted_indices = epoch_indices[order]
-
-            h5, fobj = self._open_remote_h5(file_dst)
-            try:
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(tasks))) as pool:
+            futures = [pool.submit(self._read_task, file_dst, positions, indices, picks)
+                      for file_dst, positions, indices in tasks]
+            for future in as_completed(futures):
+                attrs, positions, result = future.result()
                 if not attributes_dict:
-                    attributes_dict.update(dict(h5.attrs))
-                for pick in picks:
-                    ds = h5[pick]['onset']
+                    attributes_dict.update(attrs)
+                for pick, chunk in result.items():
                     if data_dict[pick] is None:
-                        data_dict[pick] = np.empty((n,) + ds.shape[1:], dtype=ds.dtype)
-                    chunk = ds[sorted_indices]
-                    data_dict[pick][positions[order]] = chunk
+                        data_dict[pick] = np.empty((n,) + chunk.shape[1:], dtype=chunk.dtype)
+                    data_dict[pick][positions] = chunk
                     bytes_read += chunk.nbytes
-            finally:
-                h5.close()
-                fobj.close()
 
         elapsed = time.monotonic() - start
         if self._store.verbose:
             speed = bytes_read / 1e6 / elapsed if elapsed > 0 else float('inf')
-            logger.info(f"Loaded {n} epochs from {n_files} file(s): "
-                       f"{_format_size(bytes_read)} range-read in {elapsed:.1f}s "
+            n_files = df['file_dst'].nunique()
+            logger.info(f"Loaded {n} epochs from {n_files} file(s) via {len(tasks)} concurrent "
+                       f"read(s): {_format_size(bytes_read)} range-read in {elapsed:.1f}s "
                        f"({speed:.1f} MB/s)")
 
         return build_epochs_array(data_dict, df, attributes_dict)
+
+    @staticmethod
+    def _build_read_tasks(df: pd.DataFrame, max_workers: int):
+        """Split the query into (file_dst, positions, epoch_indices) read tasks.
+
+        One task per file, further split into up to ``max_workers``
+        sub-batches when a single file has enough matching epochs to make a
+        second connection to it worthwhile (see ``MIN_EPOCHS_PER_TASK``).
+        """
+        tasks = []
+        for file_dst, group in df.groupby('file_dst', sort=False):
+            positions = group.index.to_numpy()
+            epoch_indices = group['epoch_index'].to_numpy()
+            order = np.argsort(epoch_indices)
+            positions, epoch_indices = positions[order], epoch_indices[order]
+
+            n_splits = min(max_workers, max(1, len(epoch_indices) // MIN_EPOCHS_PER_TASK))
+            for pos_batch, idx_batch in zip(np.array_split(positions, n_splits),
+                                            np.array_split(epoch_indices, n_splits)):
+                if len(idx_batch) > 0:
+                    tasks.append((file_dst, pos_batch, idx_batch))
+        return tasks
+
+    def _read_task(self, file_dst: str, positions: np.ndarray, epoch_indices: np.ndarray,
+                   picks: Sequence[str]):
+        """Range-read one (file, epoch subset) task. Runs in a worker thread."""
+        h5, fobj = self._open_remote_h5(file_dst)
+        try:
+            attrs = dict(h5.attrs)
+            result = {pick: h5[pick]['onset'][epoch_indices] for pick in picks}
+            return attrs, positions, result
+        finally:
+            h5.close()
+            fobj.close()
 
     def _open_remote_h5(self, dst: str):
         url = self._store.url_for(dst)

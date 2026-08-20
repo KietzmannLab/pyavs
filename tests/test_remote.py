@@ -4,15 +4,15 @@ Tests for pyavs.remote — the S3-backed dataloader.
 Real network calls against the live public bucket (s3://kietzmannlab-avs),
 same convention as the rest of the suite's real-tree tests: gated on
 reachability rather than mocked, since pyAVS's tests generally exercise real
-data rather than stub it out. Only sub-01/ses-01 is uploaded so far, so tests
-are scoped to that subject/session.
+data rather than stub it out. Only sub-01/ses-01..04 are uploaded so far, so
+tests are scoped to that subject.
 """
 
 import socket
 
 import pytest
 
-from pyavs.remote import AVSRemote, RemoteFileNotFoundError, S3Store
+from pyavs.remote import AVSRemote, EpochQuery, RemoteFileNotFoundError, S3Store
 from pyavs.remote.store import DEFAULT_BUCKET, DEFAULT_REGION
 
 
@@ -87,3 +87,43 @@ def test_avs_remote_load_eye_events(tmp_path):
 
     assert len(events) > 0
     assert len(msgs) > 0
+
+
+@requires_network
+def test_epoch_query_where_filters_locally_without_loading_data(tmp_path):
+    avs = AVSRemote(cache_root=tmp_path)
+
+    q = avs.epochs(event_type='fixation_scene', subject_id=1, session=1)
+    dogs = q.where("object_label == 'dog'")
+
+    # Matches the independently-verified count from the whole-session load path
+    # and the Colab notebook's separate local-mount test.
+    assert len(dogs) == 62
+    assert len(dogs) < len(q)
+    assert (dogs.metadata['object_label'] == 'dog').all()
+
+
+@requires_network
+def test_epoch_query_load_range_reads_only_matching_epochs(tmp_path):
+    avs = AVSRemote(cache_root=tmp_path)
+    dogs = avs.epochs(event_type='fixation_scene', subject_id=1, session=1).where(
+        "object_label == 'dog'")
+    small = EpochQuery(dogs.metadata.head(3), avs.store)
+
+    epochs = small.load(picks=['grad'])
+
+    assert len(epochs) == 3
+    assert (epochs.metadata['object_label'] == 'dog').all()
+    assert epochs.get_data().shape[0] == 3
+
+
+@requires_network
+def test_epoch_query_load_missing_session_raises_remote_not_found(tmp_path):
+    avs = AVSRemote(cache_root=tmp_path, verbose=False)
+    # Catalog covers the whole released dataset regardless of upload progress --
+    # subject 2 isn't uploaded yet, but the query itself should still resolve.
+    q = avs.epochs(event_type='fixation_scene', subject_id=2, session=1)
+    assert len(q) > 0
+
+    with pytest.raises(RemoteFileNotFoundError):
+        EpochQuery(q.metadata.head(1), avs.store).load(picks=['grad'])
