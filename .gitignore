@@ -1,0 +1,329 @@
+# Claude-related files and directories
+CLAUDE.md
+instructions_claude.md
+*claude*
+*CLAUDE*
+
+# Original AVS machine room scripts
+AVS-machine-room/
+avs_handbook/
+*.fif
+*.parquet
+*.hdf5
+*.h5
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Translations
+*.mo
+*.pot
+
+# Django
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask
+instance/
+.webassets-cache
+
+# Scrapy
+.scrapy
+
+# Sphinx documentation (build output only -- docs/_static/ and docs/_templates/ are
+# tracked source directories, not generated)
+docs/_build/
+
+# PyBuilder
+.pybuilder/
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# poetry
+poetry.lock
+
+# pdm
+.pdm.toml
+
+# PEP 582
+__pypackages__/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# PyCharm
+.idea/
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Linux
+*~
+
+# Temporary files
+*.tmp
+*.temp
+*~
+
+# Log files
+*.log
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Data files (large datasets)
+*.h5
+*.hdf5
+*.mat
+*.edf
+*.bdf
+*.csv
+
+# Configuration files with sensitive data
+config.ini
+secrets.yaml
+.env.local
+.env.production
+
+# Compiled extensions
+*.so
+*.dll
+*.dylib
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# pytest
+.pytest_cache/
+
+# mypy
+.mypy_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# poetry
+poetry.lock
+
+# Environments
+.env
+.env.local
+.env.*.local
+
+# Editor directories and files
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# FreeSurfer related (if included in repo)
+# Uncomment if you don't want to track FreeSurfer files
+# subjects/
+# FREESURFER_HOME/
+
+# MNE sample data (if downloaded)
+mne_data/
+
+# Large data files that shouldn't be in git
+data/
+datasets/
+*.nii
+*.nii.gz
+*.mgz
+
+# Compiled documentation
+_build/
+
+# Generated API docs
+docs/api/generated/
+
+#SLUMR STUFF
+*.out
+*.err
+
+# image files
+*.png
+*.jpg
+*.jpeg
+*.svg
+*.pdf
+*.gif
+
+*source_data.csv
+*stats.txt
+
+# Bundled package reference data: small CSV/JSON files shipped inside pyavs/pyavs/data/
+# (see pyproject.toml package-data / MANIFEST.in). Distinct from the external AVS dataset,
+# which is never stored in-repo and is configured via pyavs.configure() / PYAVS_DATA_PATH.
+!pyavs/data/
+!pyavs/data/*.csv
+!pyavs/data/*.json
+
+# Sphinx docs source assets (logo, favicon, hero images) -- exception to the blanket
+# image-extension ignore rules above, which would otherwise also swallow these.
+!docs/_static/
+!docs/_static/**
+!docs/_templates/
+!docs/_templates/**

@@ -1,0 +1,662 @@
+"""
+Fixation event visualization with object detection per scene.
+
+This script visualizes fixation events (not samples) with object labels on scene images.
+Originally from real_data_object_detection_example.py, now part of et_viz module.
+
+This demonstrates how to:
+1. Load actual eye tracking data for a subject and session
+2. Apply object detection using pre-transformed AVS scene annotations
+3. Visualize fixations and object labels overlaid on scene images
+4. Create summary plots of object fixation patterns
+
+Requirements:
+- Eye tracking data files (preprocessed)
+- Transformed AVS scene annotations (run transform_scene_annotations.py first)
+- Processed scene images (``stimuli/images``)
+- matplotlib for plotting
+
+Note: This uses the new simplified pyAVS approach with pre-transformed annotations
+that match the processed scene format used in the AVS experiment.
+
+Usage:
+    python plot_fixation_events_with_objects.py \\
+        --data-path /path/to/avs-public \\
+        --output-dir /path/to/output \\
+        --subject 4 --session 10
+
+Author: P. Sulewski (psulewski@uos.de)
+"""
+
+import argparse
+import os
+import json
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.patheffects as path_effects
+from PIL import Image
+from scipy import ndimage
+import pycocotools.mask as mask_util
+import seaborn as sns
+
+# pyAVS imports
+from pyavs.layout import get_layout
+from pyavs.scenes.objects import get_fixated_objects
+from pyavs.dataloader.eye import load_and_enrich_eye_events
+from pyavs.config.config import PyAVSConfig
+from pyavs.utils.logging import get_logger
+
+logger = get_logger('scripts.et_viz')
+
+
+def load_subject_eye_data(subject_id: int, session_id: int,
+                         data_path: str) -> pd.DataFrame:
+    """
+    Load eye tracking data for a specific subject and session using pyAVS composer.
+
+    Parameters
+    ----------
+    subject_id : int
+        Subject identifier
+    session_id : int
+        Session identifier
+    data_path : str
+        Path to data directory
+
+    Returns
+    -------
+    pd.DataFrame
+        Eye tracking events dataframe with scene information
+    """
+    logger.info(f"Loading eye tracking data for subject {subject_id}, session {session_id}")
+
+    # Load enriched eye events (includes scene mapping)
+    _, events_df = load_and_enrich_eye_events(
+        subjects=[subject_id],
+        sessions=[session_id],
+        data_path=data_path,
+        preprocessed=True,
+        verbose=True
+    )
+
+    # Filter to fixations only for this example
+    fixations = events_df[events_df['type'] == 'fixation'].copy()
+
+    logger.info(f"Loaded {len(fixations)} fixations")
+    logger.info(f"Unique scenes: {len(fixations['sceneID'].dropna().unique())}")
+
+    return fixations
+
+
+def add_object_labels_to_data(fixations_df: pd.DataFrame,
+                             transformed_annotations_dir: str,
+                             verbose: bool = True) -> pd.DataFrame:
+    """
+    Add object labels to fixation data using transformed AVS scene annotations.
+
+    Parameters
+    ----------
+    fixations_df : pd.DataFrame
+        Fixation events dataframe
+    transformed_annotations_dir : str
+        Path to transformed annotations directory
+    verbose : bool, optional
+        Print progress information
+
+    Returns
+    -------
+    pd.DataFrame
+        Fixations with object labels added
+    """
+    logger.info("Adding object labels to fixations using transformed annotations...")
+
+    # Use the new AVS transformed annotations approach
+    fixations_with_objects = get_fixated_objects(
+        fixations_df,
+        transformed_annotations_dir=transformed_annotations_dir,
+        verbose=verbose
+    )
+
+    # Print summary statistics
+    total_fixations = len(fixations_with_objects)
+    labeled_fixations = len(fixations_with_objects[fixations_with_objects['object_label'] != 'None'])
+
+    logger.info(f"Object detection results:")
+    logger.info(f"  Total fixations: {total_fixations}")
+    logger.info(f"  Fixations on objects: {labeled_fixations} ({labeled_fixations/total_fixations*100:.1f}%)")
+    logger.info(f"  Unique objects fixated: {len(fixations_with_objects['object_label'].unique())}")
+
+    return fixations_with_objects
+
+
+def plot_fixations_on_scene(scene_id: int, fixations_df: pd.DataFrame,
+                           mscoco_image_dir: str, config: PyAVSConfig,
+                           transformed_annotations_dir: str = None,
+                           output_dir: str = "plots", max_fixations: int = 50) -> None:
+    """
+    Plot fixations with object labels overlaid on a scene image.
+
+    Parameters
+    ----------
+    scene_id : int
+        COCO scene ID to plot
+    fixations_df : pd.DataFrame
+        Fixations dataframe with object labels
+    mscoco_image_dir : str
+        Path to MSCOCO images directory
+    config : PyAVSConfig
+        Configuration with visual system parameters (required)
+    transformed_annotations_dir : str, optional
+        Path to transformed annotations directory for segmentation mask plots
+    output_dir : str, optional
+        Output directory for plots
+    max_fixations : int, optional
+        Maximum number of fixations to plot (for readability)
+    """
+    # Filter fixations for this scene
+    scene_fixations = fixations_df[fixations_df['sceneID'] == scene_id].copy()
+    scene_fixations = scene_fixations.loc[scene_fixations["recording"] == "scene"]
+    scene_fixations = scene_fixations.loc[scene_fixations["type"] == "fixation"]
+    if len(scene_fixations) == 0:
+        logger.warning(f"No fixations found for scene {scene_id}")
+        return
+
+    # Limit number of fixations for readability
+    if len(scene_fixations) > max_fixations:
+        scene_fixations = scene_fixations.head(max_fixations)
+        logger.info(f"Showing first {max_fixations} fixations for scene {scene_id}")
+
+    # Find and load the scene image
+    scene_id_str = str(int(scene_id)).zfill(12)+"_MEG_size"
+
+
+    candidate_path = os.path.join(mscoco_image_dir, f"{scene_id_str}.jpg")
+    logger.info(f"Looking for scene image at: {candidate_path}")
+    if os.path.exists(candidate_path):
+        image_file = candidate_path
+    else:
+        logger.error(f"Scene image not found: {candidate_path}")
+        return
+
+    # Load and rescale image using config
+    scene_image = Image.open(image_file)
+    original_size = scene_image.size
+    rescaled_size = config.get_rescaled_scene_size(original_size)
+
+    if rescaled_size != original_size:
+        scene_image = scene_image.resize(rescaled_size)
+
+    img_width, img_height = rescaled_size
+
+    # Set publication-quality matplotlib parameters
+    plt.rcParams.update({
+        'font.size': 12,
+        'axes.linewidth': 1.5,
+        'xtick.major.width': 1.5,
+        'ytick.major.width': 1.5,
+        'figure.dpi': 300
+    })
+
+    # Create plot with publication-quality size (300 DPI)
+    fig, ax = plt.subplots(1, 1, figsize=(10, 7.5))  # 3000x2250 pixels at 300 DPI
+
+    # Get unique object labels and assign colors
+    unique_objects = scene_fixations['object_label'].unique()
+    colors = plt.cm.Set1(np.linspace(0, 1, min(len(unique_objects), 9)))  # Better color palette
+    object_colors = dict(zip(unique_objects, colors))
+
+    # Set image extent to center coordinate system
+    ax.imshow(scene_image, extent=[-img_width/2, img_width/2, -img_height/2, img_height/2])
+
+    # Track label positions to avoid overlaps
+    label_positions = {}
+
+    for i, (_, fixation) in enumerate(scene_fixations.iterrows()):
+        # Convert screen coordinates to image coordinates using config
+        x_screen = fixation['mean_gx']
+        y_screen = fixation['mean_gy']
+
+        # Transform to centered image coordinates
+        x = x_screen - config.screen_size_pixels[0]//2
+        y = y_screen - config.screen_size_pixels[1]//2
+
+        object_label = fixation['object_label']
+        color = object_colors[object_label]
+
+        # Plot fixation point with larger, more visible marker
+        ax.scatter(x, y, c=[color], s=800, alpha=0.7,
+                  edgecolors='white', linewidth=3, zorder=10)
+
+        # Add object label as text annotation directly on the image
+        # Position text to avoid overlap
+        if object_label not in label_positions:
+            label_positions[object_label] = (x, y)
+
+            # Create professional text annotation with background
+            ax.annotate(object_label,
+                       xy=(x, y), xytext=(10, 10),
+                       textcoords='offset points',
+                       fontsize=22, fontweight='bold',
+                       color='black',
+                       bbox=dict(boxstyle='round,pad=0.4',
+                               facecolor='lightgray',
+                               edgecolor='white',
+                               alpha=0.85),
+                       arrowprops=dict(arrowstyle='->',
+                                     connectionstyle='arc3,rad=0.1',
+                                     color=color,
+                                     lw=2),
+                       zorder=15)
+
+    # Set publication-quality title
+    #ax.set_title(f"Fixation patterns on scene {scene_id}",
+    #            fontsize=16, fontweight='bold', pad=20)
+    ax.axis('off')
+
+    # Ensure tight layout
+    plt.tight_layout()
+
+    # Save plot in both PNG and PDF formats
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Save as high-resolution PNG
+    png_file = os.path.join(output_dir, f"scene_{scene_id}_fixations.png")
+    plt.savefig(png_file, dpi=300, bbox_inches='tight', facecolor='white', edgecolor='none')
+
+    # Save as PDF for publications
+    pdf_file = os.path.join(output_dir, f"scene_{scene_id}_fixations.pdf")
+    plt.savefig(pdf_file, format='pdf', bbox_inches='tight', facecolor='white', edgecolor='none')
+
+    logger.info(f"Saved fixation plots:")
+    logger.info(f"  PNG: {png_file}")
+    logger.info(f"  PDF: {pdf_file}")
+
+    plt.show()
+    plt.close()
+
+    # Generate segmentation mask visualization if annotation directory provided
+    if transformed_annotations_dir is not None:
+        plot_segmentation_mask(scene_id, transformed_annotations_dir, config, output_dir)
+
+
+def plot_segmentation_mask(scene_id: int, transformed_annotations_dir: str,
+                           config: PyAVSConfig, output_dir: str = "plots") -> None:
+    """
+    Plot segmentation masks for a scene with category labels.
+
+    Creates a visualization showing all object segmentation masks with distinct
+    colors and category labels at the centroid of each region.
+
+    Parameters
+    ----------
+    scene_id : int
+        COCO scene ID to plot
+    transformed_annotations_dir : str
+        Path to transformed annotations directory
+    config : PyAVSConfig
+        Configuration with visual system parameters
+    output_dir : str, optional
+        Output directory for plots
+    """
+    # Load transformed annotations
+    annotation_file = os.path.join(transformed_annotations_dir, f"{scene_id}_transformed.json")
+
+    if not os.path.exists(annotation_file):
+        logger.warning(f"No transformed annotations found for scene {scene_id}")
+        return
+
+    with open(annotation_file, 'r') as f:
+        annotations = json.load(f)
+
+    if not annotations:
+        logger.warning(f"Empty annotations for scene {scene_id}")
+        return
+
+    # Get scene dimensions from config
+    scene_width = int(config.screen_size_pixels[0] * config.screen_usage)
+    scene_height = int(config.screen_size_pixels[1] * config.screen_usage)
+
+    # Create blank RGB image
+    segmentation_image = np.zeros((scene_height, scene_width, 3), dtype=np.float32)
+
+    # Get colormap with enough distinct colors
+    num_categories = len(annotations)
+    colors = []   
+    import colorsys                                                                                                         
+    for i in range(num_categories):                                                                                  
+        # Spread hues evenly, vary saturation and value to increase distinction                                      
+        hue = i / num_categories                                                                                     
+        saturation = 0.6 + 0.4 * ((i % 3) / 2)  # Vary between 0.6-1.0                                               
+        value = 0.7 + 0.3 * ((i % 2))  # Vary between 0.7-1.0                                                        
+        # Convert HSV to RGB                                                                                         
+                                                                                                
+        rgb = colorsys.hsv_to_rgb(hue, saturation, value)                                                            
+        colors.append(rgb)                                                                                           
+    colors = np.array(colors)   
+    # Store category info for labels
+    category_info = []
+
+    # Decode and fill each mask
+    for idx, (cat_id_str, obj_data) in enumerate(annotations.items()):
+        # Decode RLE mask
+        rle_data = obj_data['rle']
+        rle = {
+            'size': rle_data['size'],
+            'counts': rle_data['counts'].encode('utf-8') if isinstance(rle_data['counts'], str) else rle_data['counts']
+        }
+        mask = mask_util.decode(rle).astype(bool)
+
+        # Assign color (cycle through colormap)
+        color = colors[idx][:3]
+
+        # Fill mask region with color
+        segmentation_image[mask] = color
+
+        # Calculate centroid for label placement
+        if mask.any():
+            center_y, center_x = ndimage.center_of_mass(mask)
+            category_info.append({
+                'name': obj_data['category_name'],
+                'center_x': center_x,
+                'center_y': center_y,
+                'color': color
+            })
+
+    # Set up seaborn context
+    sns.set_context("poster")
+
+    # Create figure with same size parameters as fixation plot
+    plt.figure(figsize=(10, 7.5))
+    ax = plt.gca()
+
+    # Display segmentation image
+    ax.imshow(segmentation_image)
+
+    # Add category labels at centroids
+    for info in category_info:
+        if info['name'] in ['outside', 'unknown']:
+            continue
+        text = ax.text(
+            info['center_x'], info['center_y'],
+            info['name'],
+            color='white',
+            ha='center', va='center'
+        )
+        # Add black outline for readability on lighter colors
+        text.set_path_effects([
+            path_effects.Stroke(linewidth=2, foreground='black'),
+            path_effects.Normal()
+        ])
+
+    ax.axis('off')
+    plt.tight_layout()
+
+    # Save plots
+    os.makedirs(output_dir, exist_ok=True)
+
+    png_file = os.path.join(output_dir, f"scene_{scene_id}_segmentation.png")
+    plt.savefig(png_file, dpi=300, bbox_inches='tight', facecolor='white', edgecolor='none')
+
+    pdf_file = os.path.join(output_dir, f"scene_{scene_id}_segmentation.pdf")
+    plt.savefig(pdf_file, format='pdf', bbox_inches='tight', facecolor='white', edgecolor='none')
+
+    logger.info(f"Saved segmentation plots:")
+    logger.info(f"  PNG: {png_file}")
+    logger.info(f"  PDF: {pdf_file}")
+
+    sns.despine()
+    plt.close()
+
+
+def plot_object_fixation_summary(fixations_df: pd.DataFrame,
+                                output_dir: str = "plots") -> None:
+    """
+    Create summary plots of object fixation patterns.
+
+    Parameters
+    ----------
+    fixations_df : pd.DataFrame
+        Fixations dataframe with object labels
+    output_dir : str, optional
+        Output directory for plots
+    """
+    # Filter out None and outside fixations
+    object_fixations = fixations_df[
+        ~fixations_df['object_label'].isin(['None', 'outside'])
+    ].copy()
+
+    if len(object_fixations) == 0:
+        logger.warning("No object fixations to plot")
+        return
+
+    # Set publication-quality parameters for summary plots
+    plt.rcParams.update({
+        'font.size': 11,
+        'axes.linewidth': 1.2,
+        'xtick.major.width': 1.2,
+        'ytick.major.width': 1.2,
+        'figure.dpi': 300
+    })
+
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+
+    # 1. Most fixated objects
+    object_counts = object_fixations['object_label'].value_counts().head(15)
+
+    axes[0, 0].barh(range(len(object_counts)), object_counts.values)
+    axes[0, 0].set_yticks(range(len(object_counts)))
+    axes[0, 0].set_yticklabels(object_counts.index)
+    axes[0, 0].set_xlabel('Number of Fixations')
+    axes[0, 0].set_title('Most Fixated Objects')
+    axes[0, 0].grid(True, alpha=0.3)
+
+    # 2. Fixation duration by object type
+    if 'duration' in object_fixations.columns:
+        top_objects = object_counts.head(10).index
+        duration_data = []
+        labels = []
+
+        for obj in top_objects:
+            durations = object_fixations[object_fixations['object_label'] == obj]['duration']
+            if len(durations) > 0:
+                duration_data.append(durations)
+                labels.append(f"{obj}\n(n={len(durations)})")
+
+        if duration_data:
+            axes[0, 1].boxplot(duration_data, tick_labels=labels)
+            axes[0, 1].set_ylabel('Fixation Duration (s)')
+            axes[0, 1].set_title('Fixation Duration by Object Type')
+            axes[0, 1].tick_params(axis='x', rotation=45)
+    else:
+        axes[0, 1].text(0.5, 0.5, 'Duration data not available',
+                       ha='center', va='center', transform=axes[0, 1].transAxes)
+        axes[0, 1].set_title('Fixation Duration by Object Type')
+
+    # 3. Objects per scene
+    objects_per_scene = object_fixations.groupby('sceneID')['object_label'].nunique()
+
+    axes[1, 0].hist(objects_per_scene, bins=20, edgecolor='black', alpha=0.7)
+    axes[1, 0].set_xlabel('Number of Different Objects Fixated')
+    axes[1, 0].set_ylabel('Number of Scenes')
+    axes[1, 0].set_title('Object Diversity per Scene')
+    axes[1, 0].grid(True, alpha=0.3)
+
+    # 4. Fixation sequence analysis
+    if 'fix_sequence' in object_fixations.columns:
+        # Analyze first vs later fixations
+        first_fixations = object_fixations[object_fixations['fix_sequence'] == 0]
+        later_fixations = object_fixations[object_fixations['fix_sequence'] > 0]
+
+        first_objects = first_fixations['object_label'].value_counts().head(10)
+        later_objects = later_fixations['object_label'].value_counts().head(10)
+
+        all_objects = set(first_objects.index) | set(later_objects.index)
+
+        first_props = [first_objects.get(obj, 0) / len(first_fixations) * 100 for obj in all_objects]
+        later_props = [later_objects.get(obj, 0) / len(later_fixations) * 100 for obj in all_objects]
+
+        x = np.arange(len(all_objects))
+        width = 0.35
+
+        axes[1, 1].bar(x - width/2, first_props, width, label='First Fixations', alpha=0.8)
+        axes[1, 1].bar(x + width/2, later_props, width, label='Later Fixations', alpha=0.8)
+
+        axes[1, 1].set_ylabel('Percentage of Fixations')
+        axes[1, 1].set_title('First vs Later Fixations by Object')
+        axes[1, 1].set_xticks(x)
+        axes[1, 1].set_xticklabels(list(all_objects), rotation=45, ha='right')
+        axes[1, 1].legend()
+        axes[1, 1].grid(True, alpha=0.3)
+    else:
+        axes[1, 1].text(0.5, 0.5, 'Fixation sequence data not available',
+                       ha='center', va='center', transform=axes[1, 1].transAxes)
+        axes[1, 1].set_title('First vs Later Fixations by Object')
+
+    plt.tight_layout()
+
+    # Save plots in both formats
+    os.makedirs(output_dir, exist_ok=True)
+
+    png_file = os.path.join(output_dir, "object_fixation_summary.png")
+    pdf_file = os.path.join(output_dir, "object_fixation_summary.pdf")
+
+    plt.savefig(png_file, dpi=300, bbox_inches='tight', facecolor='white', edgecolor='none')
+    plt.savefig(pdf_file, format='pdf', bbox_inches='tight', facecolor='white', edgecolor='none')
+
+    logger.info(f"Saved summary plots:")
+    logger.info(f"  PNG: {png_file}")
+    logger.info(f"  PDF: {pdf_file}")
+
+    plt.show()
+    plt.close()
+
+
+def run(
+    data_path: str,
+    output_dir: str,
+    subject_id: int,
+    session_id: int,
+    top_n_scenes: int = 20,
+) -> None:
+    """
+    Main fixation event object detection workflow.
+    """
+    logger.info("=== Fixation Event Object Detection Visualization ===\n")
+
+    layout = get_layout(data_path)
+    config = PyAVSConfig()
+    config.data_path = data_path
+    transformed_annotations_dir = str(layout.annotations_dir('cocostuff'))
+    mscoco_image_dir = str(layout.scenes_dir)
+
+    logger.info(f"Using standardized visual parameters:")
+    logger.info(f"  Screen size: {config.screen_size_pixels} pixels")
+    logger.info(f"  Screen usage: {config.screen_usage}")
+    logger.info(f"  Pixels per degree: {config.get_pixels_per_degree():.1f}")
+    logger.info(f"  Scene scaling factor: {config.get_scene_scaling_factor():.3f}\n")
+
+    if not os.path.exists(transformed_annotations_dir):
+        logger.error(f"Transformed annotations directory not found: {transformed_annotations_dir}")
+        logger.error("Please run the annotation transformation script first:")
+        logger.error("python -m pyavs.scenes.transform_scene_annotations --avs-scenes-dir ... --output-dir ...")
+        return
+
+    # Step 1: Load eye tracking data
+    logger.info(f"Step 1: Loading eye tracking data for subject {subject_id}, session {session_id}")
+    fixations_df = load_subject_eye_data(subject_id, session_id, data_path)
+
+    # Step 2: Add object labels
+    logger.info(f"\nStep 2: Adding object labels to {len(fixations_df)} fixations")
+    fixations_with_objects = add_object_labels_to_data(fixations_df, transformed_annotations_dir, verbose=True)
+
+    # Step 3: Create visualizations
+    logger.info(f"\nStep 3: Creating visualizations")
+
+    # Plot summary statistics
+    plot_object_fixation_summary(fixations_with_objects, output_dir=output_dir)
+
+    # sort scenes by number of unique object fixations (getting more interesting scenes first)
+    selected_scenes = fixations_with_objects.groupby('sceneID')['object_label'].nunique().sort_values(ascending=False).index.tolist()
+    top_scenes = selected_scenes[:top_n_scenes]
+
+    for scene_id in top_scenes:
+        logger.info(f"\nPlotting fixations for scene {scene_id}")
+        plot_fixations_on_scene(
+            int(scene_id),
+            fixations_with_objects,
+            mscoco_image_dir,
+            config,
+            transformed_annotations_dir=transformed_annotations_dir,
+            output_dir=output_dir,)
+
+    # Print final summary
+    logger.info(f"\n=== Summary ===")
+    logger.info(f"Subject: {subject_id}, Session: {session_id}")
+    logger.info(f"Total fixations: {len(fixations_with_objects)}")
+    logger.info(f"Fixations on objects: {len(fixations_with_objects[fixations_with_objects['object_label'] != 'None'])}")
+    logger.info(f"Unique scenes: {len(fixations_with_objects['sceneID'].unique())}")
+    logger.info(f"Unique objects fixated: {len(fixations_with_objects[fixations_with_objects['object_label'] != 'None']['object_label'].unique())}")
+
+    top_objects = fixations_with_objects[fixations_with_objects['object_label'] != 'None']['object_label'].value_counts().head(5)
+    logger.info(f"\nTop 5 most fixated objects:")
+    for obj, count in top_objects.items():
+        logger.info(f"  {obj}: {count} fixations")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description=(
+            "Visualize fixation events with COCO/COCO-Stuff object labels "
+            "overlaid on scene images, for one subject/session."
+        )
+    )
+    parser.add_argument(
+        '--data-path', '-d',
+        type=str,
+        default=None,
+        help='AVS BIDS data directory',
+    )
+    parser.add_argument(
+        '--output-dir', '-o',
+        type=str,
+        required=True,
+        help='Output directory for plots',
+    )
+    parser.add_argument(
+        '--subject', '-s',
+        type=int, default=4,
+        help='Subject ID (default: 4)',
+    )
+    parser.add_argument(
+        '--session',
+        type=int, default=10,
+        help='Session number (default: 10)',
+    )
+    parser.add_argument(
+        '--top-n-scenes',
+        type=int, default=20,
+        help='Number of scenes (ranked by unique objects fixated) to plot (default: 20)',
+    )
+
+    args = parser.parse_args()
+
+    if args.data_path is None:
+        from pyavs import get_data_path as _get_dp
+        args.data_path = _get_dp()
+    if args.data_path is None:
+        parser.error(
+            "No data path configured. Run: pyavs configure --data-path /path/to/data"
+        )
+
+    run(
+        data_path=args.data_path,
+        output_dir=args.output_dir,
+        subject_id=args.subject,
+        session_id=args.session,
+        top_n_scenes=args.top_n_scenes,
+    )
+
+
+if __name__ == "__main__":
+    main()

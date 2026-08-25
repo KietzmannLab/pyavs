@@ -1,0 +1,588 @@
+#!/usr/bin/env python3
+"""
+Simple Plot of Encoding Results with MNE Joint Plot.
+
+This script loads encoding analysis results and creates a simple joint plot
+showing regression performance across time and sensors using MNE's visualization tools.
+
+Usage:
+    python plot_encoding_results.py --results-file /path/to/results.npz
+"""
+
+import argparse
+import os
+import sys
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from statsmodels.stats.multitest import multipletests
+from scipy.stats import bootstrap as scipy_bootstrap
+try:
+    import mne
+except ImportError as e:
+    print(f"Missing dependency: {e}")
+    sys.exit(1)
+
+
+def load_encoding_results(results_file: str):
+    """Load encoding results from NPZ file."""
+    if not os.path.exists(results_file):
+        raise FileNotFoundError(f"Results file not found: {results_file}")
+
+    # Load results
+    results = np.load(results_file, allow_pickle=True)
+
+    # Extract data
+    r_values = results['r_values']
+    times = results['times']
+
+    # Extract metadata
+    metadata = {
+        'subject_id': results.get('subject_id', 0),
+        'model_name': str(results.get('model_name', 'unknown')),
+        'layer': str(results.get('layer', 'unknown'))
+    }
+
+    print(f"Loaded encoding results: {r_values.shape[0]} channels, {r_values.shape[1]} timepoints")
+    print(f"Subject: {metadata['subject_id']}, Model: {metadata['model_name']}, Layer: {metadata['layer']}")
+
+    return r_values, times, metadata
+
+
+def load_multiple_subjects(results_dir: Path, subjects: list):
+    """
+    Load encoding results for multiple subjects.
+
+    Parameters
+    ----------
+    results_dir : Path
+        Directory containing encoding results
+    subjects : list
+        List of subject IDs to load
+
+    Returns
+    -------
+    subjects_data : list of dict
+        List of dictionaries, each containing:
+        - 'subject_id': subject identifier
+        - 'r_values': correlation values [channels × timepoints]
+        - 'times': time array
+        - 'metadata': metadata dict
+    """
+    subjects_data = []
+
+    for subject_id in subjects:
+        # Look for NPZ file matching this subject
+        # enter the subject sub-directory
+        subject_dir = results_dir / f"sub-{subject_id:02d}"
+        print(f"Searching for results in: {subject_dir}")
+        #model-resnet50_ecoset_crop_layer-avgpool_encoding_results.npz
+        pattern = f"model-*_layer-avgpool_encoding_results.npz"
+        matching_files = list(subject_dir.glob(pattern))
+
+        if not matching_files:
+            print(f"Warning: No results file found for subject {subject_id} (pattern: {pattern})")
+            continue
+
+        if len(matching_files) > 1:
+            print(f"Warning: Multiple files found for subject {subject_id}, using first: {matching_files[0].name}")
+
+        results_file = matching_files[0]
+        print(f"\nLoading subject {subject_id}: {results_file.name}")
+
+        r_values, times, metadata = load_encoding_results(str(results_file))
+
+        subjects_data.append({
+            'subject_id': subject_id,
+            'r_values': r_values,
+            'times': times,
+            'metadata': metadata
+        })
+
+    return subjects_data
+
+def create_mne_evoked(r_values: np.ndarray, times: np.ndarray, sfreq: float = 500.0, info: mne.Info = None) -> mne.EvokedArray:
+    """Create MNE Evoked object from encoding results."""
+    n_channels, n_times = r_values.shape
+
+    if info is None:
+        # Create default info if not provided
+        ch_names = [f'MEG{idx:03d}' for idx in range(n_channels)]
+        ch_types = ['mag'] * n_channels
+        info = mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types=ch_types)
+    # Create EvokedArray
+    # change the sfreq to match the times array
+    
+        
+        
+    evoked = mne.EvokedArray(r_values, info, tmin=times[0])
+    return evoked
+
+def plot_encoding_joint(evoked: mne.EvokedArray, output_dir: Path, metadata: dict):
+    """Plot joint topography and time course."""
+    try:
+        # Create joint plot
+   
+        import seaborn as sns
+        sns.set_context("poster")
+        sigma_ms = 5  # smoothing width in milliseconds
+        sigma_samples = sigma_ms * evoked.info['sfreq'] / 1000
+        evoked_smoothed = evoked.copy()
+        
+        from scipy.ndimage import gaussian_filter1d
+
+        evoked_smoothed.data = gaussian_filter1d(evoked.data, sigma=sigma_samples, axis=1)
+        # pick only grad channels
+        evoked = evoked.copy().pick_types(meg='grad')
+
+        fig = evoked_smoothed.plot(scalings=1, show=False, xlim=(-100, 350), time_unit='ms',
+                          units=dict(mag='encoding [r]',grad='encoding [r]'),
+                          titles=dict(mag='magnetometers', grad='gradiometers'),spatial_colors=False)
+                          
+
+        # make all lines gray and low alppha that never cross 0.075
+        # chage figsize
+        fig.set_size_inches(6, 5)
+        # despine
+        sns.despine(fig=fig)
+        print(fig.axes)
+        for ax in fig.axes[:-1]:
+            print(ax, ax.title.get_text())
+            for line in ax.get_lines():
+                #if np.any(np.abs(line.get_ydata()) < 0.1):
+                #     line.set_alpha(.2)
+                line.set_linewidth(2)
+                line.set_alpha(.4)
+        # incease size ot the small topomap
+        #ax_topo1 = fig.axes[3]
+        #box = ax_topo1.get_position()
+        #ax_topo1.set_position([box.x0 - 0.05, box.y0 - 0.05, box.width + 0.1, box.height + 0.1])
+        # add title to the small topomap
+        #ax_topo1.set_title('Topography at 110 ms', fontsize=16)
+        # vertical line at 0 ms
+        for ax in fig.axes:
+            if 'Time (ms)' in ax.get_xlabel():
+                ax.axvline(x=0, color='grey', linestyle='--')
+                ax.axhline(y=0, color='grey', linestyle='-')
+                ax.set_xlabel('time[ms]')
+                ax.set_title(None)
+            
+        # nuke the same chanels from the small topomap
+
+        # add the topo at t=110ms
+        #evoked.plot_topomap(times=0.110, ch_type='mag', colorbar=True, show=False, axes=fig.axes[0])
+        
+        # Save figure
+        output_file = output_dir / f'sub-{metadata["subject_id"]:02d}_encoding_joint.png'
+        plt.savefig(output_file, dpi=300, bbox_inches='tight')
+        print(f"Saved joint plot to {output_file}")
+        plt.close()
+
+    except IndentationError as e:
+        print(f"Could not create joint plot: {e}")
+
+
+def report_encoding_stats(
+    all_data: np.ndarray,
+    times_evoked: np.ndarray,
+    peak_t_idx: int,
+    output_dir: Path,
+    processing_params: dict,
+    n_bootstrap: int = 10_000,
+) -> dict:
+    """
+    Compute and print encoding stats across subjects (biological replicates).
+
+    Bootstrapped 95% CI (BCa method) for mean channel-averaged encoding at
+    peak time and at t=0. Saves a one-row CSV to output_dir/source_data/.
+
+    Parameters
+    ----------
+    all_data : np.ndarray, shape (n_subjects, n_channels, n_times)
+    times_evoked : np.ndarray
+        Times in seconds from grand_avg_evoked.times
+    peak_t_idx : int
+        Index of peak encoding time
+    output_dir : Path
+    processing_params : dict
+        Processing parameters to record (e.g. filter settings, channel type)
+    n_bootstrap : int
+        Number of bootstrap resamples (default 10,000)
+    """
+    subject_means = all_data.mean(axis=1)   # (n_subjects, n_times)
+    n_subjects = subject_means.shape[0]
+    n_channels = all_data.shape[1]
+    peak_time_ms = times_evoked[peak_t_idx] * 1000
+
+    def _ci(values):
+        res = scipy_bootstrap(
+            (values,), np.mean, n_resamples=n_bootstrap,
+            confidence_level=0.95, method='BCa',
+        )
+        return res.confidence_interval.low, res.confidence_interval.high
+
+    vals_peak = subject_means[:, peak_t_idx]
+    mean_peak = vals_peak.mean()
+    ci_low_peak, ci_high_peak = _ci(vals_peak)
+
+    t0_idx = int(np.argmin(np.abs(times_evoked)))
+    vals_t0 = subject_means[:, t0_idx]
+    mean_t0 = vals_t0.mean()
+    ci_low_t0, ci_high_t0 = _ci(vals_t0)
+
+    print(f"\n--- Encoding Stats (N={n_subjects} subjects) ---")
+    print(f"Peak time: {peak_time_ms:.1f} ms")
+    print(f"Mean encoding at peak: {mean_peak:.4f} [95% CI: {ci_low_peak:.4f}, {ci_high_peak:.4f}]")
+    print(f"Mean encoding at t=0:  {mean_t0:.4f} [95% CI: {ci_low_t0:.4f}, {ci_high_t0:.4f}]")
+    print("CIs are bootstrapped (BCa, n=10,000) across subjects (biological replicates).\n")
+
+    stats = {
+        'n_subjects': n_subjects,
+        'n_channels': n_channels,
+        'peak_time_ms': peak_time_ms,
+        'mean_at_peak': mean_peak,
+        'ci_low_at_peak': ci_low_peak,
+        'ci_high_at_peak': ci_high_peak,
+        'mean_at_t0': mean_t0,
+        'ci_low_at_t0': ci_low_t0,
+        'ci_high_at_t0': ci_high_t0,
+        'ci_method': 'bootstrap_BCa',
+        'n_bootstrap': n_bootstrap,
+        'ci_level': 0.95,
+        **processing_params,
+    }
+    source_data_dir = output_dir / 'source_data'
+    source_data_dir.mkdir(exist_ok=True)
+    stats_file = source_data_dir / 'grand_average_encoding_stats.csv'
+    pd.DataFrame([stats]).to_csv(stats_file, index=False)
+    print(f"Saved stats to {stats_file}")
+    return stats
+
+
+def plot_grand_average(subjects_data: list, output_dir: Path, info_raw: mne.Info, sfreq: float):
+    """
+    Create grand average plot across subjects matching individual plot style.
+    Uses statistical masking (t-test against zero) to select significant channels.
+
+    Parameters
+    ----------
+    subjects_data : list of dict
+        List of subject data dictionaries
+    output_dir : Path
+        Output directory for plots
+    info_raw : mne.Info
+        MNE info object for channel information
+    sfreq : float
+        Sampling frequency
+    """
+    print("Preparing data for grand average plot...")
+
+    # Get times from first subject
+    times = subjects_data[0]['times']
+
+    # Collect all evoked objects (filtered and grad-only)
+    all_evoked_grad = []
+
+    for subj_data in subjects_data:
+        r_values = subj_data['r_values']
+
+        # Create evoked object
+        evoked = create_mne_evoked(r_values, times, sfreq=sfreq, info=info_raw)
+
+        # Apply same filtering as individual plots
+        evoked.filter(None, 40., fir_design='firwin')
+
+        # Pick only gradiometer channels
+        evoked_grad = evoked.copy().pick_types(meg='grad')
+        all_evoked_grad.append(evoked_grad)
+
+    # Stack all subject data: (n_subjects, n_channels, n_times)
+    all_data = np.array([evoked.data for evoked in all_evoked_grad])
+    n_subjects, n_channels, n_times = all_data.shape
+
+    print(f"Grand average across {n_subjects} subjects, {n_channels} channels, {n_times} timepoints")
+
+    # Compute grand average
+    grand_avg_data = np.mean(all_data, axis=0)
+
+    # Create grand average evoked object
+    grand_avg_evoked = create_mne_evoked(grand_avg_data, times, sfreq=sfreq, info=all_evoked_grad[0].info)
+
+    # Find peak encoding time (mean across channels)
+    mean_r_over_channels = np.mean(grand_avg_data, axis=0)
+    peak_t_idx = np.argmax(mean_r_over_channels)
+    peak_time_s = grand_avg_evoked.times[peak_t_idx]
+    peak_time_ms = peak_time_s * 1000
+    print(f"Peak encoding time: {peak_time_ms:.1f} ms")
+
+    # Report stats (CI over subjects = biological replicates)
+    report_encoding_stats(
+        all_data=all_data,
+        times_evoked=grand_avg_evoked.times,
+        peak_t_idx=peak_t_idx,
+        output_dir=output_dir,
+        processing_params={
+            'channel_type': 'gradiometer',
+            'lowpass_hz': 40.0,
+            'fir_design': 'firwin',
+            'sfreq_hz': sfreq,
+            'time_window_ms': '-100 to 350',
+            'ci_unit': 'subjects (biological replicates)',
+        },
+    )
+
+    # Build long-format DataFrames with subject as the unit of variation
+    times_ms = grand_avg_evoked.times * 1000
+    ch_names = grand_avg_evoked.ch_names
+
+    # Vectorised construction: one row per (subject, channel, time)
+    n_subj, n_ch, n_t = all_data.shape
+    subj_idx_arr = np.repeat(np.arange(n_subj), n_ch * n_t)
+    ch_idx_arr   = np.tile(np.repeat(np.arange(n_ch), n_t), n_subj)
+    t_idx_arr    = np.tile(np.arange(n_t), n_subj * n_ch)
+
+    df_channels = pd.DataFrame({
+        'time':         times_ms[t_idx_arr],
+        'channel':      [ch_names[i] for i in ch_idx_arr],
+        'subject':      subj_idx_arr,
+        'encoding [r]': all_data[subj_idx_arr, ch_idx_arr, t_idx_arr],
+    })
+
+    # Global CI: mean across channels per subject → CI across subjects
+    subject_means = all_data.mean(axis=1)    # (n_subjects, n_times)
+    df_global = pd.DataFrame(subject_means.T)
+    df_global['time'] = times_ms
+    df_global = df_global.melt(id_vars='time', var_name='subject', value_name='encoding [r]')
+
+    # Export plot source data (required by editorial review)
+    source_data_dir = output_dir / 'source_data'
+    source_data_dir.mkdir(exist_ok=True)
+    subject_ids = [sd['subject_id'] for sd in subjects_data]
+    df_source = df_channels.copy()
+    df_source['subject_id'] = [subject_ids[s] for s in df_source['subject']]
+    df_source = df_source.rename(columns={'encoding [r]': 'encoding_r', 'time': 'time_ms'})
+    df_source = df_source[['subject_id', 'channel', 'time_ms', 'encoding_r']]
+    source_file = source_data_dir / 'grand_average_encoding_source_data.csv'
+    df_source.to_csv(source_file, index=False)
+    print(f"Saved plot source data to {source_file}")
+
+    # Rank channels by their peak encoding value
+    peak_per_channel = np.max(grand_avg_data, axis=1)  # peak r per channel
+    ranks = np.argsort(np.argsort(peak_per_channel))   # rank (0 = lowest)
+    norm_ranks = ranks / (len(ranks) - 1)               # normalise to [0, 1]
+    cmap = plt.cm.magma
+
+    # Plot directly with seaborn — one line + CI band per channel
+    sns.set_context("poster")
+    plt.figure(figsize=(8, 6))
+    ax = plt.gca()
+
+    channel_palette = {ch: cmap(r * 0.8) for ch, r in zip(ch_names, norm_ranks)}
+    sns.lineplot(data=df_channels, x='time', y='encoding [r]', hue='channel',
+                 palette=channel_palette, errorbar=('ci', 95), alpha=0.2,
+                 legend=False, ax=ax, zorder=1, n_boot=500)
+
+    # Global mean ± bootstrapped 95% CI across subjects (biological replicates)
+    sns.lineplot(data=df_global, x='time', y='encoding [r]',
+        color='darkgrey', errorbar=('ci', 95), ax=ax, zorder=1000)
+
+    ax.axvline(x=0, color='grey', linestyle='--', zorder=0)
+    ax.set_xlim(-100, 350)
+    ax.set_xlabel('time [ms]')
+    ax.set_ylabel('encoding [r]')
+    sns.despine()
+
+    # Save timecourse figure
+    output_file = output_dir / 'grand_average_encoding_joint.pdf'
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    print(f"Saved grand average joint plot to {output_file}")
+    plt.close()
+
+    # Topoplot at peak encoding time
+    plt.figure(figsize=(4, 4))
+    ax = plt.gca()
+    # set vmax to 0.1
+    im, _ = mne.viz.plot_topomap(
+        grand_avg_evoked.data[:, peak_t_idx],
+        grand_avg_evoked.info,
+        axes=ax, cmap="magma",
+        show=False, vlim=(None, 0.1))
+    
+    cbar = plt.colorbar(im, ax=ax, shrink=0.8, aspect=25)
+    cbar.set_label('encoding [r]')
+    cbar.ax.tick_params(size=0)
+    cbar.outline.set_visible(False)
+    plt.tight_layout()
+    topo_file = output_dir / 'grand_average_encoding_topomap.pdf'
+    plt.savefig(topo_file, dpi=300, bbox_inches='tight')
+    print(f"Saved topomap at {peak_time_ms:.1f} ms to {topo_file}")
+    plt.close()
+
+    print(f"\nPeak encoding time: {peak_time_ms:.1f} ms")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Plot Encoding Analysis Results")
+
+    # Single file mode
+    parser.add_argument('--results-file', help='Path to encoding results NPZ file (single subject mode)')
+
+    # Multi-subject mode
+    parser.add_argument('--results-dir', help='Directory containing encoding results (multi-subject mode)', default=None)
+    parser.add_argument('--subjects', type=int, nargs='+', help='Subject IDs to load (multi-subject mode)', default=[1, 2, 3, 4, 5])
+
+    # Output options
+    parser.add_argument('--output-dir', help='Output directory for plots', default=None)
+    parser.add_argument('--data-path', help='AVS BIDS data root, used to load a template raw for sensor '
+                                             'layout info (default: pyavs.get_data_path())', default=None)
+
+    args = parser.parse_args()
+
+    # Validate arguments
+    if args.results_file and (args.results_dir or args.subjects):
+        parser.error("Cannot specify both --results-file and --results-dir/--subjects")
+    if not args.results_file and not (args.results_dir and args.subjects):
+        parser.error("Must specify either --results-file OR both --results-dir and --subjects")
+
+    if args.data_path is None:
+        from pyavs import get_data_path
+        args.data_path = get_data_path()
+    if args.data_path is None:
+        parser.error("No data path configured. Pass --data-path or run: pyavs configure --data-path /path/to/data")
+
+    # Setup paths
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"Encoding Results Plotting")
+    print(f"Output directory: {output_dir}")
+
+    # Determine mode: single file or multi-subject
+    multi_subject_mode = args.results_dir is not None
+
+    try:
+        if multi_subject_mode:
+            # Multi-subject mode
+            results_dir = Path(args.results_dir)
+            print(f"Results directory: {results_dir}")
+            print(f"Subjects: {args.subjects}")
+
+            # Load all subjects
+            print("\n" + "="*60)
+            print("Loading multiple subjects...")
+            print("="*60)
+            subjects_data = load_multiple_subjects(results_dir, args.subjects)
+
+            if not subjects_data:
+                print("Error: No subject data loaded!")
+                return 1
+
+            print(f"\nSuccessfully loaded {len(subjects_data)} subjects")
+
+            # Get common info from first subject
+            first_data = subjects_data[0]
+            times = first_data['times']
+            diffs = np.diff(times)
+            mean_diff = np.mean(diffs)
+            sfreq_inferred = 1.0 / mean_diff if mean_diff > 0 else 500
+
+            # Load raw info for MNE plotting
+            print("\nLoading MEG sensor info...")
+            rawdir = Path(args.data_path) / "rawdir" / "as01a" / "as01ad.fif"
+            raw = mne.io.read_raw_fif(rawdir, preload=False)
+            raw = raw.crop(tmin=20, tmax=30)
+            raw.resample(sfreq_inferred, npad="auto")
+            info_raw = mne.pick_info(raw.info, mne.pick_types(raw.info, meg="grad", eeg=False, exclude='bads',))
+           
+           
+
+            
+            # Create individual plots for each subject
+            print("\n" + "="*60)
+            print("Creating individual subject plots...")
+            print("="*60)
+            for subj_data in subjects_data:
+                print(f"\nPlotting subject {subj_data['subject_id']}...")
+                # take only the last 204 result channels (grads)
+                r_grads = subj_data['r_values']#[102:]
+                print(r_grads.shape)
+                evoked = create_mne_evoked(r_grads, times, sfreq=sfreq_inferred, info=info_raw)
+                plot_encoding_joint(evoked, output_dir, subj_data['metadata'])
+
+            # Create grand average plot
+            print("\n" + "="*60)
+            print("Creating grand average plot...")
+            print("="*60)
+            plot_grand_average(subjects_data, output_dir, info_raw, sfreq_inferred)
+
+            print("\n" + "="*60)
+            print("All plots created successfully!")
+            print("="*60)
+            print(f"\nOutput directory: {output_dir}")
+            print(f"  - Individual plots: sub-XX_encoding_joint.png")
+            print(f"  - Grand average: grand_average_encoding.png")
+
+            return 0
+
+        else:
+            # Single file mode (backward compatible)
+            results_file = Path(args.results_file)
+            print(f"Results file: {results_file}")
+
+            # Load results
+            print("\nLoading encoding results...")
+            r_values, times, metadata = load_encoding_results(results_file)
+            print(times)
+
+            # Infer the sampling frequency
+            diffs = np.diff(times)
+            mean_diff = np.mean(diffs)
+            sfreq_inferred = 1.0 / mean_diff if mean_diff > 0 else 500
+
+            # Create MNE Evoked object
+            print("Creating MNE Evoked object...")
+            rawdir = Path(args.data_path) / "rawdir" / "as01a" / "as01ad.fif"
+            raw = mne.io.read_raw_fif(rawdir, preload=False)
+            raw = raw.crop(tmin=20, tmax=30)
+            raw.resample(sfreq_inferred, npad="auto")
+            info_raw = mne.pick_info(raw.info, mne.pick_types(raw.info, meg=True, eeg=False, exclude='bads'))
+
+            # # IMPORTANT: Reorder channels to match encoding data order (mag first, then grad)
+            # print("Reordering channels to match encoding data (mag first, then grad)...")
+            # ch_types = [mne.io.pick.channel_type(info_raw, i) for i in range(len(info_raw['ch_names']))]
+            # mag_indices = [i for i, ch_type in enumerate(ch_types) if ch_type == 'mag']
+            # grad_indices = [i for i, ch_type in enumerate(ch_types) if ch_type == 'grad']
+            # reorder_indices = mag_indices + grad_indices
+            # info_raw = mne.pick_info(info_raw, reorder_indices)
+            # print(f"Reordered: {len(mag_indices)} mag + {len(grad_indices)} grad = {len(info_raw['ch_names'])} total channels")
+
+            print(f"Inferred sampling frequency: {sfreq_inferred} Hz")
+            evoked = create_mne_evoked(r_values, times, sfreq=sfreq_inferred, info=info_raw)
+
+            # Create joint plot
+            print("Creating joint plot...")
+            plot_encoding_joint(evoked, output_dir, metadata)
+
+            # Summary
+            print(f"\nSummary:")
+            print(f"  - Data shape: {r_values.shape[0]} channels × {r_values.shape[1]} timepoints")
+            print(f"  - Time range: {times[0]*1000:.0f} to {times[-1]*1000:.0f} ms")
+            print(f"  - R-value range: {np.min(r_values):.3f} to {np.max(r_values):.3f}")
+            print(f"  - Mean R-value: {np.mean(r_values):.3f}")
+            print(f"\nPlot saved to: {output_dir}")
+
+            return 0
+
+    except Exception as e:
+        print(f"Error in plotting pipeline: {e}")
+        import traceback
+
+        traceback.print_exc()
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
