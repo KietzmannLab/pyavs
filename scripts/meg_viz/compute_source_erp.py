@@ -21,7 +21,7 @@ Usage:
         --subjects-dir /path/to/avs-public/derivatives/freesurfer \\
         --output-dir /share/klab/psulewski/psulewski/pyavs/source_erp/
 
-Author: P. Sulewski (psulewski@uos.de)
+Author: P. Sulewski (phsulewski@gmail.com)
 """
 
 import argparse

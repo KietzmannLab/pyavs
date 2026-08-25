@@ -10,7 +10,7 @@ Usage:
         --data-path /path/to/avs-public \\
         --output-dir /path/to/output
 
-Author: P. Sulewski (psulewski@uos.de)
+Author: P. Sulewski (phsulewski@gmail.com)
 """
 
 import argparse

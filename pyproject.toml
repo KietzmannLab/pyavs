@@ -7,7 +7,7 @@ name = "pyavs"
 dynamic = ["version"]
 description = "Python package for Active Visual Semantics dataset processing"
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
 authors = [
     {name = "P. Sulewski", email = "phsulewski@gmail.com"},
 ]
@@ -15,7 +15,6 @@ classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Information Analysis",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
@@ -90,9 +89,6 @@ include = ["pyavs*"]
 
 [tool.setuptools.package-data]
 pyavs = [
-    "examples/*.py",
-    "data/*.csv",
-    "data/*.json",
     "preprocessing/calibration/*.dat",
     "preprocessing/calibration/*.fif",
     "preprocessing/calibration/*.csv",

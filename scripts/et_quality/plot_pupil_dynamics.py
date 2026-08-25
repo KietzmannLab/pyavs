@@ -13,7 +13,7 @@ Usage:
     python plot_pupil_dynamics.py --data-path /share/klab/datasets/avs/ --verbose
     python plot_pupil_dynamics.py --subjects 1 2 3 --sessions 1 2
 
-Author: P. Sulewski (psulewski@uos.de)
+Author: P. Sulewski (phsulewski@gmail.com)
 """
 
 import argparse

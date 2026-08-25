@@ -13,7 +13,7 @@ Usage:
         --output-dir /path/to/output \\
         --subject 4
 
-Author: P. Sulewski (psulewski@uos.de)
+Author: P. Sulewski (phsulewski@gmail.com)
 """
 
 import argparse

@@ -11,7 +11,7 @@ Usage:
     python get_pupil_dynamics.py --data-path /path/to/avs [--subjects 1 2 3] \\
         [--sessions 1 2 3] [--prefix as] [--verbose]
 
-Author: P. Sulewski (psulewski@uos.de)
+Author: P. Sulewski (phsulewski@gmail.com)
 """
 
 import argparse

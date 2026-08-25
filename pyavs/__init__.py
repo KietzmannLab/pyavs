@@ -12,7 +12,7 @@ except ImportError:
     __version__ = "1.0.0"
 
 __author__ = "Philip Sulewski"
-__email__ = "psulewski@uos.de"
+__email__ = "phsulewski@gmail.com"
 
 # Initialize logging system
 from .utils.logging import configure_logging, get_logger

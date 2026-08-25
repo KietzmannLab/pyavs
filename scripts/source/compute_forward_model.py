@@ -26,7 +26,7 @@ Usage:
         --subjects-dir /path/to/avs-public/derivatives/freesurfer \\
         --data-path /path/to/avs-public
 
-Author: P. Sulewski (psulewski@uos.de)
+Author: P. Sulewski (phsulewski@gmail.com)
 """
 
 import argparse

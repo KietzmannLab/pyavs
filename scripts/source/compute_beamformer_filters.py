@@ -24,7 +24,7 @@ Usage:
         --data-path /share/klab/datasets/avs/ \\
         --fwd-session 1
 
-Author: P. Sulewski (psulewski@uos.de)
+Author: P. Sulewski (phsulewski@gmail.com)
 """
 
 import argparse

@@ -24,7 +24,7 @@ STYLE PREFERENCES:
 Usage:
     python plot_et_quality_summary.py --derivatives-dir /path/to/derivatives
 
-Author: P. Sulewski (psulewski@uos.de)
+Author: P. Sulewski (phsulewski@gmail.com)
 """
 
 import argparse

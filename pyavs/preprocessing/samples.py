@@ -4,7 +4,7 @@ Eye tracking samples scene assignment for pyAVS package.
 This module provides functionality to load eye tracking samples data and assign them
 to stimulus scenes, inspired by the avs_combine_events function but adapted for samples data.
 
-Author: P. Sulewski (psulewski@uos.de)
+Author: P. Sulewski (phsulewski@gmail.com)
 """
 
 import pandas as pd

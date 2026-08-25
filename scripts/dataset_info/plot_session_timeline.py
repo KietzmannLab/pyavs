@@ -13,7 +13,7 @@ Usage:
     python plot_session_timeline.py --verbose
     python plot_session_timeline.py --recompute
 
-Author: P. Sulewski (psulewski@uos.de)
+Author: P. Sulewski (phsulewski@gmail.com)
 """
 
 import argparse

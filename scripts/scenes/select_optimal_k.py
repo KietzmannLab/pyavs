@@ -45,7 +45,7 @@ Usage:
     k, diag = select_optimal_k(X, return_diagnostics=True)
     diag['n_clusters_steps'], diag['criterion'], diag['silhouette_samples_over_k']
 
-Author: P. Sulewski (psulewski@uos.de)
+Author: P. Sulewski (phsulewski@gmail.com)
 """
 
 import numpy as np

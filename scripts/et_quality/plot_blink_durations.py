@@ -13,7 +13,7 @@ Usage:
     python plot_blink_durations.py --data-path /path/to/avs/
     python plot_blink_durations.py --subjects 1 2 3 --by-recording
 
-Author: P. Sulewski (psulewski@uos.de)
+Author: P. Sulewski (phsulewski@gmail.com)
 """
 
 import argparse

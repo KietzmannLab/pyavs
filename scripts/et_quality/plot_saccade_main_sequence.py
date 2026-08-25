@@ -13,7 +13,7 @@ Usage:
     python plot_saccade_main_sequence.py --verbose
     python plot_saccade_main_sequence.py --subjects 1 2 3
 
-Author: P. Sulewski (psulewski@uos.de)
+Author: P. Sulewski (phsulewski@gmail.com)
 """
 
 import argparse

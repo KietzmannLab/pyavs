@@ -9,7 +9,7 @@ subject-session in the derivatives directory.
 Usage:
     python extract_calibration_quality.py --data-path /path/to/avs/data
 
-Author: P. Sulewski (psulewski@uos.de)
+Author: P. Sulewski (phsulewski@gmail.com)
 """
 
 import argparse

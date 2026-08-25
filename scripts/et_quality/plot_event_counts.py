@@ -12,7 +12,7 @@ GENERATED FIGURES:
 Usage:
     python plot_event_counts.py --data-path /path/to/avs/
 
-Author: P. Sulewski (psulewski@uos.de)
+Author: P. Sulewski (phsulewski@gmail.com)
 """
 
 import argparse

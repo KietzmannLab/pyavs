@@ -52,7 +52,7 @@ Output structure:
         │   └── ...
         └── ...
 
-Author: P. Sulewski (psulewski@uos.de)
+Author: P. Sulewski (phsulewski@gmail.com)
 """
 
 import argparse

@@ -7,6 +7,9 @@ instructions_claude.md
 # Original AVS machine room scripts
 AVS-machine-room/
 avs_handbook/
+
+# setuptools_scm-generated version file (written at build time)
+pyavs/_version.py
 *.fif
 *.parquet
 *.hdf5

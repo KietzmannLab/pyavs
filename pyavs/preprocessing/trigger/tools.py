@@ -5,7 +5,7 @@ This module provides functions to use the subjects eye-tracking data in order to
 fixation based annotations to the MEG data of the AVS experiment.
 
 Adapted from AVS-machine-room/avs_machine_room/prepro/meg/avs_trigger_tools.py
-Author(s): P. Sulewski (psulewski@uos.de)
+Author(s): P. Sulewski (phsulewski@gmail.com)
 """
 
 import mne

@@ -4,7 +4,7 @@ AVS Composer for MEG-ET data fusion in pyAVS package.
 This script is used to load the MEG and ET data. It fuses them in the sense that it can
 be used to generate ET event based MEG epochs and their related metadata.
 
-Author(s): P. Sulewski (psulewski@uos.de)
+Author(s): P. Sulewski (phsulewski@gmail.com)
 """
 
 import os
