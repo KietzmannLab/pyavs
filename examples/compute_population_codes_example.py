@@ -207,17 +207,15 @@ def main():
             source_rois = [roi for roi in rois if roi not in ["mag", "grad"]]
             if source_rois:
                 logger.info("Computing source-level population codes...")
-                try:
-                    source_population_codes = compute_source_population_codes(
-                        epochs, composer, subject_id, session_num, 
-                        source_rois, method, pick_ori, output_dir, event_type, data_path,
-                        tmin, tmax, filter_params, resample_to_hz, hemi, blocks
-                    )
-                    population_codes.update(source_population_codes)
-                except Exception as e:
-                    logger.error(f"Source reconstruction failed: {e}")
-                    logger.info("Creating mock source data for demonstration...")
-                    population_codes.update(create_mock_source_data(epochs, source_rois))
+                # Deliberately unguarded: a failure here must surface, not be
+                # replaced by synthetic data that then gets saved to HDF5 under
+                # a real filename.
+                source_population_codes = compute_source_population_codes(
+                    epochs, composer, subject_id, session_num,
+                    source_rois, method, pick_ori, output_dir, event_type, data_path,
+                    tmin, tmax, filter_params, resample_to_hz, hemi, blocks
+                )
+                population_codes.update(source_population_codes)
             
             # Step 6: Save population codes to HDF5
             logger.info("Step 6: Saving population codes...")
@@ -297,75 +295,53 @@ def compute_source_population_codes(epochs, composer, subject_id, session_num,
     
     logger.info("Setting up source reconstruction with per-session LCMV filters...")
     
-    try:
-        # Import the new filter management system
-        from pyavs.source.filters import load_or_compute_lcmv_filters, apply_lcmv_to_epochs
-        
-        # Load or compute per-session LCMV filters with full parameter set
-        logger.info(f"Loading/computing LCMV filters for event type: {event_type}")
-        
-        # Get filter kwargs from config for consistent parameter usage
-        from pyavs.config import get_config
-        config = get_config()
-        filter_kwargs = config.get_filter_kwargs()
-        
-        # Load or compute filters with config-derived parameters
-        filters = load_or_compute_lcmv_filters(
-            data_path=data_path,
-            subject_id=subject_id,
-            sessions=[session_num],  # Only need current session for application
-            event_type=event_type,
-            **filter_kwargs
-        )
-        
-        # Apply beamformer filters to epochs
-        logger.info(f"Applying LCMV beamformer for session {session_num}...")
-        stcs = apply_lcmv_to_epochs(epochs, filters, session_num)
-        
-        # Extract ROI data
-        population_codes = {}
-        for roi in source_rois:
-            if roi == "stc":
-                # Full source space
-                population_codes[roi] = np.array([stc.data for stc in stcs])
-            else:
-                # Specific ROI (would need label files)
-                try:
-                    label_fname = os.path.join(composer.subject_dir, "label", f"lh.L_{roi}_ROI.label")
-                    label = mne.read_label(label_fname, subject=f"as{subject_id:02d}")
-                    roi_data = []
-                    for stc in stcs:
-                        stc_roi = stc.in_label(label)
-                        roi_data.append(stc_roi.data)
-                    population_codes[roi] = np.array(roi_data)
-                except:
-                    logger.warning(f"Could not load ROI {roi}, creating mock data")
-                    n_sources = 50  # Mock number of sources in ROI
-                    population_codes[roi] = np.random.randn(len(epochs), n_sources, len(epochs.times))
-        
-        return population_codes
-        
-    except Exception as e:
-        logger.error(f"Source reconstruction failed: {e}")
-        raise
-
-
-def create_mock_source_data(epochs, source_rois):
-    """Create mock source data for demonstration purposes."""
-    population_codes = {}
+    # Import the new filter management system
+    from pyavs.source.filters import load_or_compute_lcmv_filters, apply_lcmv_to_epochs
     
+    # Load or compute per-session LCMV filters with full parameter set
+    logger.info(f"Loading/computing LCMV filters for event type: {event_type}")
+    
+    # Get filter kwargs from config for consistent parameter usage
+    from pyavs.config import get_config
+    config = get_config()
+    filter_kwargs = config.get_filter_kwargs()
+    
+    # Load or compute filters with config-derived parameters
+    filters = load_or_compute_lcmv_filters(
+        data_path=data_path,
+        subject_id=subject_id,
+        sessions=[session_num],  # Only need current session for application
+        event_type=event_type,
+        **filter_kwargs
+    )
+    
+    # Apply beamformer filters to epochs
+    logger.info(f"Applying LCMV beamformer for session {session_num}...")
+    stcs = apply_lcmv_to_epochs(epochs, filters, session_num)
+    
+    # Extract ROI data
+    population_codes = {}
     for roi in source_rois:
         if roi == "stc":
-            n_sources = 200  # Mock full source space
+            # Full source space
+            population_codes[roi] = np.array([stc.data for stc in stcs])
         else:
-            n_sources = 50   # Mock ROI size
-            
-        population_codes[roi] = np.random.randn(len(epochs), n_sources, len(epochs.times))
-        logger.info(f"Created mock data for {roi}: {population_codes[roi].shape}")
-    
+            # Specific ROI. Both hemispheres are read and combined into a
+            # BiHemiLabel -- reading only lh.L_* silently halved the ROI.
+            fs_subject = f"as{subject_id:02d}"
+            label_dir = os.path.join(composer.subject_dir, "label")
+            lh = mne.read_label(
+                os.path.join(label_dir, f"lh.L_{roi}_ROI.label"), subject=fs_subject
+            )
+            rh = mne.read_label(
+                os.path.join(label_dir, f"rh.R_{roi}_ROI.label"), subject=fs_subject
+            )
+            label = lh + rh
+            population_codes[roi] = np.array(
+                [stc.in_label(label).data for stc in stcs]
+            )
+
     return population_codes
-
-
 
 
 if __name__ == "__main__":

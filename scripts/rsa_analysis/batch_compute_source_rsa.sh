@@ -30,7 +30,22 @@ conda activate avs
 # --data-path /path/to/avs-public` to have been run once. rsa_results_dir/
 # output_dir default to this lab's scratch location but can be overridden
 # with the PYAVS_RSA_RESULTS_DIR/PYAVS_OUTPUT_DIR env vars.
-script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Resolve this script's directory in the repo checkout.
+#
+# BASH_SOURCE alone is not enough under sbatch: SLURM copies the batch script
+# to a node-local spool dir (/var/spool/slurm/...), so BASH_SOURCE resolves
+# there and sibling files are not found. Recover the submitted path from
+# SLURM, keeping BASH_SOURCE for plain `bash` invocation. SCRIPT_PATH
+# overrides both.
+if [[ -n "${SCRIPT_PATH:-}" ]]; then
+    script_path="$(cd "$SCRIPT_PATH" && pwd)"
+elif [[ -n "${SLURM_JOB_ID:-}" ]] && command -v scontrol >/dev/null 2>&1; then
+    _submitted="$(scontrol show job "$SLURM_JOB_ID" \
+        | awk -F= '/^[[:space:]]*Command=/{print $2; exit}')"
+    script_path="$(cd "$(dirname "$_submitted")" && pwd)"
+else
+    script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
 data_path="$(pyavs configure --show)"
 # FreeSurfer SUBJECTS_DIR (individual anatomies sub-0X + fsaverage). Needed for
 # morphing to fsaverage and loading the ico-5 source space. Without it,

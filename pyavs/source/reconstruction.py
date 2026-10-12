@@ -336,115 +336,238 @@ def compute_source_power(source_data: np.ndarray,
     return power
 
 
+def _resolve_roi_label(roi_name: str,
+                       subjects_dir: str,
+                       subject: str,
+                       hemi: str = 'both') -> mne.Label:
+    """Resolve a bare ROI name to an :class:`mne.Label`, combining hemispheres.
+
+    Callers pass unqualified names (``'FFC'`` from
+    :func:`~pyavs.get_glasser_roi_labels`, ``'ventral'`` for an NSD stream),
+    but the label files on disk carry a hemisphere prefix. Both hemispheres are
+    read and combined into a :class:`mne.BiHemiLabel` unless ``hemi`` restricts
+    it, so an ROI is never silently reduced to its left half.
+
+    Parameters
+    ----------
+    roi_name : str
+        ROI name, bare (``'FFC'``) or fully qualified (``'lh.L_FFC_ROI'``).
+    subjects_dir : str
+        FreeSurfer subjects directory.
+    subject : str
+        FreeSurfer subject name.
+    hemi : str, optional
+        ``'both'``, ``'lh'`` or ``'rh'`` (default: ``'both'``).
+
+    Returns
+    -------
+    mne.Label or mne.BiHemiLabel
+
+    Raises
+    ------
+    FileNotFoundError
+        If the ROI matches no label file and no parcellation entry. Raising
+        rather than skipping is deliberate: a missing ROI used to be logged and
+        dropped, so callers received a dict quietly missing keys.
+    """
+    label_dir = os.path.join(subjects_dir, subject, 'label')
+
+    # A fully-qualified name resolves directly, single hemisphere.
+    direct = os.path.join(label_dir, f'{roi_name}.label')
+    if os.path.exists(direct):
+        return mne.read_label(direct, subject=subject)
+
+    # HCP-MMP1 (Glasser) and the NSD streams ship as lh.L_<name>_ROI.label /
+    # rh.R_<name>_ROI.label; FreeSurfer's own labels as <hemi>.<name>.label.
+    wanted = ('lh', 'rh') if hemi == 'both' else (hemi,)
+    parts = []
+    for h in wanted:
+        prefix = 'L' if h == 'lh' else 'R'
+        for fname in (f'{h}.{prefix}_{roi_name}_ROI.label', f'{h}.{roi_name}.label'):
+            path = os.path.join(label_dir, fname)
+            if os.path.exists(path):
+                parts.append(mne.read_label(path, subject=subject))
+                break
+
+    if not parts:
+        # Fall back to a parcellation annotation (aparc names such as
+        # 'lateraloccipital'), matching per hemisphere rather than taking the
+        # first hit across both.
+        annot_labels = mne.read_labels_from_annot(
+            subject, parc='aparc', subjects_dir=subjects_dir,
+            surf_name='white', hemi=hemi, verbose=False,
+        )
+        parts = [l for l in annot_labels if l.name.startswith(f'{roi_name}-')]
+
+    if not parts:
+        raise FileNotFoundError(
+            f"ROI '{roi_name}' not found for subject '{subject}' in {label_dir}. "
+            f"Tried '{roi_name}.label', '<hemi>.<L|R>_{roi_name}_ROI.label', "
+            f"'<hemi>.{roi_name}.label', and the aparc parcellation."
+        )
+
+    label = parts[0]
+    for extra in parts[1:]:
+        label = label + extra
+    return label
+
+
+def _label_row_indices(label: mne.Label, src: mne.SourceSpaces) -> np.ndarray:
+    """Row indices into the source axis of ``source_data`` for ``label``.
+
+    Source data stacks hemispheres along the source axis in source-space order
+    (all of ``src[0]['vertno']``, then all of ``src[1]['vertno']``), so a
+    label's rows are the *positions* of its vertices within those arrays — not
+    the vertex numbers themselves, and not their arithmetic sum.
+
+    Parameters
+    ----------
+    label : mne.Label or mne.BiHemiLabel
+        Label to locate.
+    src : mne.SourceSpaces
+        Source space the data was reconstructed on.
+
+    Returns
+    -------
+    np.ndarray
+        Integer row indices, left hemisphere first. Empty if the label and the
+        source space do not intersect.
+    """
+    if isinstance(label, mne.BiHemiLabel):
+        hemi_vertices = {'lh': label.lh.vertices, 'rh': label.rh.vertices}
+    else:
+        hemi_vertices = {label.hemi: label.vertices}
+
+    rows = []
+    offset = 0
+    for hemi_idx, hemi_name in enumerate(('lh', 'rh')):
+        if hemi_idx >= len(src):
+            break
+        vertno = src[hemi_idx]['vertno']
+        if hemi_name in hemi_vertices:
+            sel = np.flatnonzero(np.isin(vertno, hemi_vertices[hemi_name]))
+            rows.append(offset + sel)
+        offset += len(vertno)
+
+    if not rows:
+        return np.array([], dtype=int)
+    return np.concatenate(rows)
+
+
 def extract_roi_data(source_data: np.ndarray,
                     src: mne.SourceSpaces,
-                    roi_labels: List[str],
+                    roi_labels: Union[str, List[str]],
                     subjects_dir: Optional[str] = None,
                     subject: str = 'fsaverage',
                     method: str = 'mean',
+                    hemi: str = 'both',
                     verbose: bool = True) -> Dict[str, np.ndarray]:
     """
     Extract data from regions of interest.
-    
+
     Parameters
     ----------
     source_data : np.ndarray
-        Source space data with shape (n_epochs, n_sources, n_times)
+        Source space data with shape (n_epochs, n_sources, n_times). The source
+        axis must match ``src`` vertex for vertex.
     src : mne.SourceSpaces
-        Source space
-    roi_labels : list of str
-        List of ROI label names
+        Source space the data was reconstructed on.
+    roi_labels : str or list of str
+        ROI names, bare (``'FFC'``, ``'ventral'``) or fully qualified
+        (``'lh.L_FFC_ROI'``).
     subjects_dir : str, optional
         FreeSurfer subjects directory (default: None, uses get_default_subjects_dir())
     subject : str, optional
         Subject name (default: 'fsaverage')
     method : str, optional
         Aggregation method ('mean', 'pca', 'max') (default: 'mean')
+    hemi : str, optional
+        Hemispheres to include: ``'both'``, ``'lh'`` or ``'rh'``
+        (default: ``'both'``).
     verbose : bool, optional
         Whether to print progress information (default: True)
-        
+
     Returns
     -------
     dict
-        Dictionary mapping ROI names to extracted data
+        Dictionary mapping ROI names to arrays of shape (n_epochs, n_times).
+        Every requested ROI is present — a name that cannot be resolved raises
+        instead of being dropped.
+
+    Notes
+    -----
+    ``method='mean'`` averages signed values, which cancels for inverse
+    solutions whose per-vertex sign is arbitrary (an LCMV beamformer with
+    ``pick_ori='max-power'``, for instance). For that case aggregate
+    amplitudes instead -- see
+    ``scripts/source/project_fixations_to_nsd_rois.py``, which offers
+    ``abs_mean``/``rms``/``pca_flip`` over the NSD streams.
     """
     # Use default subjects directory if none provided
     if subjects_dir is None:
         subjects_dir = get_default_subjects_dir()
         if verbose:
             logger.info(f"Using default subjects directory: {subjects_dir}")
-    
+
+    if isinstance(roi_labels, str):
+        roi_labels = [roi_labels]
+
+    n_sources = sum(len(s['vertno']) for s in src)
+    if source_data.shape[1] != n_sources:
+        raise ValueError(
+            f"source_data has {source_data.shape[1]} sources but src has "
+            f"{n_sources} vertices — they must correspond one to one."
+        )
+
     if verbose:
         logger.info(f"Extracting data from {len(roi_labels)} ROIs...")
-    
+
     roi_data = {}
-    
+
     for roi_name in roi_labels:
-        try:
-            # Load label
-            label_file = os.path.join(subjects_dir, subject, 'label', f'{roi_name}.label')
-            
-            if os.path.exists(label_file):
-                label = mne.read_label(label_file)
-            else:
-                # Try automatic atlas labels
-                label = mne.read_labels_from_annot(
-                    subject, parc='aparc', subjects_dir=subjects_dir,
-                    surf_name='white', hemi='both'
-                )
-                # Find matching label
-                matching_labels = [l for l in label if roi_name in l.name]
-                if not matching_labels:
-                    if verbose:
-                        logger.warning(f"ROI {roi_name} not found")
-                    continue
-                label = matching_labels[0]
-            
-            # Extract vertices for this label
-            label_vertices = label.get_vertices_used(vertices=src[0]['vertno'] + src[1]['vertno'])
-            
-            if len(label_vertices) == 0:
-                if verbose:
-                    logger.warning(f"No vertices found for ROI {roi_name}")
-                continue
-            
-            # Extract data for these vertices
-            roi_source_data = source_data[:, label_vertices, :]
-            
-            # Aggregate across vertices
-            if method == 'mean':
-                aggregated_data = np.mean(roi_source_data, axis=1)
-            elif method == 'pca':
-                # Use first principal component
-                from sklearn.decomposition import PCA
-                n_epochs, n_vertices, n_times = roi_source_data.shape
-                
-                # Reshape for PCA
-                data_reshaped = roi_source_data.reshape(n_epochs * n_times, n_vertices)
-                
-                pca = PCA(n_components=1)
-                pc1 = pca.fit_transform(data_reshaped)
-                
-                # Reshape back
-                aggregated_data = pc1.reshape(n_epochs, n_times)
-            elif method == 'max':
-                # Use vertex with maximum power
-                vertex_power = np.mean(np.abs(roi_source_data), axis=(0, 2))
-                max_vertex = np.argmax(vertex_power)
-                aggregated_data = roi_source_data[:, max_vertex, :]
-            else:
-                raise ValueError(f"Unknown aggregation method: {method}")
-            
-            roi_data[roi_name] = aggregated_data
-            
-            if verbose:
-                logger.info(f"  {roi_name}: {len(label_vertices)} vertices")
-        
-        except Exception as e:
-            if verbose:
-                logger.error(f"Error processing ROI {roi_name}: {e}")
-            continue
-    
+        label = _resolve_roi_label(roi_name, subjects_dir, subject, hemi)
+        rows = _label_row_indices(label, src)
+
+        if rows.size == 0:
+            raise ValueError(
+                f"ROI '{roi_name}' contains no vertex of the source space — "
+                f"label and source space are mismatched (wrong subject?)."
+            )
+
+        roi_source_data = source_data[:, rows, :]
+
+        # Aggregate across vertices
+        if method == 'mean':
+            aggregated_data = np.mean(roi_source_data, axis=1)
+        elif method == 'pca':
+            # Use first principal component
+            from sklearn.decomposition import PCA
+            n_epochs, n_vertices, n_times = roi_source_data.shape
+
+            # (epochs, vertices, times) -> (epochs * times, vertices). The
+            # transpose is required: reshaping directly interleaves vertices
+            # with time samples and the components are then meaningless.
+            data_reshaped = np.transpose(
+                roi_source_data, (0, 2, 1)
+            ).reshape(n_epochs * n_times, n_vertices)
+
+            pc1 = PCA(n_components=1).fit_transform(data_reshaped)
+
+            # Reshape back
+            aggregated_data = pc1.reshape(n_epochs, n_times)
+        elif method == 'max':
+            # Use vertex with maximum power
+            vertex_power = np.mean(np.abs(roi_source_data), axis=(0, 2))
+            max_vertex = np.argmax(vertex_power)
+            aggregated_data = roi_source_data[:, max_vertex, :]
+        else:
+            raise ValueError(f"Unknown aggregation method: {method}")
+
+        roi_data[roi_name] = aggregated_data
+
+        if verbose:
+            logger.info(f"  {roi_name}: {rows.size} vertices")
+
     if verbose:
         logger.info(f"Successfully extracted data from {len(roi_data)} ROIs")
     
