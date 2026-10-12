@@ -27,7 +27,28 @@ eval "$(conda shell.bash hook)"
 conda activate avs
 export LD_LIBRARY_PATH=$HOME/.conda/envs/avs/lib:$LD_LIBRARY_PATH
 
-script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Locate this script's directory in the repo checkout.
+#
+# BASH_SOURCE alone is NOT enough under sbatch: SLURM copies the batch script
+# to a node-local spool dir (/var/spool/slurm/d/job<id>/), so BASH_SOURCE
+# resolves there and the sibling .py is not found. Recover the submitted path
+# from SLURM instead, and keep BASH_SOURCE for plain `bash` invocation.
+# (The other batch_*.sh scripts in this repo still have the unfixed idiom.)
+if [[ -n "${SCRIPT_PATH:-}" ]]; then
+    script_path="$SCRIPT_PATH"
+elif [[ -n "${SLURM_JOB_ID:-}" ]] && command -v scontrol >/dev/null 2>&1; then
+    submitted="$(scontrol show job "$SLURM_JOB_ID" \
+        | awk -F= '/^[[:space:]]*Command=/{print $2; exit}')"
+    script_path="$(cd "$(dirname "$submitted")" && pwd)"
+else
+    script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
+
+if [[ ! -f "${script_path}/project_fixations_to_nsd_rois.py" ]]; then
+    echo "ERROR: project_fixations_to_nsd_rois.py not found in ${script_path}" >&2
+    echo "Set SCRIPT_PATH to the repo's scripts/source directory." >&2
+    exit 1
+fi
 
 # The preprocessed raws and FreeSurfer labels live in the public tree; the LCMV
 # filters live in the internal derivatives tree. Two roots, deliberately.
