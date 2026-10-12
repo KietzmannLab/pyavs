@@ -355,6 +355,7 @@ def project_session(
     tmin: float,
     tmax: float,
     streams: List[str],
+    lcmv_root: Optional[str] = None,
     max_epochs: Optional[int] = None,
     overwrite: bool = False,
     verbose: bool = False,
@@ -368,7 +369,8 @@ def project_session(
     session : int
         Session number.
     data_path : str
-        AVS data root holding the epochs and the LCMV filter.
+        AVS data root holding the preprocessed raws the epochs are rebuilt
+        from (the ``avs-public`` layout).
     subjects_dir : str
         FreeSurfer ``SUBJECTS_DIR`` holding the NSD stream labels.
     output_dir : str
@@ -379,6 +381,12 @@ def project_session(
         Epoch window relative to fixation onset [s].
     streams : list of str
         NSD streams to extract.
+    lcmv_root : str, optional
+        Root under which ``derivatives/pyavs/sub-XX/source/`` holds the LCMV
+        filter. Defaults to ``data_path``. Needed because the filters and the
+        preprocessed raws do not necessarily live under the same root — on the
+        lab cluster the filters sit in the internal tree while the raws and
+        FreeSurfer labels sit in ``avs-public``.
     max_epochs : int, optional
         Truncate to the first N epochs. For quick validation runs only.
     overwrite : bool
@@ -398,7 +406,7 @@ def project_session(
         return None
 
     # --- Filter ---
-    filter_path = get_lcmv_filter_path(subject, data_path)
+    filter_path = get_lcmv_filter_path(subject, lcmv_root or data_path)
     if not filter_path.exists():
         raise FileNotFoundError(
             f"LCMV filter not found: {filter_path}\n"
@@ -512,7 +520,12 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument('--sessions', '-sess', type=int, nargs='+', default=[1],
                    help='Session numbers (default: 1)')
     p.add_argument('--data-path', '-d', type=str, required=True,
-                   help='AVS data root holding the epochs and LCMV filters')
+                   help='AVS data root (avs-public layout) holding the preprocessed '
+                        'raws the epochs are rebuilt from')
+    p.add_argument('--lcmv-root', type=str, default=None,
+                   help='Root under which derivatives/pyavs/sub-XX/source/ holds the '
+                        'LCMV filter (default: --data-path). Set this when the filters '
+                        'live in a different tree than the raws')
     p.add_argument('--subjects-dir', type=str, default=None,
                    help='FreeSurfer SUBJECTS_DIR holding the NSD stream labels '
                         '(default: resolved from SUBJECTS_DIR / the pyAVS layout)')
@@ -560,6 +573,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 tmin=args.tmin,
                 tmax=args.tmax,
                 streams=args.streams,
+                lcmv_root=args.lcmv_root,
                 max_epochs=args.max_epochs,
                 overwrite=args.overwrite,
                 verbose=args.verbose,
